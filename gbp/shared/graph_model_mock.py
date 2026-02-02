@@ -108,7 +108,7 @@ class GraphMockDataLoader:
         """
         config = MockGraphConfig(
             n_depots=2,
-            edge_density=0.4,
+            edge_density=1,
             seed=self._seed,
         )
         return self.load(config)
@@ -121,7 +121,7 @@ class GraphMockDataLoader:
         """
         config = MockGraphConfig(
             n_depots=3,
-            edge_density=0.2,
+            edge_density=1,
             seed=self._seed,
         )
         return self.load(config)
@@ -134,7 +134,7 @@ class GraphMockDataLoader:
         """
         config = MockGraphConfig(
             n_depots=10,
-            edge_density=0.1,
+            edge_density=1,
             seed=self._seed,
         )
         return self.load(config)
