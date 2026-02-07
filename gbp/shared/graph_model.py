@@ -21,8 +21,7 @@ from pandera.typing import DataFrame, Series
 class NodeType(str, Enum):
     """Enumeration of supported node types."""
 
-    DEPOT = "depot"
-
+    STATION = "station"
 
 class EdgeType(str, Enum):
     """Enumeration of supported edge types."""
@@ -30,17 +29,15 @@ class EdgeType(str, Enum):
     USAGE = "usage"
     TRANSFER = "transfer"
 
-
 class ResourceType(str, Enum):
     """Enumeration of supported resource types."""
 
     VEHICLE = "vehicle"
 
-
 class CommodityType(str, Enum):
     """Enumeration of supported commodity types."""
 
-    SCOOTER = "scooter"
+    BIKE = "bike"
 
 
 # =============================================================================
@@ -53,7 +50,7 @@ class NodesSchema(pa.DataFrameModel):
 
     Columns:
         id: Unique node identifier.
-        node_type: Type classification (station, depot, customer).
+        node_type: Type classification (station).
         node_name: Human-readable name of the node.
         latitude: Geographic latitude coordinate.
         longitude: Geographic longitude coordinate.
@@ -100,12 +97,12 @@ class ResourcesSchema(pa.DataFrameModel):
     Columns:
         resource_id: Unique resource identifier.
         resource_type: Type of resource (vehicle).
-        capacity: Maximum capacity of the resource.
+        resource_capacity: Maximum capacity of the resource.
     """
 
     resource_id: Series[str] = pa.Field(unique=True, str_length={"min_value": 1})
     resource_type: Series[str] = pa.Field(isin=[e.value for e in ResourceType])
-    capacity: Series[int] = pa.Field(ge=0, nullable=True, default=None)
+    resource_capacity: Series[int] = pa.Field(ge=0, nullable=True, default=None)
 
     class Config:
         """Pandera configuration."""
@@ -120,7 +117,7 @@ class CommoditiesSchema(pa.DataFrameModel):
     Columns:
         commodity_id: Unique commodity identifier.
         commodity_name: Human-readable name.
-        commodity_type: Type of commodity (scooter).
+        commodity_type: Type of commodity (bike).
     """
 
     commodity_id: Series[str] = pa.Field(unique=True, str_length={"min_value": 1})
@@ -160,12 +157,14 @@ class InventorySchema(pa.DataFrameModel):
     Columns:
         node_id: Node where inventory is stored.
         commodity_type: Type of commodity.
-        quantity: Amount available (non-negative).
+        commodity_quantity: Amount available (non-negative).
+        inventory_capacity: Maximum capacity of the inventory.
     """
 
     node_id: Series[str] = pa.Field(str_length={"min_value": 1})
     commodity_type: Series[str] = pa.Field(isin=[e.value for e in CommodityType])
-    quantity: Series[int] = pa.Field(ge=0)
+    commodity_quantity: Series[int] = pa.Field(ge=0)
+    inventory_capacity: Series[int] = pa.Field(ge=0)
 
     class Config:
         """Pandera configuration."""
@@ -206,8 +205,8 @@ class GraphData:
     Example:
         >>> nodes = pd.DataFrame({
         ...     "id": ["n1", "n2"],
-        ...     "node_type": ["station", "depot"],
-        ...     "node_name": ["Station A", "Depot B"],
+        ...     "node_type": ["station", "station"],
+        ...     "node_name": ["Station A", "Station B"],
         ...     "latitude": [55.0, 56.0],
         ...     "longitude": [37.0, 38.0],
         ... })
