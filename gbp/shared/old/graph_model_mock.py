@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from gbp.shared.graph_model import (
+from gbp.shared.old.graph_model import (
     CommodityType,
     EdgeType,
     GraphData,
