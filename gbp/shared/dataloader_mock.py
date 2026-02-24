@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-class DataLoader:
+class DataLoaderMock:
     """
     Data loader utility for generating fake stations, depots, and resources data.
     """
@@ -67,7 +67,7 @@ class DataLoader:
         }
         return pd.DataFrame(resources_data)
 
-    def load_data(self):
+    def load_data(self) -> None:
         self.df_stations = self.prepare_stations_data(self.config)
         self.df_depots = self.prepare_depot_data(self.config)
         self.df_resources = self.prepare_resources_data(self.config)

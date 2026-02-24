@@ -1,3 +1,7 @@
+from ortools.constraint_solver import routing_enums_pb2
+from ortools.constraint_solver import pywrapcp
+from .postprocessing import extract_pdp_solution
+
 ## Solver
 def solve_pdp(data: dict, time_limit_seconds: int = 30) -> dict | None:
     """Solve the Pickup and Delivery Problem."""
@@ -32,32 +36,25 @@ def solve_pdp(data: dict, time_limit_seconds: int = 30) -> dict | None:
     )
 
     # Pickup and Delivery constraints
-    print('1')
     for pickup_idx, delivery_idx in data['pickups_deliveries']:
         pickup_index = manager.NodeToIndex(pickup_idx)
         delivery_index = manager.NodeToIndex(delivery_idx)
         
-        # Same resource must handle both pickup and delivery
         routing.AddPickupAndDelivery(pickup_index, delivery_index)
         
-        # Pickup must happen before delivery
         routing.solver().Add(
             routing.VehicleVar(pickup_index) == routing.VehicleVar(delivery_index)
         )
         
-        # Time/distance precedence: pickup before delivery
         distance_dimension = routing.GetDimensionOrDie('Capacity')
         routing.solver().Add(
             distance_dimension.CumulVar(pickup_index) <= distance_dimension.CumulVar(delivery_index)
         )
-    print('2')
 
     # Allow dropping nodes if infeasible (with high penalty)
     penalty = 100000
-    print('3')
     for node in range(1, len(data['distance_matrix'])):
         routing.AddDisjunction([manager.NodeToIndex(node)], penalty)
-    print('4')
     
     # Search parameters
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()

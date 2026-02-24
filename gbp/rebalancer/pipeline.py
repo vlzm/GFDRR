@@ -1,51 +1,40 @@
 import pandas as pd
 import numpy as np
-from .data_loader import DataLoader
 from .demand import DemandCalculator
-from .routing.solver import Solver
+from .routing.solver import Solver  
+from ..shared.protocols import DataLoaderRebalancerProtocol
 
 class Rebalancer:
-    def __init__(self, config: dict):
+    def __init__(self, dataloader_rebalancer: DataLoaderRebalancerProtocol, config: dict):
         self.config = config
-    
-        self.data_loader = None
-        self.df_stations = None
-        self.df_original = None
-        self.df_depots = None
-        self.df_resources = None
-
-        self.sources = None
-        self.destinations = None
-
-        self.route_df = None
-        self.df_updated = None
-
-    def load_data(self):
-        self.data_loader = DataLoader(self.config)
-        self.data_loader.load_data()
-        self.df_stations = self.data_loader.df_stations
-        self.df_original = self.df_stations.copy()
-        self.df_depots = self.data_loader.df_depots
-        self.df_resources = self.data_loader.df_resources
-
-    def calculate_demand(self):
-        demand_calculator = DemandCalculator(self.df_stations, self.config)
-        return demand_calculator.calculate_demand()
-
-    def run_solver(self):
-        solver = Solver(self.sources, self.destinations, self.df_depots, self.df_original, self.config)
-        self.route_df, self.df_updated = solver.run()
+        self.dataloader_rebalancer = dataloader_rebalancer
 
     def run(self):
+        """Run the full rebalancing pipeline: load → demand → pairs → solve → postprocess."""
 
-        # Load data
-        self.load_data()
+        # 1. Load graph data (stations, depots, resources)
+        self.dataloader_rebalancer.load_data()
+        df_stations = self.dataloader_rebalancer.df_stations
+        df_depots = self.dataloader_rebalancer.df_depots
 
-        # Calculate demand
-        self.df_stations, self.sources, self.destinations = self.calculate_demand()
+        # 2. Calculate demand → identify sources and destinations
+        demand_calculator = DemandCalculator(df_stations, self.config)
+        df_stations, sources, destinations = demand_calculator.calculate_demand()
 
-        # Run solver
-        if len(self.sources) > 0 and len(self.destinations) > 0:
-            self.run_solver()
-        else:
+        if len(sources) == 0 or len(destinations) == 0:
             print("No imbalances to fix (either no sources or no destinations)")
+            return
+
+        # 3. Create pickup-delivery pairs and PDP data model
+        pairs = self.dataloader_rebalancer.create_pickup_delivery_pairs(sources, destinations)
+        depot_coords = (df_depots['lat'].mean(), df_depots['lon'].mean())
+        data = self.dataloader_rebalancer.load_rebalancer_data(
+            pairs=pairs,
+            depot_coords=depot_coords,
+            resource_capacity=self.config['resource_capacity'],
+            num_resources=self.config['num_resources'],
+        )
+
+        # 4. Solve and postprocess
+        solver = Solver(data, df_stations, self.config)
+        self.route_df, self.df_updated = solver.run()
