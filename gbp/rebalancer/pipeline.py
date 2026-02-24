@@ -13,13 +13,14 @@ class Rebalancer:
         """Run the full rebalancing pipeline: load → demand → pairs → solve → postprocess."""
 
         # 1. Load graph data (stations, depots, resources)
-        self.dataloader_rebalancer.load_data()
+        ###### Вот это должно быть в граф дataloader, а не в пайплайне. ######
+        self.dataloader_rebalancer.load_data() # Вот этот метод должен использоваь граф дataloader, а не пайплайн. Пайплайн должен просто вызвать его и получить готовые датафреймы.
         df_stations = self.dataloader_rebalancer.df_stations
         df_depots = self.dataloader_rebalancer.df_depots
 
         # 2. Calculate demand → identify sources and destinations
         demand_calculator = DemandCalculator(df_stations, self.config)
-        df_stations, sources, destinations = demand_calculator.calculate_demand()
+        df_stations_demand, sources, destinations = demand_calculator.calculate_demand()
 
         if len(sources) == 0 or len(destinations) == 0:
             print("No imbalances to fix (either no sources or no destinations)")
@@ -28,6 +29,8 @@ class Rebalancer:
         # 3. Create pickup-delivery pairs and PDP data model
         pairs = self.dataloader_rebalancer.create_pickup_delivery_pairs(sources, destinations)
         depot_coords = (df_depots['lat'].mean(), df_depots['lon'].mean())
+        ##########################################################################
+
         data = self.dataloader_rebalancer.load_rebalancer_data(
             pairs=pairs,
             depot_coords=depot_coords,
@@ -36,5 +39,5 @@ class Rebalancer:
         )
 
         # 4. Solve and postprocess
-        solver = Solver(data, df_stations, self.config)
+        solver = Solver(data, df_stations_demand, self.config)
         self.route_df, self.df_updated = solver.run()
