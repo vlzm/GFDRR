@@ -1,92 +1,144 @@
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist
+
 from ..shared.protocols import DataLoaderGraphProtocol
+from .demand import DemandCalculator
+
 
 class DataLoaderRebalancer:
+    """Build rebalancer data from a GraphData snapshot.
+
+    Node types used for filtering are read from *config*:
+
+    - ``inventory_node_type`` — nodes that carry rebalanceable inventory
+    - ``depot_node_type``     — nodes that serve as VRP depot (resource origin)
+
+    After ``load_data(date)`` the following attributes are available:
+
+    - ``df_node_demand`` – inventory nodes with utilisation / demand columns
+    - ``data``           – PDP model dict ready for the solver
+                           (*None* when no imbalance detected)
+    """
+
     def __init__(self, dataloader_graph: DataLoaderGraphProtocol, config: dict):
         self.config = config
         self.dataloader_graph = dataloader_graph
 
-    def load_data(self):
-        self.df_stations = self.dataloader_graph.prepare_stations_data(config=self.config)
-        self.df_depots = self.dataloader_graph.prepare_depot_data(config=self.config)
-        self.df_resources = self.dataloader_graph.prepare_resources_data(config=self.config)
+    def load_data(self, date: pd.Timestamp | None = None) -> None:
+        if date is None:
+            date = self.dataloader_graph.available_dates[0]
 
-    ## Move to dataloader
-    def create_distance_matrix(self, locations: np.ndarray) -> np.ndarray:
-        """Create distance matrix from lat/lon coordinates."""
+        snapshot = self.dataloader_graph.get_snapshot(date)
+
+        inventory_type = self.config['inventory_node_type']
+        depot_type = self.config['depot_node_type']
+
+        # Inventory nodes = graph nodes of the configured type joined with inventory
+        inv_nodes = snapshot.filter_nodes_by_type(inventory_type)
+        inventory = snapshot.inventory
+
+        df_node_state = (
+            inv_nodes[["node_id", "lat", "lon"]]
+            .merge(
+                inventory[["node_id", "commodity_quantity", "inventory_capacity"]],
+                on="node_id",
+            )
+        )
+
+        # Demand calculation
+        demand_calculator = DemandCalculator(df_node_state, self.config)
+        self.df_node_demand, sources, destinations = demand_calculator.calculate_demand()
+
+        if len(sources) == 0 or len(destinations) == 0:
+            self.data = None
+            return
+
+        # Depot coords (centroid of depot-type nodes)
+        depot_nodes = snapshot.filter_nodes_by_type(depot_type)
+        depot_coords = (depot_nodes['lat'].mean(), depot_nodes['lon'].mean())
+
+        # PDP model
+        pairs = self.create_pickup_delivery_pairs(sources, destinations)
+
+        self.data = self._build_pdp_model(
+            pairs=pairs,
+            depot_coords=depot_coords,
+            resource_capacity=self.config['resource_capacity'],
+            num_resources=self.config['num_resources'],
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def create_distance_matrix(locations: np.ndarray) -> np.ndarray:
+        """Approximate distance matrix in metres from lat/lon coordinates."""
         mean_lat = np.radians(locations[:, 0].mean())
-        scaled_locations = locations.copy()
-        scaled_locations[:, 1] *= np.cos(mean_lat)
-        distances = cdist(scaled_locations, scaled_locations, metric='euclidean') * 111000
-        return distances.astype(int)
+        scaled = locations.copy()
+        scaled[:, 1] *= np.cos(mean_lat)
+        return (cdist(scaled, scaled, metric='euclidean') * 111_000).astype(int)
 
-    def create_pickup_delivery_pairs(self, sources: pd.DataFrame, destinations: pd.DataFrame) -> list[dict]:
-        # Sort to preserve greedy "largest first" semantics
+    @staticmethod
+    def create_pickup_delivery_pairs(
+        sources: pd.DataFrame, destinations: pd.DataFrame,
+    ) -> list[dict]:
         supply = sources.sort_values('excess', ascending=False).reset_index(drop=True)
         demand = destinations.sort_values('deficit', ascending=False).reset_index(drop=True)
-        
-        # Build cumulative intervals: each source "owns" a segment of the number line
+
         supply['end'] = supply['excess'].cumsum()
         supply['start'] = supply['end'] - supply['excess']
-        
+
         demand['end'] = demand['deficit'].cumsum()
         demand['start'] = demand['end'] - demand['deficit']
-        
-        # Cross join
+
         pairs = supply.assign(_k=1).merge(demand.assign(_k=1), on='_k', suffixes=('_p', '_d'))
-        
-        # Overlap = max(start_p, start_d) to min(end_p, end_d)
+
         pairs['quantity'] = (
-            pairs[['end_p', 'end_d']].min(axis=1) - pairs[['start_p', 'start_d']].max(axis=1)
+            pairs[['end_p', 'end_d']].min(axis=1)
+            - pairs[['start_p', 'start_d']].max(axis=1)
         ).clip(lower=0).astype(int)
-        
-        # Filter and rename
+
         pairs = pairs.loc[pairs['quantity'] > 0, [
             'node_id_p', 'lat_p', 'lon_p',
-            'node_id_d', 'lat_d', 'lon_d', 
-            'quantity'
+            'node_id_d', 'lat_d', 'lon_d',
+            'quantity',
         ]]
         pairs.columns = [
             'pickup_node_id', 'pickup_lat', 'pickup_lon',
             'delivery_node_id', 'delivery_lat', 'delivery_lon',
-            'quantity'
+            'quantity',
         ]
-        
+
         return pairs.to_dict('records')
 
-    def load_rebalancer_data(
+    def _build_pdp_model(
         self,
         pairs: list[dict],
         depot_coords: tuple,
         resource_capacity: int,
-        num_resources: int
+        num_resources: int,
     ) -> dict:
-        """
-        Create data model for Pickup and Delivery Problem.
-        
-        Node layout: [depot, pickup_1, delivery_1, pickup_2, delivery_2, ...]
-        """
-        # Build locations array
-        locations = [list(depot_coords)]  # depot at index 0
+        """Node layout: [depot, pickup_1, delivery_1, pickup_2, delivery_2, ...]"""
+        locations = [list(depot_coords)]
         node_ids = ['depot']
         demands = [0]
         pickups_deliveries = []
-        
-        for i, pair in enumerate(pairs):
+
+        for pair in pairs:
             pickup_idx = len(locations)
             locations.append([pair['pickup_lat'], pair['pickup_lon']])
             node_ids.append(f"{pair['pickup_node_id']}_pickup")
-            demands.append(pair['quantity'])  # Pickup increases load
-            
+            demands.append(pair['quantity'])
+
             delivery_idx = len(locations)
             locations.append([pair['delivery_lat'], pair['delivery_lon']])
             node_ids.append(f"{pair['delivery_node_id']}_delivery")
-            demands.append(-pair['quantity'])  # Delivery decreases load
-            
+            demands.append(-pair['quantity'])
+
             pickups_deliveries.append((pickup_idx, delivery_idx))
-        
+
         return {
             'distance_matrix': self.create_distance_matrix(np.array(locations)),
             'demands': demands,

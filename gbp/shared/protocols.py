@@ -1,33 +1,40 @@
-from typing import Protocol
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Protocol
+
 import pandas as pd
-import numpy as np
 
-class DataLoaderGraphProtocol(Protocol):
-    def prepare_stations_data(self, config: dict) -> pd.DataFrame:
-        ...
+if TYPE_CHECKING:
+    from .graph_model import GraphData
 
-    def prepare_depot_data(self, config: dict) -> pd.DataFrame:
-        ...
 
-    def prepare_resources_data(self, config: dict) -> pd.DataFrame:
-        ...
+class DataSourceProtocol(Protocol):
+    """Protocol for raw (possibly temporal) data sources."""
 
-    def load_data(self) -> None:
-        ...
-
-class DataLoaderRebalancerProtocol(Protocol):
     df_stations: pd.DataFrame
     df_depots: pd.DataFrame
     df_resources: pd.DataFrame
+    timestamps: pd.DatetimeIndex
+    df_inventory_ts: pd.DataFrame
 
-    def load_data(self) -> None:
-        ...
+    def load_data(self) -> None: ...
 
-    def load_rebalancer_data(self, pairs: list[dict], depot_coords: tuple, resource_capacity: int, num_resources: int) -> dict:
-        ...
 
-    def create_distance_matrix(self, locations: np.ndarray) -> np.ndarray:
-        ...
+class DataLoaderGraphProtocol(Protocol):
+    """Protocol for temporal-graph data loaders."""
 
-    def create_pickup_delivery_pairs(self, sources: pd.DataFrame, destinations: pd.DataFrame) -> list[dict]:
-        ...
+    @property
+    def available_dates(self) -> pd.DatetimeIndex: ...
+
+    def load_data(self) -> None: ...
+
+    def get_snapshot(self, date: pd.Timestamp) -> GraphData: ...
+
+
+class DataLoaderRebalancerProtocol(Protocol):
+    """Protocol for rebalancer data loaders."""
+
+    df_node_demand: pd.DataFrame
+    data: dict | None
+
+    def load_data(self, date: pd.Timestamp | None = ...) -> None: ...

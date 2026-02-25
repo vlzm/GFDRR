@@ -1,16 +1,23 @@
 import pandas as pd
 import numpy as np
 
+
 class DemandCalculator:
-    def __init__(self, df_stations: pd.DataFrame, config: dict):
-        self.df_stations = df_stations
+    def __init__(self, df_nodes: pd.DataFrame, config: dict):
+        self.df_nodes = df_nodes
         self.config = config
 
     def calculate_demand(self):
-        return compute_utilization_and_balance(self.df_stations, self.config['min_threshold'], self.config['max_threshold'])
-    
-## Demand calculation
-def compute_utilization_and_balance(df: pd.DataFrame, min_threshold: float, max_threshold: float) -> pd.DataFrame:
+        return compute_utilization_and_balance(
+            self.df_nodes,
+            self.config['min_threshold'],
+            self.config['max_threshold'],
+        )
+
+
+def compute_utilization_and_balance(
+    df: pd.DataFrame, min_threshold: float, max_threshold: float,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Compute utilization, target counts, and identify sources/destinations."""
     df = df.copy()
     df['utilization'] = df['commodity_quantity'] / df['inventory_capacity']
