@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist
 
+from ..shared.decorators import validate
 from ..shared.protocols import DataLoaderGraphProtocol
+from ..shared.schemas import DestinationsSchema, NodeStateSchema, PdpModel, SourcesSchema
 from .demand import DemandCalculator
 
 
@@ -34,10 +36,24 @@ class DataLoaderRebalancer:
         inventory_type = self.config['inventory_node_type']
         depot_type = self.config['depot_node_type']
 
-        # Inventory nodes = graph nodes of the configured type joined with inventory
-        inv_nodes = snapshot.filter_nodes_by_type(inventory_type)
+        # Input boundary: validate snapshot provides required data
         inventory = snapshot.inventory
+        if inventory is None:
+            raise ValueError("Snapshot must include inventory data")
 
+        inv_nodes = snapshot.filter_nodes_by_type(inventory_type)
+        if len(inv_nodes) == 0:
+            raise ValueError(
+                f"No nodes of type '{inventory_type}' found in snapshot"
+            )
+
+        depot_nodes = snapshot.filter_nodes_by_type(depot_type)
+        if len(depot_nodes) == 0:
+            raise ValueError(
+                f"No nodes of type '{depot_type}' found in snapshot"
+            )
+
+        # Build node state by joining filtered nodes with inventory
         df_node_state = (
             inv_nodes[["node_id", "lat", "lon"]]
             .merge(
@@ -45,6 +61,7 @@ class DataLoaderRebalancer:
                 on="node_id",
             )
         )
+        NodeStateSchema.validate(df_node_state)
 
         # Demand calculation
         demand_calculator = DemandCalculator(df_node_state, self.config)
@@ -55,7 +72,6 @@ class DataLoaderRebalancer:
             return
 
         # Depot coords (centroid of depot-type nodes)
-        depot_nodes = snapshot.filter_nodes_by_type(depot_type)
         depot_coords = (depot_nodes['lat'].mean(), depot_nodes['lon'].mean())
 
         # PDP model
@@ -81,6 +97,7 @@ class DataLoaderRebalancer:
         return (cdist(scaled, scaled, metric='euclidean') * 111_000).astype(int)
 
     @staticmethod
+    @validate(inputs={"sources": SourcesSchema, "destinations": DestinationsSchema})
     def create_pickup_delivery_pairs(
         sources: pd.DataFrame, destinations: pd.DataFrame,
     ) -> list[dict]:
@@ -119,7 +136,7 @@ class DataLoaderRebalancer:
         depot_coords: tuple,
         resource_capacity: int,
         num_resources: int,
-    ) -> dict:
+    ) -> PdpModel:
         """Node layout: [depot, pickup_1, delivery_1, pickup_2, delivery_2, ...]"""
         locations = [list(depot_coords)]
         node_ids = ['depot']

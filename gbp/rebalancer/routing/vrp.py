@@ -1,9 +1,11 @@
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
+
+from ...shared.schemas import PdpModel
 from .postprocessing import extract_pdp_solution
 
-## Solver
-def solve_pdp(data: dict, time_limit_seconds: int = 30) -> dict | None:
+
+def solve_pdp(data: PdpModel, time_limit_seconds: int = 30) -> dict | None:
     """Solve the Pickup and Delivery Problem."""
     manager = pywrapcp.RoutingIndexManager(
         len(data['distance_matrix']),

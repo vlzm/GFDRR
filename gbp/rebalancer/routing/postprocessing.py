@@ -1,7 +1,10 @@
 import pandas as pd
 
+from ...shared.decorators import validate
+from ...shared.schemas import NodeDemandSchema, PdpModel, RouteSchema, UpdatedInventorySchema
 
-def extract_pdp_solution(data: dict, manager, routing, solution) -> dict:
+
+def extract_pdp_solution(data: PdpModel, manager, routing, solution) -> dict:
     """Extract routes from PDP solution."""
     routes = []
     total_distance = 0
@@ -57,6 +60,7 @@ def extract_pdp_solution(data: dict, manager, routing, solution) -> dict:
     }
 
 
+@validate(output=RouteSchema)
 def format_pdp_route_output(solution: dict, pairs: list[dict]) -> pd.DataFrame:
     """Format PDP solution into DataFrame."""
     records = []
@@ -84,6 +88,10 @@ def format_pdp_route_output(solution: dict, pairs: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+@validate(
+    inputs={"df_original": NodeDemandSchema, "route_df": RouteSchema},
+    output=UpdatedInventorySchema,
+)
 def update_inventory_from_pdp(df_original: pd.DataFrame, route_df: pd.DataFrame) -> pd.DataFrame:
     """Update inventory based on PDP solution."""
     df_updated = df_original.copy()

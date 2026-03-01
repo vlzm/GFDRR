@@ -1,5 +1,6 @@
 import pandas as pd
 
+from ...shared.schemas import PdpModel
 from .postprocessing import format_pdp_route_output
 from .vrp import solve_pdp
 
@@ -7,7 +8,7 @@ from .vrp import solve_pdp
 class Solver:
     """Solves the Pickup and Delivery Problem (solve only, no inventory update)."""
 
-    def __init__(self, data: dict, config: dict):
+    def __init__(self, data: PdpModel, config: dict):
         self.data = data
         self.config = config
 

@@ -1,14 +1,22 @@
 """Graph data model — unified structure for all modules.
 
 Defines the GraphData container and type enumerations.
-Adapted from the pandera-based Silver Layer model (old/graph_model.py)
-but kept lightweight (no pandera dependency).
+Adapted from the pandera-based Silver Layer model (old/graph_model.py).
+All tables are validated against schemas from ``schemas.py`` on construction.
 """
 
 from enum import Enum
 
 import numpy as np
 import pandas as pd
+
+from .schemas import (
+    GraphCommoditiesSchema,
+    GraphEdgesSchema,
+    GraphInventorySchema,
+    GraphNodesSchema,
+    GraphResourcesSchema,
+)
 
 
 # =============================================================================
@@ -65,6 +73,16 @@ class GraphData:
     ) -> None:
         if len(nodes) == 0:
             raise ValueError("nodes DataFrame must have at least 1 row")
+
+        GraphNodesSchema.validate(nodes)
+        if edges is not None:
+            GraphEdgesSchema.validate(edges)
+        if resources is not None:
+            GraphResourcesSchema.validate(resources)
+        if commodities is not None:
+            GraphCommoditiesSchema.validate(commodities)
+        if inventory is not None:
+            GraphInventorySchema.validate(inventory)
 
         self._nodes = nodes
         self._edges = edges

@@ -1,6 +1,14 @@
 import pandas as pd
 import numpy as np
 
+from ..shared.decorators import validate
+from ..shared.schemas import (
+    DestinationsSchema,
+    NodeDemandSchema,
+    NodeStateSchema,
+    SourcesSchema,
+)
+
 
 class DemandCalculator:
     def __init__(self, df_nodes: pd.DataFrame, config: dict):
@@ -15,6 +23,10 @@ class DemandCalculator:
         )
 
 
+@validate(
+    inputs={"df": NodeStateSchema},
+    output=(NodeDemandSchema, SourcesSchema, DestinationsSchema),
+)
 def compute_utilization_and_balance(
     df: pd.DataFrame, min_threshold: float, max_threshold: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:

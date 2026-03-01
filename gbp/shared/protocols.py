@@ -5,7 +5,10 @@ from typing import TYPE_CHECKING, Protocol
 import pandas as pd
 
 if TYPE_CHECKING:
+    from pandera.typing import DataFrame
+
     from .graph_model import GraphData
+    from .schemas import NodeDemandSchema, PdpModel
 
 
 class DataSourceProtocol(Protocol):
@@ -34,7 +37,7 @@ class DataLoaderGraphProtocol(Protocol):
 class DataLoaderRebalancerProtocol(Protocol):
     """Protocol for rebalancer data loaders."""
 
-    df_node_demand: pd.DataFrame
-    data: dict | None
+    df_node_demand: DataFrame[NodeDemandSchema]
+    data: PdpModel | None
 
     def load_data(self, date: pd.Timestamp | None = ...) -> None: ...
