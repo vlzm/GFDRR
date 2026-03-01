@@ -1,0 +1,66 @@
+```mermaid
+---
+title: Data Flow - Typical Usage
+---
+
+flowchart LR
+    subgraph Input["Input Data"]
+        Raw["Raw Data<br/>(CSV, DB, API)"]
+    end
+
+    subgraph Loading["Data Loading"]
+        LoadNodes["Load Nodes"]
+        LoadAttrs["Load Attributes"]
+        LoadFlows["Load Flows"]
+        LoadCoords["Load Coordinates"]
+    end
+
+    subgraph GraphModel["GraphData"]
+        GD["GraphDataWithQueries"]
+    end
+
+    subgraph Queries["Query Layer"]
+        Q1["get_nodes()"]
+        Q2["nodes_with_attrs()"]
+        Q3["edges_with_attrs()"]
+        Q4["get_flows()"]
+    end
+
+    subgraph Dynamic["Dynamic Computation"]
+        DS["DistanceService<br/>haversine/OSRM"]
+        EB["EdgeBuilder<br/>build edges on demand"]
+    end
+
+    subgraph Output["Output"]
+        Solver["OR-Tools Solver"]
+        Analysis["Data Analysis"]
+        Export["Export<br/>(Parquet, JSON)"]
+    end
+
+    Raw --> LoadNodes --> GD
+    Raw --> LoadAttrs --> GD
+    Raw --> LoadFlows --> GD
+    Raw --> LoadCoords --> GD
+
+    GD --> Q1
+    GD --> Q2
+    GD --> Q3
+    GD --> Q4
+
+    GD --> DS
+    DS --> EB
+    GD --> EB
+
+    Q2 --> Solver
+    Q3 --> Solver
+    EB --> Solver
+    
+    Q1 --> Analysis
+    Q4 --> Analysis
+    
+    GD --> Export
+
+    style GD fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style DS fill:#e8f5e9,stroke:#2e7d32
+    style EB fill:#e8f5e9,stroke:#2e7d32
+```

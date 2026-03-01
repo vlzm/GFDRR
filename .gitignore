@@ -70,6 +70,9 @@ venv.bak/
 # Cursor
 .cursor/
 
+# all files from folder .reference/
+reference/
+
 # mypy
 .mypy_cache/
 .dmypy.json

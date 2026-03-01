@@ -1,0 +1,79 @@
+```mermaid
+---
+title: Graph Model Architecture
+---
+
+flowchart TB
+    subgraph Core["Core Entities"]
+        Nodes["Nodes<br/>─────────<br/>id: str<br/>node_type: str"]
+        Resources["Resources<br/>─────────<br/>id: str<br/>resource_type: str"]
+        Commodities["Commodities<br/>─────────<br/>id: str<br/>commodity_type: str"]
+    end
+
+    subgraph Geography["Geography"]
+        Coordinates["Coordinates<br/>─────────<br/>node_id: str<br/>latitude: float<br/>longitude: float"]
+    end
+
+    subgraph Attributes["Attributes (Registry Pattern)"]
+        NodeAttrs["node_attributes<br/>dict[str, AttributeTable]"]
+        EdgeAttrs["edge_attributes<br/>dict[str, AttributeTable]"]
+        
+        subgraph AttrExamples["Example Tables"]
+            FixedCost["fixed_cost<br/>keys: [node_id]"]
+            VarCost["variable_cost<br/>keys: [node_id, commodity_id]"]
+            TransRate["transport_rate<br/>keys: [src, tgt, commodity, resource]"]
+        end
+    end
+
+    subgraph TimeSeries["Time-Series Data"]
+        Flows["Flows<br/>dict[str, FlowsTable]"]
+        Demands["Demands<br/>─────────<br/>node_id, commodity_id<br/>period, quantity"]
+        Inventory["Inventory<br/>─────────<br/>node_id, commodity_id<br/>quantity"]
+        Telemetry["Telemetry<br/>─────────<br/>node_id, metric<br/>timestamp, value"]
+    end
+
+    subgraph Tags["Tags (Categorical)"]
+        TagsDF["Tags<br/>─────────<br/>entity_type: node|resource|commodity<br/>entity_id: str<br/>key: str<br/>value: str"]
+    end
+
+    subgraph Services["Dynamic Services"]
+        DistService["DistanceService<br/>─────────<br/>haversine / euclidean / OSRM"]
+        EdgeBuilder["EdgeBuilder<br/>─────────<br/>build edges on demand"]
+    end
+
+    %% Relationships
+    Nodes --> Coordinates
+    Nodes --> NodeAttrs
+    NodeAttrs --> FixedCost
+    NodeAttrs --> VarCost
+    EdgeAttrs --> TransRate
+    
+    Nodes --> Flows
+    Nodes --> Demands
+    Nodes --> Inventory
+    Nodes --> Telemetry
+    
+    Nodes --> TagsDF
+    Resources --> TagsDF
+    Commodities --> TagsDF
+    
+    Coordinates --> DistService
+    DistService --> EdgeBuilder
+    Nodes --> EdgeBuilder
+    EdgeAttrs --> EdgeBuilder
+
+    %% Styling
+    classDef core fill:#e1f5fe,stroke:#01579b
+    classDef geo fill:#e8f5e9,stroke:#1b5e20
+    classDef attr fill:#fff3e0,stroke:#e65100
+    classDef time fill:#f3e5f5,stroke:#4a148c
+    classDef tags fill:#fce4ec,stroke:#880e4f
+    classDef services fill:#e0f2f1,stroke:#004d40
+
+    class Nodes,Resources,Commodities core
+    class Coordinates geo
+    class NodeAttrs,EdgeAttrs,FixedCost,VarCost,TransRate attr
+    class Flows,Demands,Inventory,Telemetry time
+    class TagsDF tags
+    class DistService,EdgeBuilder services
+```
