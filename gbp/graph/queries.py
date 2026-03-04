@@ -11,11 +11,14 @@ Usage:
     # Or use the combined class GraphDataWithQueries
 """
 
+from __future__ import annotations
+
 from typing import Literal
 
 import pandas as pd
 
 from gbp.graph.core import GraphData, AttributeTable, FlowsTable
+from gbp.graph.builders import DistanceService, DistanceBackend, EdgeBuilder
 
 
 class GraphQueryMixin:
@@ -27,6 +30,7 @@ class GraphQueryMixin:
     
     # Type hints for IDE support (actual attributes come from GraphData)
     nodes: pd.DataFrame
+    edges: pd.DataFrame | None
     resources: pd.DataFrame | None
     commodities: pd.DataFrame | None
     coordinates: pd.DataFrame | None
@@ -37,6 +41,7 @@ class GraphQueryMixin:
     inventory: pd.DataFrame | None
     telemetry: pd.DataFrame | None
     tags: pd.DataFrame | None
+    distance_service: DistanceService | None
     
     # =========================================================================
     # Node Queries
@@ -181,7 +186,161 @@ class GraphQueryMixin:
         ]
     
     # =========================================================================
-    # Merge Helpers (solves Query complexity)
+    # Distance Service
+    # =========================================================================
+    
+    def set_distance_service(
+        self,
+        service: DistanceService | None = None,
+        *,
+        backend: DistanceBackend = "haversine",
+        default_speed_kmh: float = 50.0,
+    ) -> None:
+        """Configure distance calculations for edge building.
+        
+        Either pass an existing DistanceService, or let the graph create one
+        from its own coordinates.
+        
+        Args:
+            service: Pre-configured DistanceService. If None, creates one
+                from the graph's coordinates.
+            backend: Distance backend (used when creating from coordinates).
+            default_speed_kmh: Default speed for duration estimates.
+        
+        Example:
+            >>> graph.set_distance_service(backend="haversine")
+            >>> graph.set_distance_service(my_custom_service)
+        """
+        if service is not None:
+            self.distance_service = service
+            return
+        
+        if self.coordinates is None:
+            raise ValueError(
+                "Cannot create DistanceService: no coordinates in graph. "
+                "Either set coordinates or pass an existing service."
+            )
+        
+        self.distance_service = DistanceService(
+            coordinates=self.coordinates,
+            backend=backend,
+            default_speed_kmh=default_speed_kmh,
+        )
+    
+    def _get_edge_builder(
+        self,
+        distance_service: DistanceService | None = None,
+    ) -> EdgeBuilder:
+        """Create an EdgeBuilder bound to this graph.
+        
+        Args:
+            distance_service: Override for the graph's distance_service.
+        """
+        svc = distance_service or self.distance_service
+        return EdgeBuilder(graph=self, distance_service=svc)  # type: ignore[arg-type]
+    
+    # =========================================================================
+    # Edge Building
+    # =========================================================================
+    
+    def build_edges(
+        self,
+        *,
+        source_ids: list[str] | None = None,
+        target_ids: list[str] | None = None,
+        source_types: list[str] | None = None,
+        target_types: list[str] | None = None,
+        include_distances: bool = True,
+        include_self_loops: bool = False,
+        bidirectional: bool = False,
+        distance_service: DistanceService | None = None,
+        store: bool = True,
+    ) -> pd.DataFrame:
+        """Build edges between nodes and store on the graph.
+        
+        Creates edges dynamically between specified source and target nodes.
+        Delegates to EdgeBuilder internally. By default the result is stored
+        in ``self.edges``.
+        
+        Args:
+            source_ids: Explicit list of source node IDs.
+            target_ids: Explicit list of target node IDs.
+            source_types: Node types for sources (used if source_ids is None).
+            target_types: Node types for targets (used if target_ids is None).
+            include_distances: Whether to compute distances (requires distance_service).
+            include_self_loops: Whether to include edges where source=target.
+            bidirectional: If True, include both A->B and B->A edges.
+            distance_service: Override distance service for this call.
+            store: If True (default), save result to ``self.edges``.
+        
+        Returns:
+            DataFrame with columns: source_id, target_id, [distance_km, duration_h].
+        
+        Example:
+            >>> graph.set_distance_service(backend="haversine")
+            >>> graph.build_edges(
+            ...     source_types=["depot"],
+            ...     target_types=["zone"]
+            ... )
+            >>> graph.edges  # edges are now stored
+        """
+        builder = self._get_edge_builder(distance_service)
+        edges = builder.build(
+            source_ids=source_ids,
+            target_ids=target_ids,
+            source_types=source_types,
+            target_types=target_types,
+            include_distances=include_distances,
+            include_self_loops=include_self_loops,
+            bidirectional=bidirectional,
+        )
+        if store:
+            self.edges = edges
+        return edges
+    
+    def build_edges_from_flows(
+        self,
+        flow_name: str,
+        *,
+        include_distances: bool = True,
+        distance_service: DistanceService | None = None,
+        store: bool = True,
+        **filters,
+    ) -> pd.DataFrame:
+        """Build edges based on existing flow data (sparse graph).
+        
+        Creates edges only where flows exist, rather than the full
+        cartesian product. By default the result is stored in ``self.edges``.
+        
+        Args:
+            flow_name: Name of the flows table.
+            include_distances: Whether to compute distances.
+            distance_service: Override distance service for this call.
+            store: If True (default), save result to ``self.edges``.
+            **filters: Filters for flows (e.g., commodity_id="bulk").
+        
+        Returns:
+            DataFrame with edges derived from flows.
+        
+        Example:
+            >>> graph.build_edges_from_flows(
+            ...     "primary_deliveries",
+            ...     commodity_id="bulk"
+            ... )
+            >>> graph.edges  # edges are now stored
+        """
+        builder = self._get_edge_builder(distance_service)
+        edges = builder.build_from_flows(
+            flow_name,
+            include_distances=include_distances,
+            **filters,
+        )
+        if store:
+            self.edges = edges
+        return edges
+    
+    # =========================================================================
+    # Merge Helpers
     # =========================================================================
     
     def nodes_with_attrs(
@@ -253,97 +412,55 @@ class GraphQueryMixin:
     
     def edges_with_attrs(
         self,
+        *attr_names: str,
         source_ids: list[str] | None = None,
         target_ids: list[str] | None = None,
         source_types: list[str] | None = None,
         target_types: list[str] | None = None,
-        *attr_names: str,
+        include_distances: bool = True,
         include_self_loops: bool = False,
-        **filters
+        distance_service: DistanceService | None = None,
+        **filters,
     ) -> pd.DataFrame:
         """Build edges and merge with specified attributes.
         
-        Dynamically creates edges between specified nodes
-        and joins with edge attributes.
+        Dynamically creates edges between specified nodes, computes
+        distances, and joins with edge attributes. Delegates to
+        EdgeBuilder internally.
         
         Args:
-            source_ids: List of source node IDs. If None, inferred from source_types.
-            target_ids: List of target node IDs. If None, inferred from target_types.
+            *attr_names: Names of edge attributes to merge.
+            source_ids: Explicit list of source node IDs.
+            target_ids: Explicit list of target node IDs.
             source_types: Node types for sources (used if source_ids is None).
             target_types: Node types for targets (used if target_ids is None).
-            *attr_names: Names of edge attributes to merge.
+            include_distances: Whether to compute distances.
             include_self_loops: Whether to include edges where source=target.
+            distance_service: Override distance service for this call.
             **filters: Filters for attributes (e.g., commodity_id="bulk").
         
         Returns:
             DataFrame with edges and merged attributes.
         
         Example:
-            >>> # Build routes from depots to zones with rates
             >>> routes = graph.edges_with_attrs(
+            ...     "transport_rate", "trip_cost",
             ...     source_types=["depot"],
             ...     target_types=["zone"],
-            ...     "transport_rate", 
-            ...     "trip_cost",
-            ...     commodity_id="bulk"
+            ...     commodity_id="bulk",
             ... )
         """
-        # Resolve source_ids
-        if source_ids is None:
-            if source_types is None:
-                source_ids = list(self.nodes["id"])
-            else:
-                source_ids = list(
-                    self.nodes[self.nodes["node_type"].isin(source_types)]["id"]
-                )
-        
-        # Resolve target_ids
-        if target_ids is None:
-            if target_types is None:
-                target_ids = list(self.nodes["id"])
-            else:
-                target_ids = list(
-                    self.nodes[self.nodes["node_type"].isin(target_types)]["id"]
-                )
-        
-        # Build cartesian product
-        edges = pd.DataFrame({
-            "source_id": [s for s in source_ids for _ in target_ids],
-            "target_id": [t for _ in source_ids for t in target_ids],
-        })
-        
-        # Remove self-loops if requested
-        if not include_self_loops:
-            edges = edges[edges["source_id"] != edges["target_id"]]
-        
-        # Merge each attribute
-        for attr_name in attr_names:
-            if attr_name not in self.edge_attributes:
-                raise KeyError(f"Edge attribute '{attr_name}' not found")
-            
-            attr = self.edge_attributes[attr_name]
-            attr_df = attr.data.copy()
-            
-            # Apply filters
-            for key, value in filters.items():
-                if key in attr_df.columns:
-                    attr_df = attr_df[attr_df[key] == value]
-            
-            # Rename value columns to avoid conflicts
-            value_rename = {
-                col: f"{attr_name}_{col}" if col in edges.columns else col
-                for col in attr.value_columns
-            }
-            attr_df = attr_df.rename(columns=value_rename)
-            
-            # Merge on source_id, target_id
-            edges = edges.merge(
-                attr_df,
-                on=["source_id", "target_id"],
-                how="left"
-            )
-        
-        return edges
+        builder = self._get_edge_builder(distance_service)
+        return builder.build_with_attrs(
+            source_ids=source_ids,
+            target_ids=target_ids,
+            source_types=source_types,
+            target_types=target_types,
+            attr_names=list(attr_names) if attr_names else None,
+            include_distances=include_distances,
+            include_self_loops=include_self_loops,
+            **filters,
+        )
     
     # =========================================================================
     # Tag Queries
@@ -588,6 +705,9 @@ class GraphQueryMixin:
             "GraphData",
             f"  Nodes: {len(self.nodes)} ({', '.join(self.node_types)})",
         ]
+        
+        if self.edges is not None:
+            lines.append(f"  Edges: {len(self.edges)}")
         
         if self.resources is not None:
             types = self.resources["resource_type"].unique().tolist()

@@ -10,8 +10,6 @@ from gbp.graph import (
     GraphDataWithQueries,
     AttributeTable,
     FlowsTable,
-    DistanceService,
-    EdgeBuilder,
     validate_graph,
     save_parquet,
 )
@@ -338,26 +336,21 @@ def demonstrate_queries(graph: GraphDataWithQueries) -> None:
     print("EDGE BUILDING")
     print("=" * 60)
     
-    distance_service = DistanceService(
-        coordinates=graph.coordinates,
-        backend="haversine"
-    )
-    
-    edge_builder = EdgeBuilder(graph, distance_service)
+    graph.set_distance_service(backend="haversine")
     
     print("\nEdges from depots to zones:")
-    edges = edge_builder.build(
+    edges = graph.build_edges(
         source_types=["depot"],
         target_types=["zone"]
     )
     print(edges.head(10))
     
     print("\nEdges with transport rates:")
-    edges_with_rates = edge_builder.build_with_attrs(
+    edges_with_rates = graph.edges_with_attrs(
+        "transport_rate",
         source_types=["depot"],
         target_types=["zone"],
-        attr_names=["transport_rate"],
-        commodity_id="bulk_lpg"
+        commodity_id="bulk_lpg",
     )
     print(edges_with_rates)
     

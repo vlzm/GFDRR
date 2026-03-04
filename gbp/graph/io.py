@@ -25,6 +25,7 @@ def save_parquet(graph: GraphData, directory: str | Path) -> None:
     
     Creates a directory with multiple .parquet files:
     - nodes.parquet
+    - edges.parquet (if present)
     - resources.parquet (if present)
     - commodities.parquet (if present)
     - coordinates.parquet (if present)
@@ -55,6 +56,9 @@ def save_parquet(graph: GraphData, directory: str | Path) -> None:
     
     if graph.commodities is not None:
         graph.commodities.to_parquet(path / "commodities.parquet", index=False)
+    
+    if graph.edges is not None:
+        graph.edges.to_parquet(path / "edges.parquet", index=False)
     
     if graph.coordinates is not None:
         graph.coordinates.to_parquet(path / "coordinates.parquet", index=False)
@@ -146,6 +150,10 @@ def load_parquet(directory: str | Path) -> GraphData:
     if (path / "commodities.parquet").exists():
         commodities = pd.read_parquet(path / "commodities.parquet")
     
+    edges = None
+    if (path / "edges.parquet").exists():
+        edges = pd.read_parquet(path / "edges.parquet")
+    
     coordinates = None
     if (path / "coordinates.parquet").exists():
         coordinates = pd.read_parquet(path / "coordinates.parquet")
@@ -213,6 +221,7 @@ def load_parquet(directory: str | Path) -> GraphData:
     
     return GraphData(
         nodes=nodes,
+        edges=edges,
         resources=resources,
         commodities=commodities,
         coordinates=coordinates,
@@ -249,6 +258,9 @@ def to_dict(graph: GraphData) -> dict[str, Any]:
     result: dict[str, Any] = {
         "nodes": graph.nodes.to_dict(orient="records"),
     }
+    
+    if graph.edges is not None:
+        result["edges"] = graph.edges.to_dict(orient="records")
     
     if graph.resources is not None:
         result["resources"] = graph.resources.to_dict(orient="records")
@@ -325,6 +337,10 @@ def from_dict(data: dict[str, Any]) -> GraphData:
     """
     nodes = pd.DataFrame(data["nodes"])
     
+    edges = None
+    if "edges" in data:
+        edges = pd.DataFrame(data["edges"])
+    
     resources = None
     if "resources" in data:
         resources = pd.DataFrame(data["resources"])
@@ -396,6 +412,7 @@ def from_dict(data: dict[str, Any]) -> GraphData:
     
     return GraphData(
         nodes=nodes,
+        edges=edges,
         resources=resources,
         commodities=commodities,
         coordinates=coordinates,

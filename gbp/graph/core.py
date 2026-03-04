@@ -12,10 +12,15 @@ Design principles:
 4. Business-agnostic (no domain-specific fields)
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, TYPE_CHECKING
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from gbp.graph.builders import DistanceService
 
 
 # =============================================================================
@@ -242,6 +247,8 @@ class GraphData:
     
     Attributes:
         nodes: DataFrame with columns [id, node_type].
+        edges: Optional DataFrame with columns [source_id, target_id, ...].
+            Populated by build_edges() or set manually.
         resources: Optional DataFrame with columns [id, resource_type].
         commodities: Optional DataFrame with columns [id, commodity_type].
         coordinates: Optional DataFrame with columns [node_id, latitude, longitude].
@@ -269,6 +276,7 @@ class GraphData:
     
     # === Core entities ===
     nodes: pd.DataFrame
+    edges: pd.DataFrame | None = None
     resources: pd.DataFrame | None = None
     commodities: pd.DataFrame | None = None
     
@@ -287,6 +295,9 @@ class GraphData:
     
     # === Tags (unified) ===
     tags: pd.DataFrame | None = None
+    
+    # === Distance service (lazy, avoids circular import) ===
+    distance_service: DistanceService | None = field(default=None, repr=False)
     
     def __post_init__(self) -> None:
         """Validate graph structure."""
@@ -390,6 +401,8 @@ class GraphData:
     def __repr__(self) -> str:
         parts = [f"GraphData(nodes={len(self.nodes)}"]
         
+        if self.edges is not None:
+            parts.append(f"edges={len(self.edges)}")
         if self.resources is not None:
             parts.append(f"resources={len(self.resources)}")
         if self.commodities is not None:
