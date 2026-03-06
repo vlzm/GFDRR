@@ -30,6 +30,16 @@ if TYPE_CHECKING:
 ValueType = Literal["float", "int", "str", "bool", "json"]
 EntityType = Literal["node", "edge"]
 AttributeClass = Literal["cost", "rate", "capacity", "tag", "property"]
+TimeGranularity = Literal["hourly", "daily", "weekly", "monthly", "quarterly", "yearly"]
+
+GRANULARITY_TO_FREQ: dict[str, str] = {
+    "hourly": "h",
+    "daily": "D",
+    "weekly": "W",
+    "monthly": "M",
+    "quarterly": "Q",
+    "yearly": "Y",
+}
 
 
 # =============================================================================
@@ -43,6 +53,8 @@ class AttributeTable:
     
     Stores attributes for nodes or edges with explicit information about
     what dimensions (granularity keys) the attribute depends on.
+    Supports both static and temporal (time-varying) attributes via
+    optional ``date_column`` / ``time_granularity`` fields.
     
     Attributes:
         name: Unique identifier for this attribute table.
@@ -55,8 +67,30 @@ class AttributeTable:
         value_types: Mapping of value column names to their types.
         data: The actual DataFrame with data.
         description: Human-readable description.
+        date_column: Name of the column containing date/time values.
+            Must be present in ``granularity_keys``. ``None`` for static attributes.
+        time_granularity: Semantic time resolution of the date column
+            ("hourly", "daily", "weekly", "monthly", "quarterly", "yearly").
+            Required when ``date_column`` is set; must be ``None`` otherwise.
+        date_format: Optional strftime format string for parsing the date column
+            (e.g. "%Y-%m", "%Y-%m-%d %H:00"). When ``None``, pandas auto-detection
+            is used.
     
-    Example:
+    Example (static):
+        >>> attr = AttributeTable(
+        ...     name="fixed_cost",
+        ...     entity_type="node",
+        ...     attribute_class="cost",
+        ...     granularity_keys=["node_id"],
+        ...     value_columns=["value"],
+        ...     value_types={"value": "float"},
+        ...     data=pd.DataFrame({
+        ...         "node_id": ["depot_1", "depot_2"],
+        ...         "value": [5000.0, 6000.0],
+        ...     }),
+        ... )
+    
+    Example (temporal):
         >>> attr = AttributeTable(
         ...     name="variable_cost",
         ...     entity_type="node",
@@ -70,6 +104,9 @@ class AttributeTable:
         ...         "period": ["2024-01", "2024-01"],
         ...         "value": [10.0, 15.0],
         ...     }),
+        ...     date_column="period",
+        ...     time_granularity="monthly",
+        ...     date_format="%Y-%m",
         ...     description="Variable processing cost per ton"
         ... )
     """
@@ -82,11 +119,15 @@ class AttributeTable:
     value_types: dict[str, ValueType]
     data: pd.DataFrame
     description: str = ""
+    date_column: str | None = None
+    time_granularity: TimeGranularity | None = None
+    date_format: str | None = None
     
     def __post_init__(self) -> None:
         """Validate the attribute table structure."""
         self._validate_columns()
         self._validate_entity_keys()
+        self._validate_temporal()
     
     def _validate_columns(self) -> None:
         """Check that all declared columns exist in data."""
@@ -113,6 +154,43 @@ class AttributeTable:
                     f"'source_id' and 'target_id' in granularity_keys"
                 )
     
+    def _validate_temporal(self) -> None:
+        """Check consistency of temporal fields."""
+        has_col = self.date_column is not None
+        has_gran = self.time_granularity is not None
+        
+        if has_col != has_gran:
+            raise ValueError(
+                f"AttributeTable '{self.name}': date_column and time_granularity "
+                f"must both be set or both be None"
+            )
+        
+        if not has_col:
+            if self.date_format is not None:
+                raise ValueError(
+                    f"AttributeTable '{self.name}': date_format is set but "
+                    f"date_column is None"
+                )
+            return
+        
+        if self.date_column not in self.granularity_keys:
+            raise ValueError(
+                f"AttributeTable '{self.name}': date_column '{self.date_column}' "
+                f"must be listed in granularity_keys"
+            )
+    
+    @property
+    def is_temporal(self) -> bool:
+        """Whether this attribute varies over time."""
+        return self.date_column is not None
+    
+    @property
+    def pandas_freq(self) -> str | None:
+        """Pandas frequency string corresponding to ``time_granularity``."""
+        if self.time_granularity is None:
+            return None
+        return GRANULARITY_TO_FREQ[self.time_granularity]
+    
     @property
     def all_columns(self) -> list[str]:
         """All columns (keys + values)."""
@@ -130,12 +208,16 @@ class AttributeTable:
         return len(self.data)
     
     def __repr__(self) -> str:
+        temporal_info = ""
+        if self.is_temporal:
+            temporal_info = f", temporal={self.date_column}@{self.time_granularity}"
         return (
             f"AttributeTable(name='{self.name}', "
             f"entity={self.entity_type}, "
             f"class={self.attribute_class}, "
             f"granularity={self.granularity_keys}, "
-            f"rows={len(self.data)})"
+            f"rows={len(self.data)}"
+            f"{temporal_info})"
         )
 
 

@@ -72,7 +72,7 @@ def save_parquet(graph: GraphData, directory: str | Path) -> None:
     
     for name, attr in graph.node_attributes.items():
         attr.data.to_parquet(path / f"node_attr_{name}.parquet", index=False)
-        metadata["node_attributes"][name] = {
+        meta_entry: dict[str, Any] = {
             "entity_type": attr.entity_type,
             "attribute_class": attr.attribute_class,
             "granularity_keys": attr.granularity_keys,
@@ -80,10 +80,16 @@ def save_parquet(graph: GraphData, directory: str | Path) -> None:
             "value_types": attr.value_types,
             "description": attr.description,
         }
+        if attr.is_temporal:
+            meta_entry["date_column"] = attr.date_column
+            meta_entry["time_granularity"] = attr.time_granularity
+            if attr.date_format is not None:
+                meta_entry["date_format"] = attr.date_format
+        metadata["node_attributes"][name] = meta_entry
     
     for name, attr in graph.edge_attributes.items():
         attr.data.to_parquet(path / f"edge_attr_{name}.parquet", index=False)
-        metadata["edge_attributes"][name] = {
+        meta_entry = {
             "entity_type": attr.entity_type,
             "attribute_class": attr.attribute_class,
             "granularity_keys": attr.granularity_keys,
@@ -91,6 +97,12 @@ def save_parquet(graph: GraphData, directory: str | Path) -> None:
             "value_types": attr.value_types,
             "description": attr.description,
         }
+        if attr.is_temporal:
+            meta_entry["date_column"] = attr.date_column
+            meta_entry["time_granularity"] = attr.time_granularity
+            if attr.date_format is not None:
+                meta_entry["date_format"] = attr.date_format
+        metadata["edge_attributes"][name] = meta_entry
     
     # Flows
     for name, flow in graph.flows.items():
@@ -171,6 +183,9 @@ def load_parquet(directory: str | Path) -> GraphData:
             value_types=meta["value_types"],
             data=data,
             description=meta.get("description", ""),
+            date_column=meta.get("date_column"),
+            time_granularity=meta.get("time_granularity"),
+            date_format=meta.get("date_format"),
         )
     
     # Edge attributes
@@ -186,6 +201,9 @@ def load_parquet(directory: str | Path) -> GraphData:
             value_types=meta["value_types"],
             data=data,
             description=meta.get("description", ""),
+            date_column=meta.get("date_column"),
+            time_granularity=meta.get("time_granularity"),
+            date_format=meta.get("date_format"),
         )
     
     # Flows
@@ -274,7 +292,7 @@ def to_dict(graph: GraphData) -> dict[str, Any]:
     # Attributes
     result["node_attributes"] = {}
     for name, attr in graph.node_attributes.items():
-        result["node_attributes"][name] = {
+        entry: dict[str, Any] = {
             "entity_type": attr.entity_type,
             "attribute_class": attr.attribute_class,
             "granularity_keys": attr.granularity_keys,
@@ -283,10 +301,16 @@ def to_dict(graph: GraphData) -> dict[str, Any]:
             "description": attr.description,
             "data": attr.data.to_dict(orient="records"),
         }
+        if attr.is_temporal:
+            entry["date_column"] = attr.date_column
+            entry["time_granularity"] = attr.time_granularity
+            if attr.date_format is not None:
+                entry["date_format"] = attr.date_format
+        result["node_attributes"][name] = entry
     
     result["edge_attributes"] = {}
     for name, attr in graph.edge_attributes.items():
-        result["edge_attributes"][name] = {
+        entry = {
             "entity_type": attr.entity_type,
             "attribute_class": attr.attribute_class,
             "granularity_keys": attr.granularity_keys,
@@ -295,6 +319,12 @@ def to_dict(graph: GraphData) -> dict[str, Any]:
             "description": attr.description,
             "data": attr.data.to_dict(orient="records"),
         }
+        if attr.is_temporal:
+            entry["date_column"] = attr.date_column
+            entry["time_granularity"] = attr.time_granularity
+            if attr.date_format is not None:
+                entry["date_format"] = attr.date_format
+        result["edge_attributes"][name] = entry
     
     # Flows
     result["flows"] = {}
@@ -365,6 +395,9 @@ def from_dict(data: dict[str, Any]) -> GraphData:
             value_types=attr_data["value_types"],
             data=pd.DataFrame(attr_data["data"]),
             description=attr_data.get("description", ""),
+            date_column=attr_data.get("date_column"),
+            time_granularity=attr_data.get("time_granularity"),
+            date_format=attr_data.get("date_format"),
         )
     
     # Edge attributes
@@ -379,6 +412,9 @@ def from_dict(data: dict[str, Any]) -> GraphData:
             value_types=attr_data["value_types"],
             data=pd.DataFrame(attr_data["data"]),
             description=attr_data.get("description", ""),
+            date_column=attr_data.get("date_column"),
+            time_granularity=attr_data.get("time_granularity"),
+            date_format=attr_data.get("date_format"),
         )
     
     # Flows

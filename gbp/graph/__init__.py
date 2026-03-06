@@ -70,6 +70,8 @@ from gbp.graph.core import (
     ValueType,
     EntityType,
     AttributeClass,
+    TimeGranularity,
+    GRANULARITY_TO_FREQ,
 )
 
 # Query helpers
@@ -114,6 +116,8 @@ __all__ = [
     "ValueType",
     "EntityType",
     "AttributeClass",
+    "TimeGranularity",
+    "GRANULARITY_TO_FREQ",
     # Queries
     "GraphQueryMixin",
     "GraphDataWithQueries",

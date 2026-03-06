@@ -149,7 +149,7 @@ def create_logistics_graph() -> GraphDataWithQueries:
         description="Variable processing cost (EUR/ton)",
     ))
     
-    # COGS rates (granularity: node_id + commodity_id + period)
+    # COGS rates (granularity: node_id + commodity_id + period) — temporal attribute
     graph.add_node_attribute(AttributeTable(
         name="cogs_rate",
         entity_type="node",
@@ -167,6 +167,9 @@ def create_logistics_graph() -> GraphDataWithQueries:
             "value": [380.0, 385.0, 420.0, 425.0],
         }),
         description="Cost of goods sold (EUR/ton)",
+        date_column="period",
+        time_granularity="monthly",
+        date_format="%Y-%m",
     ))
     
     # Capacity (granularity: node_id + commodity_id)
