@@ -1,6 +1,6 @@
 import pandas as pd
 
-from ...shared.schemas import PdpModel
+from ..contracts import PdpModel, RebalancerConfig
 from .postprocessing import format_pdp_route_output
 from .vrp import solve_pdp
 
@@ -8,13 +8,13 @@ from .vrp import solve_pdp
 class Solver:
     """Solves the Pickup and Delivery Problem (solve only, no inventory update)."""
 
-    def __init__(self, data: PdpModel, config: dict):
+    def __init__(self, data: PdpModel, config: RebalancerConfig):
         self.data = data
         self.config = config
 
     def run(self) -> pd.DataFrame | None:
         """Solve PDP and return *route_df*, or *None* if no solution found."""
-        solution = solve_pdp(self.data, time_limit_seconds=self.config['time_limit_seconds'])
+        solution = solve_pdp(self.data, time_limit_seconds=self.config.time_limit_seconds)
 
         if solution:
             print(

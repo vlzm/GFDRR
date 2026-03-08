@@ -1,7 +1,6 @@
 import pandas as pd
 
-from ...shared.decorators import validate
-from ...shared.schemas import NodeDemandSchema, PdpModel, RouteSchema, UpdatedInventorySchema
+from ..contracts import NodeDemandSchema, PdpModel, RouteSchema, UpdatedInventorySchema
 
 
 def extract_pdp_solution(data: PdpModel, manager, routing, solution) -> dict:
@@ -60,9 +59,9 @@ def extract_pdp_solution(data: PdpModel, manager, routing, solution) -> dict:
     }
 
 
-@validate(output=RouteSchema)
 def format_pdp_route_output(solution: dict, pairs: list[dict]) -> pd.DataFrame:
     """Format PDP solution into DataFrame."""
+    _ = pairs
     records = []
     for route_info in solution['routes']:
         for step, stop in enumerate(route_info['route']):
@@ -85,27 +84,29 @@ def format_pdp_route_output(solution: dict, pairs: list[dict]) -> pd.DataFrame:
                 'quantity': abs(stop['demand']),
                 'cumulative_load': stop['cumulative_load'],
             })
-    return pd.DataFrame(records)
+    route_df = pd.DataFrame(records)
+    RouteSchema.validate(route_df)
+    return route_df
 
 
-@validate(
-    inputs={"df_original": NodeDemandSchema, "route_df": RouteSchema},
-    output=UpdatedInventorySchema,
-)
 def update_inventory_from_pdp(df_original: pd.DataFrame, route_df: pd.DataFrame) -> pd.DataFrame:
     """Update inventory based on PDP solution."""
-    df_updated = df_original.copy()
-    df_updated['old_commodity_quantity'] = df_updated['commodity_quantity']
+    NodeDemandSchema.validate(df_original)
+    RouteSchema.validate(route_df)
 
-    changes = route_df[route_df['action'] != 'depot'].copy()
-    changes['delta'] = changes.apply(
-        lambda row: -row['quantity'] if row['action'] == 'pickup' else row['quantity'],
+    df_updated = df_original.copy()
+    df_updated["old_quantity"] = df_updated["quantity"]
+
+    changes = route_df[route_df["action"] != "depot"].copy()
+    changes["delta"] = changes.apply(
+        lambda row: -row["quantity"] if row["action"] == "pickup" else row["quantity"],
         axis=1,
     )
-    net_changes = changes.groupby('node_id')['delta'].sum()
+    net_changes = changes.groupby("node_id")["delta"].sum()
 
-    df_updated['inventory_change'] = df_updated['node_id'].map(net_changes).fillna(0).astype(int)
-    df_updated['commodity_quantity'] = df_updated['commodity_quantity'] + df_updated['inventory_change']
-    df_updated['new_utilization'] = df_updated['commodity_quantity'] / df_updated['inventory_capacity']
+    df_updated["inventory_change"] = df_updated["node_id"].map(net_changes).fillna(0).astype(int)
+    df_updated["quantity"] = df_updated["quantity"] + df_updated["inventory_change"]
+    df_updated["new_utilization"] = df_updated["quantity"] / df_updated["inventory_capacity"]
 
+    UpdatedInventorySchema.validate(df_updated)
     return df_updated

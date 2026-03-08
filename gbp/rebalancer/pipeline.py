@@ -1,13 +1,20 @@
 import pandas as pd
 
+from .contracts import DataLoaderRebalancerProtocol, RebalancerConfig
 from .routing.solver import Solver
 from .routing.postprocessing import update_inventory_from_pdp
-from ..shared.protocols import DataLoaderRebalancerProtocol
 
 
 class Rebalancer:
-    def __init__(self, dataloader_rebalancer: DataLoaderRebalancerProtocol, config: dict):
-        self.config = config
+    def __init__(
+        self,
+        dataloader_rebalancer: DataLoaderRebalancerProtocol,
+        config: RebalancerConfig | dict,
+    ):
+        if isinstance(config, RebalancerConfig):
+            self.config = config
+        else:
+            self.config = RebalancerConfig(**config)
         self.dataloader_rebalancer = dataloader_rebalancer
 
     def run(self, date: pd.Timestamp | None = None):

@@ -1,7 +1,7 @@
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
-from ...shared.schemas import PdpModel
+from ..contracts import PdpModel
 from .postprocessing import extract_pdp_solution
 
 
