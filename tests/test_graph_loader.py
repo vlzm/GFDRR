@@ -233,3 +233,128 @@ class TestConfig:
         snap = loader.get_snapshot(loader.available_dates[0])
         assert snap.edges is not None
         assert (snap.edges["distance_km"] > 0).all()
+
+
+# =============================================================================
+# Citi Bike-like mock extras
+# =============================================================================
+
+
+class TestMockExtras:
+
+    def test_stations_include_citibike_metadata(self, mock_config):
+        mock = DataLoaderMock(mock_config)
+        mock.load_data()
+        assert {
+            "station_id",
+            "name",
+            "short_name",
+            "region_id",
+            "capacity",
+            "is_installed",
+            "is_renting",
+            "is_returning",
+        }.issubset(mock.df_stations.columns)
+
+    def test_telemetry_columns_exist(self, mock_config):
+        mock = DataLoaderMock(mock_config)
+        mock.load_data()
+        expected_cols = {
+            "timestamp",
+            "region_id",
+            "lat",
+            "lon",
+            "station_id",
+            "capacity",
+            "short_name",
+            "name",
+            "num_docks_available",
+            "is_returning",
+            "last_reported",
+            "num_bikes_available",
+            "is_installed",
+            "is_renting",
+            "num_ebikes_available",
+            "num_docks_disabled",
+            "num_bikes_disabled",
+        }
+        assert expected_cols.issubset(mock.df_telemetry_ts.columns)
+        assert len(mock.df_telemetry_ts) == len(mock.timestamps) * N_STATIONS
+
+    def test_trips_schema_and_station_references(self, mock_config):
+        mock = DataLoaderMock(mock_config)
+        mock.load_data()
+        expected_cols = {
+            "ride_id",
+            "rideable_type",
+            "started_at",
+            "ended_at",
+            "start_station_name",
+            "start_station_id",
+            "end_station_name",
+            "end_station_id",
+            "start_lat",
+            "start_lng",
+            "end_lat",
+            "end_lng",
+            "member_casual",
+        }
+        assert expected_cols.issubset(mock.df_trips.columns)
+        station_ids = set(mock.df_stations["node_id"])
+        assert set(mock.df_trips["start_station_id"]).issubset(station_ids)
+        assert set(mock.df_trips["end_station_id"]).issubset(station_ids)
+
+    def test_cost_tables_exist(self, mock_config):
+        mock = DataLoaderMock(mock_config)
+        mock.load_data()
+        assert {
+            "station_id",
+            "fixed_cost_per_visit",
+            "cost_per_bike_moved",
+        }.issubset(mock.df_station_costs.columns)
+        assert {
+            "resource_id",
+            "cost_per_km",
+            "cost_per_hour",
+            "fixed_dispatch_cost",
+        }.issubset(mock.df_truck_rates.columns)
+
+
+class TestGraphEnrichedFields:
+
+    def test_snapshot_contains_cost_attributes(self, loaded_graph_loader):
+        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
+        assert "station_fixed_cost" in snap.node_attributes
+        assert "station_variable_cost" in snap.node_attributes
+
+    def test_snapshot_resources_include_rate_columns(self, loaded_graph_loader):
+        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
+        assert {
+            "cost_per_km",
+            "cost_per_hour",
+            "fixed_dispatch_cost",
+        }.issubset(snap.resources.columns)
+
+    def test_snapshot_contains_telemetry(self, loaded_graph_loader):
+        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
+        assert snap.telemetry is not None
+        assert {"node_id", "metric", "timestamp", "value"}.issubset(snap.telemetry.columns)
+        assert {"num_bikes_available", "num_ebikes_available"}.issubset(set(snap.telemetry["metric"]))
+
+    def test_snapshot_contains_trip_flows(self, loaded_graph_loader):
+        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
+        assert "trip_flows" in snap.flows
+        flow = snap.flows["trip_flows"]
+        assert {"source_id", "target_id", "period", "value"}.issubset(flow.data.columns)
+
+    def test_snapshot_contains_region_tags(self, loaded_graph_loader):
+        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
+        assert snap.tags is not None
+        assert {"entity_type", "entity_id", "key", "value"}.issubset(snap.tags.columns)
+        assert (snap.tags["key"] == "region").all()
+
+    def test_snapshot_contains_station_info_attribute(self, loaded_graph_loader):
+        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
+        assert "station_info" in snap.node_attributes
+        station_info = snap.node_attributes["station_info"]
+        assert {"node_id", "name", "short_name"}.issubset(station_info.data.columns)
