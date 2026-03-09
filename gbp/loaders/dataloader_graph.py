@@ -55,6 +55,7 @@ class DataLoaderGraph:
         self._source = source
         self._config = config or GraphLoaderConfig()
         self._log = log.bind(loader="graph")
+        self._graph: GraphData | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -67,61 +68,70 @@ class DataLoaderGraph:
         self._source.load_data()
         self._validate_source()
 
-        self._nodes = self._build_nodes()
-        self._coordinates = self._build_coordinates()
-        self._resources = self._build_resources()
-        self._commodities = self._build_commodities()
-        self._node_attrs = self._build_node_attributes()
-        self._node_attrs.update(self._build_station_property_attributes())
-        self._node_attrs.update(self._build_cost_attributes())
-        self._tags = self._build_tags()
-        self._flows = {"trip_flows": self._build_trip_flows()}
+        nodes = self._build_nodes()
+        coordinates = self._build_coordinates()
+        resources = self._build_resources()
+        commodities = self._build_commodities()
+        node_attrs = self._build_node_attributes()
+        node_attrs.update(self._build_station_property_attributes())
+        node_attrs.update(self._build_cost_attributes())
+        tags = self._build_tags()
+        flows = {"trip_flows": self._build_trip_flows()}
 
-        self._inventory_ts = self._source.df_inventory_ts
-        self._timestamps = self._source.timestamps
-        self._telemetry_ts = self._source.df_telemetry_ts.copy()
-
-        self._distance_service: DistanceService | None = None
-        self._edges: pd.DataFrame | None = None
+        distance_service: DistanceService | None = None
+        edges: pd.DataFrame | None = None
 
         if self._config.build_edges:
-            self._distance_service = DistanceService(
-                coordinates=self._coordinates,
+            distance_service = DistanceService(
+                coordinates=coordinates,
                 backend=self._config.distance_backend,
                 default_speed_kmh=self._config.default_speed_kmh,
             )
-            self._edges = self._build_edges()
+            edges = self._build_edges(nodes=nodes, coordinates=coordinates, distance_service=distance_service)
+
+        self._graph = GraphData(
+            nodes=nodes,
+            edges=edges,
+            resources=resources,
+            commodities=commodities,
+            coordinates=coordinates,
+            node_attributes=node_attrs,
+            flows=flows,
+            tags=tags,
+            distance_service=distance_service,
+            inventory_ts=self._source.df_inventory_ts,
+            telemetry_ts=self._source.df_telemetry_ts.copy(),
+            timestamps=self._source.timestamps,
+        )
+        # Backward-compatible aliases used in tests and notebooks.
+        self._inventory_ts = self._graph.inventory_ts
 
         self._log.info(
             "load_done",
-            nodes=len(self._nodes),
-            edges=len(self._edges) if self._edges is not None else 0,
+            nodes=len(self._graph.nodes),
+            edges=len(self._graph.edges) if self._graph.edges is not None else 0,
         )
 
     def get_snapshot(self, date: pd.Timestamp) -> GraphData:
         """Return a ``GraphData`` snapshot for the given *date*."""
         self._log.debug("snapshot", date=str(date))
-        return GraphData(
-            nodes=self._nodes.copy(),
-            edges=self._edges.copy() if self._edges is not None else None,
-            resources=self._resources.copy(),
-            commodities=self._commodities.copy(),
-            coordinates=self._coordinates.copy(),
-            node_attributes=dict(self._node_attrs),
-            inventory=self._build_inventory_snapshot(date),
-            telemetry=self._build_telemetry_snapshot(date),
-            flows=dict(self._flows),
-            tags=self._tags.copy() if self._tags is not None else None,
-            distance_service=self._distance_service,
-        )
+        return self.graph.get_snapshot(date)
 
     @property
     def available_dates(self) -> pd.DatetimeIndex:
-        return self._timestamps
+        return self.graph.available_dates
+
+    @property
+    def graph(self) -> GraphData:
+        if self._graph is None:
+            raise ValueError("Data is not loaded. Call load_data() first.")
+        return self._graph
 
     @property
     def inventory_timeseries(self) -> pd.DataFrame:
-        return self._inventory_ts
+        if self.graph.inventory_ts is None:
+            return pd.DataFrame()
+        return self.graph.inventory_ts
 
     # ------------------------------------------------------------------
     # Source validation
@@ -280,62 +290,15 @@ class DataLoaderGraph:
             description="Aggregated hourly trip counts between stations",
         )
 
-    def _build_edges(self) -> pd.DataFrame:
-        temp_graph = GraphData(nodes=self._nodes, coordinates=self._coordinates)
+    def _build_edges(
+        self,
+        nodes: pd.DataFrame,
+        coordinates: pd.DataFrame,
+        distance_service: DistanceService,
+    ) -> pd.DataFrame:
+        temp_graph = GraphData(nodes=nodes, coordinates=coordinates)
         builder = EdgeBuilder(
             graph=temp_graph,
-            distance_service=self._distance_service,
+            distance_service=distance_service,
         )
-        return builder.build_complete_graph(node_ids=list(self._nodes["id"]))
-
-    # ------------------------------------------------------------------
-    # Temporal snapshots
-    # ------------------------------------------------------------------
-
-    def _build_inventory_snapshot(self, date: pd.Timestamp) -> pd.DataFrame:
-        idx = self._inventory_ts.index.get_indexer([date], method="nearest")[0]
-        ts = self._inventory_ts.index[idx]
-        quantities = self._inventory_ts.loc[ts]
-        return pd.DataFrame({
-            "node_id": quantities.index.tolist(),
-            "commodity_id": "bike",
-            "quantity": quantities.values.astype(int),
-        })
-
-    def _build_telemetry_snapshot(self, date: pd.Timestamp) -> pd.DataFrame | None:
-        if self._telemetry_ts.empty or "timestamp" not in self._telemetry_ts.columns:
-            return None
-
-        telemetry = self._telemetry_ts.copy()
-        telemetry["timestamp"] = pd.to_datetime(telemetry["timestamp"])
-        available = pd.DatetimeIndex(sorted(telemetry["timestamp"].dropna().unique()))
-        if len(available) == 0:
-            return None
-
-        idx = available.get_indexer([date], method="nearest")[0]
-        ts = available[idx]
-        snap = telemetry[telemetry["timestamp"] == ts].copy()
-        if snap.empty or "station_id" not in snap.columns:
-            return None
-
-        metric_columns = [
-            "num_bikes_available",
-            "num_ebikes_available",
-            "num_docks_available",
-            "num_docks_disabled",
-            "num_bikes_disabled",
-            "is_installed",
-            "is_renting",
-            "is_returning",
-        ]
-        present_metrics = [c for c in metric_columns if c in snap.columns]
-        if not present_metrics:
-            return None
-
-        normalized = snap.melt(
-            id_vars=["station_id", "timestamp"],
-            value_vars=present_metrics,
-            var_name="metric",
-            value_name="value",
-        ).rename(columns={"station_id": "node_id"})
-        return normalized.reset_index(drop=True)
+        return builder.build_complete_graph(node_ids=list(nodes["id"]))

@@ -739,8 +739,13 @@ class GraphQueryMixin:
             lines.append(f"  Demands: {len(self.demands)} rows")
         if self.inventory is not None:
             lines.append(f"  Inventory: {len(self.inventory)} rows")
+        if getattr(self, "inventory_ts", None) is not None:
+            inventory_ts = self.inventory_ts
+            lines.append(f"  Inventory TS: {inventory_ts.shape[0]}x{inventory_ts.shape[1]}")
         if self.telemetry is not None:
             lines.append(f"  Telemetry: {len(self.telemetry)} rows")
+        if getattr(self, "telemetry_ts", None) is not None:
+            lines.append(f"  Telemetry TS: {len(self.telemetry_ts)} rows")
         if self.tags is not None:
             lines.append(f"  Tags: {len(self.tags)} entries")
         

@@ -358,3 +358,36 @@ class TestGraphEnrichedFields:
         assert "station_info" in snap.node_attributes
         station_info = snap.node_attributes["station_info"]
         assert {"node_id", "name", "short_name"}.issubset(station_info.data.columns)
+
+
+class TestFullGraphAccess:
+
+    def test_loader_exposes_full_graph(self, loaded_graph_loader):
+        graph = loaded_graph_loader.graph
+        assert isinstance(graph, GraphData)
+        assert graph.inventory_ts is not None
+        assert graph.telemetry_ts is not None
+        assert graph.timestamps is not None
+
+    def test_graph_available_dates(self, loaded_graph_loader):
+        graph = loaded_graph_loader.graph
+        assert len(graph.available_dates) == 48
+        assert graph.available_dates.equals(loaded_graph_loader.available_dates)
+
+    def test_graph_get_snapshot_matches_loader_get_snapshot(self, loaded_graph_loader):
+        date = loaded_graph_loader.available_dates[5]
+        snap_from_loader = loaded_graph_loader.get_snapshot(date)
+        snap_from_graph = loaded_graph_loader.graph.get_snapshot(date)
+
+        assert snap_from_loader.inventory is not None
+        assert snap_from_graph.inventory is not None
+        assert snap_from_loader.telemetry is not None
+        assert snap_from_graph.telemetry is not None
+        pd.testing.assert_frame_equal(
+            snap_from_loader.inventory.sort_values("node_id").reset_index(drop=True),
+            snap_from_graph.inventory.sort_values("node_id").reset_index(drop=True),
+        )
+        pd.testing.assert_frame_equal(
+            snap_from_loader.telemetry.sort_values(["node_id", "metric"]).reset_index(drop=True),
+            snap_from_graph.telemetry.sort_values(["node_id", "metric"]).reset_index(drop=True),
+        )

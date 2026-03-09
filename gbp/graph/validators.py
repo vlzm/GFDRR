@@ -130,6 +130,7 @@ class GraphValidator:
         errors.extend(self._validate_flows_schema(graph))
         errors.extend(self._validate_demands_schema(graph))
         errors.extend(self._validate_inventory_schema(graph))
+        errors.extend(self._validate_inventory_ts_schema(graph))
         errors.extend(self._validate_telemetry_schema(graph))
         errors.extend(self._validate_tags_schema(graph))
         
@@ -393,6 +394,31 @@ class GraphValidator:
                 message=f"Missing required columns: {missing}"
             ))
         
+        return errors
+
+    def _validate_inventory_ts_schema(self, graph: GraphData) -> list[ValidationError]:
+        """Validate full inventory time-series schema."""
+        errors = []
+        inventory_ts = getattr(graph, "inventory_ts", None)
+        if inventory_ts is None:
+            return errors
+
+        if not isinstance(inventory_ts.index, pd.DatetimeIndex):
+            errors.append(ValidationError(
+                level="error",
+                category="schema",
+                entity="inventory_ts",
+                message="Index must be DatetimeIndex"
+            ))
+
+        if inventory_ts.shape[1] == 0:
+            errors.append(ValidationError(
+                level="warning",
+                category="schema",
+                entity="inventory_ts",
+                message="No node columns found in inventory_ts"
+            ))
+
         return errors
     
     def _validate_telemetry_schema(self, graph: GraphData) -> list[ValidationError]:

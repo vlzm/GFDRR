@@ -374,6 +374,9 @@ class GraphData:
     demands: pd.DataFrame | None = None
     inventory: pd.DataFrame | None = None
     telemetry: pd.DataFrame | None = None
+    inventory_ts: pd.DataFrame | None = None
+    telemetry_ts: pd.DataFrame | None = None
+    timestamps: pd.DatetimeIndex | None = None
     
     # === Tags (unified) ===
     tags: pd.DataFrame | None = None
@@ -455,6 +458,17 @@ class GraphData:
         if self.commodities is None:
             return set()
         return set(self.commodities["id"])
+
+    @property
+    def available_dates(self) -> pd.DatetimeIndex:
+        """Available timestamps for temporal snapshots."""
+        if self.timestamps is not None:
+            return self.timestamps
+        if self.inventory_ts is not None:
+            return pd.DatetimeIndex(self.inventory_ts.index)
+        if self.telemetry_ts is not None and "timestamp" in self.telemetry_ts.columns:
+            return pd.DatetimeIndex(sorted(pd.to_datetime(self.telemetry_ts["timestamp"]).dropna().unique()))
+        return pd.DatetimeIndex([])
     
     # =========================================================================
     # Registration Methods
@@ -475,6 +489,83 @@ class GraphData:
     def add_flows(self, flows_table: FlowsTable) -> None:
         """Add a flows table."""
         self.flows[flows_table.name] = flows_table
+
+    # =========================================================================
+    # Temporal snapshots
+    # =========================================================================
+
+    def get_snapshot(self, date: pd.Timestamp) -> GraphData:
+        """Return a single-timestamp snapshot from full temporal series."""
+        return GraphData(
+            nodes=self.nodes.copy(),
+            edges=self.edges.copy() if self.edges is not None else None,
+            resources=self.resources.copy() if self.resources is not None else None,
+            commodities=self.commodities.copy() if self.commodities is not None else None,
+            coordinates=self.coordinates.copy() if self.coordinates is not None else None,
+            node_attributes=dict(self.node_attributes),
+            edge_attributes=dict(self.edge_attributes),
+            flows=dict(self.flows),
+            demands=self.demands.copy() if self.demands is not None else None,
+            inventory=self._snapshot_inventory(date),
+            telemetry=self._snapshot_telemetry(date),
+            tags=self.tags.copy() if self.tags is not None else None,
+            distance_service=self.distance_service,
+        )
+
+    def _snapshot_inventory(self, date: pd.Timestamp) -> pd.DataFrame | None:
+        if self.inventory_ts is None:
+            return self.inventory.copy() if self.inventory is not None else None
+        if len(self.inventory_ts.index) == 0:
+            return None
+
+        idx = self.inventory_ts.index.get_indexer([date], method="nearest")[0]
+        ts = self.inventory_ts.index[idx]
+        quantities = self.inventory_ts.loc[ts]
+        return pd.DataFrame({
+            "node_id": quantities.index.tolist(),
+            "commodity_id": "bike",
+            "quantity": quantities.values.astype(int),
+        })
+
+    def _snapshot_telemetry(self, date: pd.Timestamp) -> pd.DataFrame | None:
+        if self.telemetry_ts is None:
+            return self.telemetry.copy() if self.telemetry is not None else None
+        if self.telemetry_ts.empty or "timestamp" not in self.telemetry_ts.columns:
+            return None
+
+        telemetry = self.telemetry_ts.copy()
+        telemetry["timestamp"] = pd.to_datetime(telemetry["timestamp"])
+        available = pd.DatetimeIndex(sorted(telemetry["timestamp"].dropna().unique()))
+        if len(available) == 0:
+            return None
+
+        idx = available.get_indexer([date], method="nearest")[0]
+        ts = available[idx]
+        snap = telemetry[telemetry["timestamp"] == ts].copy()
+        if snap.empty or "station_id" not in snap.columns:
+            return None
+
+        metric_columns = [
+            "num_bikes_available",
+            "num_ebikes_available",
+            "num_docks_available",
+            "num_docks_disabled",
+            "num_bikes_disabled",
+            "is_installed",
+            "is_renting",
+            "is_returning",
+        ]
+        present_metrics = [c for c in metric_columns if c in snap.columns]
+        if not present_metrics:
+            return None
+
+        normalized = snap.melt(
+            id_vars=["station_id", "timestamp"],
+            value_vars=present_metrics,
+            var_name="metric",
+            value_name="value",
+        ).rename(columns={"station_id": "node_id"})
+        return normalized.reset_index(drop=True)
     
     # =========================================================================
     # Info / Repr
@@ -490,10 +581,14 @@ class GraphData:
         if self.commodities is not None:
             parts.append(f"commodities={len(self.commodities)}")
         if self.node_attributes:
-            parts.append(f"node_attrs={len(self.node_attributes)}")
+            parts.append(f"node_attributes={len(self.node_attributes)}")
         if self.edge_attributes:
-            parts.append(f"edge_attrs={len(self.edge_attributes)}")
+            parts.append(f"edge_attributes={len(self.edge_attributes)}")
         if self.flows:
             parts.append(f"flows={len(self.flows)}")
+        if self.inventory_ts is not None:
+            parts.append(f"inventory_ts={self.inventory_ts.shape[0]}x{self.inventory_ts.shape[1]}")
+        if self.telemetry_ts is not None:
+            parts.append(f"telemetry_ts={len(self.telemetry_ts)}")
         
         return ", ".join(parts) + ")"
