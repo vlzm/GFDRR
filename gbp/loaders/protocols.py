@@ -1,7 +1,9 @@
 """Structural protocols for the loaders package.
 
-DataSourceProtocol — what any raw data source must expose.
-GraphLoaderProtocol — what any graph loader must expose.
+GenericSourceProtocol  — minimal interface for any data source.
+BikeShareSourceProtocol — bike-sharing specific: stations, depots, trips, etc.
+DataSourceProtocol     — backward-compatible alias for BikeShareSourceProtocol.
+GraphLoaderProtocol    — what any graph loader must expose.
 """
 
 from __future__ import annotations
@@ -14,8 +16,24 @@ if TYPE_CHECKING:
     from gbp.core.model import RawModelData, ResolvedModelData
 
 
-class DataSourceProtocol(Protocol):
-    """Raw (possibly temporal) data source — mock, CSV, DB, API, etc."""
+# ---------------------------------------------------------------------------
+# Generic (aspirational — for future domain-agnostic loaders)
+# ---------------------------------------------------------------------------
+
+class GenericSourceProtocol(Protocol):
+    """Minimal interface: any data source that can produce DataFrames."""
+
+    def load_data(self) -> None: ...
+
+    def get_dataframes(self) -> dict[str, pd.DataFrame]: ...
+
+
+# ---------------------------------------------------------------------------
+# Bike-sharing domain
+# ---------------------------------------------------------------------------
+
+class BikeShareSourceProtocol(Protocol):
+    """Bike-sharing data source — stations, depots, trips, telemetry."""
 
     df_stations: pd.DataFrame
     df_depots: pd.DataFrame
@@ -30,6 +48,14 @@ class DataSourceProtocol(Protocol):
     def load_data(self) -> None: ...
 
 
+DataSourceProtocol = BikeShareSourceProtocol
+"""Backward-compatible alias — existing code importing DataSourceProtocol keeps working."""
+
+
+# ---------------------------------------------------------------------------
+# Graph loader
+# ---------------------------------------------------------------------------
+
 class GraphLoaderProtocol(Protocol):
     """Builds ``gbp.core`` model tables from a data source."""
 
@@ -40,7 +66,7 @@ class GraphLoaderProtocol(Protocol):
     def resolved(self) -> ResolvedModelData: ...
 
     @property
-    def source(self) -> DataSourceProtocol: ...
+    def source(self) -> BikeShareSourceProtocol: ...
 
     @property
     def available_dates(self) -> pd.DatetimeIndex: ...

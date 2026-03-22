@@ -19,6 +19,7 @@ Usage::
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import pandas as pd
 import structlog
@@ -33,13 +34,17 @@ from .contracts import (
     ResourcesSourceSchema,
     StationsSourceSchema,
 )
-from .protocols import DataSourceProtocol
+from .protocols import BikeShareSourceProtocol
 
 log = structlog.get_logger()
 
 COMMODITY_CATEGORY = "working_bike"
 RESOURCE_CATEGORY = "rebalancing_truck"
 
+
+# ---------------------------------------------------------------------------
+# Geometry helpers
+# ---------------------------------------------------------------------------
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     rlat1, rlon1 = math.radians(lat1), math.radians(lon1)
@@ -65,12 +70,27 @@ def _pair_distance_km(
     return _haversine_km(lat1, lon1, lat2, lon2)
 
 
+# ---------------------------------------------------------------------------
+# Internal data carrier for intermediate entity results
+# ---------------------------------------------------------------------------
+
+class _EntityResult(NamedTuple):
+    """Intermediate result from ``_build_entities`` used by downstream builders."""
+    tables: dict[str, pd.DataFrame]
+    station_ids: list[str]
+    depot_ids: list[str]
+
+
+# ---------------------------------------------------------------------------
+# DataLoaderGraph
+# ---------------------------------------------------------------------------
+
 class DataLoaderGraph:
     """Build ``RawModelData`` from a ``DataSourceProtocol`` and run ``gbp.build.build_model``."""
 
     def __init__(
         self,
-        source: DataSourceProtocol,
+        source: BikeShareSourceProtocol,
         config: GraphLoaderConfig | None = None,
     ) -> None:
         self._source = source
@@ -114,12 +134,12 @@ class DataLoaderGraph:
         return self._source.timestamps
 
     @property
-    def source(self) -> DataSourceProtocol:
+    def source(self) -> BikeShareSourceProtocol:
         """Underlying data source (raw DataFrames, including non-core tables)."""
         return self._source
 
     # ------------------------------------------------------------------
-    # Internal
+    # Internal — validation
     # ------------------------------------------------------------------
 
     def _validate_source(self) -> None:
@@ -128,7 +148,33 @@ class DataLoaderGraph:
         ResourcesSourceSchema.validate(self._source.df_resources)
         self._log.debug("source_validated")
 
+    # ------------------------------------------------------------------
+    # Internal — raw model assembly (orchestrator + focused builders)
+    # ------------------------------------------------------------------
+
     def _build_raw_model(self) -> RawModelData:
+        """Assemble ``RawModelData`` from source DataFrames."""
+        temporal = self._build_temporal()
+        entities = self._build_entities()
+        behavior = self._build_behavior(entities)
+        edge_data = self._build_edges(entities) if self._config.build_edges else {}
+        flow_and_ops = self._build_flow_and_operations(entities)
+        costs = self._build_costs(temporal)
+        resources = self._build_resources(entities)
+
+        all_tables = {
+            **temporal,
+            **entities.tables,
+            **behavior,
+            **edge_data,
+            **flow_and_ops,
+            **costs,
+            **resources,
+        }
+        return RawModelData(**{k: v for k, v in all_tables.items() if v is not None})
+
+    def _build_temporal(self) -> dict[str, pd.DataFrame]:
+        """Planning horizon, segments, and daily periods from source timestamps."""
         ts = self._source.timestamps
         start_d = pd.Timestamp(ts[0]).normalize().date()
         end_d = (pd.Timestamp(ts[-1]).normalize() + pd.Timedelta(days=1)).date()
@@ -142,242 +188,257 @@ class DataLoaderGraph:
         for i, day in enumerate(unique_days):
             d0 = day.date()
             d1 = (day + pd.Timedelta(days=1)).date()
-            period_rows.append(
-                {
-                    "period_id": f"p{i}",
-                    "planning_horizon_id": "h1",
-                    "segment_index": 0,
-                    "period_index": i,
-                    "period_type": PeriodType.DAY.value,
-                    "start_date": d0,
-                    "end_date": d1,
-                },
-            )
-        periods = pd.DataFrame(period_rows)
+            period_rows.append({
+                "period_id": f"p{i}",
+                "planning_horizon_id": "h1",
+                "segment_index": 0,
+                "period_index": i,
+                "period_type": PeriodType.DAY.value,
+                "start_date": d0,
+                "end_date": d1,
+            })
 
-        planning_horizon = pd.DataFrame(
-            {
+        return {
+            "planning_horizon": pd.DataFrame({
                 "planning_horizon_id": ["h1"],
                 "name": ["mock_horizon"],
                 "start_date": [start_d],
                 "end_date": [end_d],
-            },
-        )
-        planning_horizon_segments = pd.DataFrame(
-            {
+            }),
+            "planning_horizon_segments": pd.DataFrame({
                 "planning_horizon_id": ["h1"],
                 "segment_index": [0],
                 "start_date": [start_d],
                 "end_date": [end_d],
                 "period_type": PeriodType.DAY.value,
-            },
-        )
+            }),
+            "periods": pd.DataFrame(period_rows),
+        }
 
+    def _build_entities(self) -> _EntityResult:
+        """Facilities, commodity/resource categories, and L3 items from source."""
         stations = self._source.df_stations
         depots = self._source.df_depots
 
-        fac_stations = pd.DataFrame(
-            {
-                "facility_id": stations["node_id"].astype(str),
-                "facility_type": "station",
-                "name": stations["name"] if "name" in stations.columns else stations["node_id"].astype(str),
-                "lat": stations["lat"].astype(float),
-                "lon": stations["lon"].astype(float),
-            },
-        )
-        fac_depots = pd.DataFrame(
-            {
-                "facility_id": depots["node_id"].astype(str),
-                "facility_type": "depot",
-                "name": depots["node_id"].astype(str),
-                "lat": depots["lat"].astype(float),
-                "lon": depots["lon"].astype(float),
-            },
-        )
+        fac_stations = pd.DataFrame({
+            "facility_id": stations["node_id"].astype(str),
+            "facility_type": "station",
+            "name": stations["name"] if "name" in stations.columns else stations["node_id"].astype(str),
+            "lat": stations["lat"].astype(float),
+            "lon": stations["lon"].astype(float),
+        })
+        fac_depots = pd.DataFrame({
+            "facility_id": depots["node_id"].astype(str),
+            "facility_type": "depot",
+            "name": depots["node_id"].astype(str),
+            "lat": depots["lat"].astype(float),
+            "lon": depots["lon"].astype(float),
+        })
         facilities = pd.concat([fac_depots, fac_stations], ignore_index=True)
 
-        station_ids = list(fac_stations["facility_id"])
-        depot_ids = list(fac_depots["facility_id"])
+        tables: dict[str, pd.DataFrame] = {
+            "facilities": facilities,
+            "commodity_categories": pd.DataFrame({
+                "commodity_category_id": [COMMODITY_CATEGORY],
+                "name": ["Working bike"],
+                "unit": ["bike"],
+            }),
+            "resource_categories": pd.DataFrame({
+                "resource_category_id": [RESOURCE_CATEGORY],
+                "name": ["Rebalancing truck"],
+                "base_capacity": [float(self._source.df_resources["capacity"].max())],
+                "capacity_unit": ["bike"],
+            }),
+            "commodities": pd.DataFrame({
+                "commodity_id": [COMMODITY_CATEGORY],
+                "commodity_category": [COMMODITY_CATEGORY],
+                "description": [""],
+            }),
+        }
+        return _EntityResult(
+            tables=tables,
+            station_ids=list(fac_stations["facility_id"]),
+            depot_ids=list(fac_depots["facility_id"]),
+        )
 
+    def _build_behavior(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
+        """Facility roles, operations, and edge generation rules."""
         role_rows: list[dict] = []
         op_rows: list[dict] = []
-        for did in depot_ids:
-            role_rows.extend(
-                [
-                    {"facility_id": did, "role": FacilityRole.STORAGE.value},
-                    {"facility_id": did, "role": FacilityRole.TRANSSHIPMENT.value},
-                ],
-            )
-            op_rows.extend(
-                [
-                    {"facility_id": did, "operation_type": "receiving", "enabled": True},
-                    {"facility_id": did, "operation_type": "storage", "enabled": True},
-                    {"facility_id": did, "operation_type": "dispatch", "enabled": True},
-                ],
-            )
-        for sid in station_ids:
-            role_rows.extend(
-                [
-                    {"facility_id": sid, "role": FacilityRole.SINK.value},
-                    {"facility_id": sid, "role": FacilityRole.STORAGE.value},
-                    {"facility_id": sid, "role": FacilityRole.SOURCE.value},
-                ],
-            )
-            op_rows.extend(
-                [
-                    {"facility_id": sid, "operation_type": "receiving", "enabled": True},
-                    {"facility_id": sid, "operation_type": "storage", "enabled": True},
-                    {"facility_id": sid, "operation_type": "dispatch", "enabled": True},
-                ],
-            )
-        facility_roles = pd.DataFrame(role_rows)
-        facility_operations = pd.DataFrame(op_rows)
+
+        for did in entities.depot_ids:
+            role_rows.extend([
+                {"facility_id": did, "role": FacilityRole.STORAGE.value},
+                {"facility_id": did, "role": FacilityRole.TRANSSHIPMENT.value},
+            ])
+            op_rows.extend([
+                {"facility_id": did, "operation_type": "receiving", "enabled": True},
+                {"facility_id": did, "operation_type": "storage", "enabled": True},
+                {"facility_id": did, "operation_type": "dispatch", "enabled": True},
+            ])
+
+        for sid in entities.station_ids:
+            role_rows.extend([
+                {"facility_id": sid, "role": FacilityRole.SINK.value},
+                {"facility_id": sid, "role": FacilityRole.STORAGE.value},
+                {"facility_id": sid, "role": FacilityRole.SOURCE.value},
+            ])
+            op_rows.extend([
+                {"facility_id": sid, "operation_type": "receiving", "enabled": True},
+                {"facility_id": sid, "operation_type": "storage", "enabled": True},
+                {"facility_id": sid, "operation_type": "dispatch", "enabled": True},
+            ])
 
         if self._config.build_edges:
-            edge_rules = pd.DataFrame(
-                {
-                    "source_type": ["depot", "station", "station", "depot"],
-                    "target_type": ["station", "depot", "station", "depot"],
-                    "commodity_category": [COMMODITY_CATEGORY] * 4,
-                    "modal_type": [ModalType.ROAD.value] * 4,
-                    "enabled": [True] * 4,
-                },
-            )
+            edge_rules = pd.DataFrame({
+                "source_type": ["depot", "station", "station", "depot"],
+                "target_type": ["station", "depot", "station", "depot"],
+                "commodity_category": [COMMODITY_CATEGORY] * 4,
+                "modal_type": [ModalType.ROAD.value] * 4,
+                "enabled": [True] * 4,
+            })
         else:
-            edge_rules = pd.DataFrame(
-                {
-                    "source_type": pd.Series(dtype="string"),
-                    "target_type": pd.Series(dtype="string"),
-                    "commodity_category": pd.Series(dtype="string"),
-                    "modal_type": pd.Series(dtype="string"),
-                    "enabled": pd.Series(dtype="bool"),
-                },
-            )
+            edge_rules = pd.DataFrame({
+                "source_type": pd.Series(dtype="string"),
+                "target_type": pd.Series(dtype="string"),
+                "commodity_category": pd.Series(dtype="string"),
+                "modal_type": pd.Series(dtype="string"),
+                "enabled": pd.Series(dtype="bool"),
+            })
 
+        return {
+            "facility_roles": pd.DataFrame(role_rows),
+            "facility_operations": pd.DataFrame(op_rows),
+            "edge_rules": edge_rules,
+        }
+
+    def _build_edges(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
+        """All-pairs edges with distance computation and commodity mapping."""
+        facilities = entities.tables["facilities"]
         latlon = {
             str(r["facility_id"]): (float(r["lat"]), float(r["lon"]))
             for _, r in facilities.iterrows()
         }
         ids = list(facilities["facility_id"].astype(str))
+        speed = self._config.default_speed_kmh
 
-        edges_df: pd.DataFrame | None = None
-        ec_df: pd.DataFrame | None = None
-        if self._config.build_edges:
-            edge_records: list[dict] = []
-            ec_records: list[dict] = []
-            speed = self._config.default_speed_kmh
-            for i, a in enumerate(ids):
-                la0, lo0 = latlon[a]
-                for j, b in enumerate(ids):
-                    if i == j:
-                        continue
-                    la1, lo1 = latlon[b]
-                    dkm = _pair_distance_km(la0, lo0, la1, lo1, self._config.distance_backend)
-                    lt_h = dkm / speed if speed > 0 else 0.0
-                    edge_records.append(
-                        {
-                            "source_id": a,
-                            "target_id": b,
-                            "modal_type": ModalType.ROAD.value,
-                            "distance": dkm,
-                            "distance_unit": "km",
-                            "lead_time_hours": max(lt_h, 1e-6),
-                            "reliability": None,
-                        },
-                    )
-                    ec_records.append(
-                        {
-                            "source_id": a,
-                            "target_id": b,
-                            "modal_type": ModalType.ROAD.value,
-                            "commodity_category": COMMODITY_CATEGORY,
-                            "enabled": True,
-                            "capacity_consumption": 1.0,
-                        },
-                    )
-            edges_df = pd.DataFrame(edge_records)
-            ec_df = pd.DataFrame(ec_records)
+        edge_records: list[dict] = []
+        ec_records: list[dict] = []
+        for i, a in enumerate(ids):
+            la0, lo0 = latlon[a]
+            for j, b in enumerate(ids):
+                if i == j:
+                    continue
+                la1, lo1 = latlon[b]
+                dkm = _pair_distance_km(la0, lo0, la1, lo1, self._config.distance_backend)
+                lt_h = dkm / speed if speed > 0 else 0.0
+                edge_records.append({
+                    "source_id": a,
+                    "target_id": b,
+                    "modal_type": ModalType.ROAD.value,
+                    "distance": dkm,
+                    "distance_unit": "km",
+                    "lead_time_hours": max(lt_h, 1e-6),
+                    "reliability": None,
+                })
+                ec_records.append({
+                    "source_id": a,
+                    "target_id": b,
+                    "modal_type": ModalType.ROAD.value,
+                    "commodity_category": COMMODITY_CATEGORY,
+                    "enabled": True,
+                    "capacity_consumption": 1.0,
+                })
+
+        return {
+            "edges": pd.DataFrame(edge_records),
+            "edge_commodities": pd.DataFrame(ec_records),
+        }
+
+    def _build_flow_and_operations(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
+        """Initial inventory and storage operation capacities from source."""
+        station_ids = entities.station_ids
+        stations = self._source.df_stations
 
         inv0 = self._source.df_inventory_ts.iloc[0]
-        inventory_initial = pd.DataFrame(
-            {
-                "facility_id": station_ids,
-                "commodity_category": COMMODITY_CATEGORY,
-                "quantity": [float(inv0[sid]) for sid in station_ids],
-                "quantity_unit": ["bike"] * len(station_ids),
-            },
-        )
+        inventory_initial = pd.DataFrame({
+            "facility_id": station_ids,
+            "commodity_category": COMMODITY_CATEGORY,
+            "quantity": [float(inv0[sid]) for sid in station_ids],
+            "quantity_unit": ["bike"] * len(station_ids),
+        })
 
         op_cap_rows = []
         for _, r in stations.iterrows():
-            op_cap_rows.append(
-                {
-                    "facility_id": str(r["node_id"]),
-                    "operation_type": "storage",
-                    "commodity_category": COMMODITY_CATEGORY,
-                    "capacity": float(r["inventory_capacity"]),
-                    "capacity_unit": "bike",
-                },
-            )
-        operation_capacities = pd.DataFrame(op_cap_rows)
+            op_cap_rows.append({
+                "facility_id": str(r["node_id"]),
+                "operation_type": "storage",
+                "commodity_category": COMMODITY_CATEGORY,
+                "capacity": float(r["inventory_capacity"]),
+                "capacity_unit": "bike",
+            })
 
+        return {
+            "inventory_initial": inventory_initial,
+            "operation_capacities": pd.DataFrame(op_cap_rows),
+        }
+
+    def _build_costs(self, temporal: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame | None]:
+        """Operation costs (station visit/handling) and resource costs (truck rates)."""
+        periods = temporal["periods"]
         horizon_dates = [p["start_date"] for _, p in periods.iterrows()]
+
         cost_rows: list[dict] = []
         costs = self._source.df_station_costs
         if costs is not None and not costs.empty:
             for d in horizon_dates:
                 for _, r in costs.iterrows():
                     sid = str(r["station_id"])
-                    cost_rows.append(
-                        {
-                            "facility_id": sid,
-                            "operation_type": "visit",
-                            "commodity_category": COMMODITY_CATEGORY,
-                            "date": d,
-                            "cost_per_unit": float(r["fixed_cost_per_visit"]),
-                            "cost_unit": "USD",
-                        },
-                    )
-                    cost_rows.append(
-                        {
-                            "facility_id": sid,
-                            "operation_type": "handling",
-                            "commodity_category": COMMODITY_CATEGORY,
-                            "date": d,
-                            "cost_per_unit": float(r["cost_per_bike_moved"]),
-                            "cost_unit": "USD",
-                        },
-                    )
+                    cost_rows.append({
+                        "facility_id": sid,
+                        "operation_type": "visit",
+                        "commodity_category": COMMODITY_CATEGORY,
+                        "date": d,
+                        "cost_per_unit": float(r["fixed_cost_per_visit"]),
+                        "cost_unit": "USD",
+                    })
+                    cost_rows.append({
+                        "facility_id": sid,
+                        "operation_type": "handling",
+                        "commodity_category": COMMODITY_CATEGORY,
+                        "date": d,
+                        "cost_per_unit": float(r["cost_per_bike_moved"]),
+                        "cost_unit": "USD",
+                    })
         operation_costs = pd.DataFrame(cost_rows) if cost_rows else None
 
-        home_depot = depot_ids[0]
-        n_trucks = len(self._source.df_resources)
-        resource_fleet = pd.DataFrame(
-            {
-                "facility_id": [home_depot],
-                "resource_category": [RESOURCE_CATEGORY],
-                "count": [n_trucks],
-            },
-        )
+        return {"operation_costs": operation_costs}
+
+    def _build_resources(self, entities: _EntityResult) -> dict[str, pd.DataFrame | None]:
+        """Resource fleet, L3 resources, compatibility tables, and truck cost rates."""
+        home_depot = entities.depot_ids[0]
+
+        resource_fleet = pd.DataFrame({
+            "facility_id": [home_depot],
+            "resource_category": [RESOURCE_CATEGORY],
+            "count": [len(self._source.df_resources)],
+        })
 
         resource_rows = []
         for _, r in self._source.df_resources.iterrows():
-            resource_rows.append(
-                {
-                    "resource_id": str(r["resource_id"]),
-                    "resource_category": RESOURCE_CATEGORY,
-                    "home_facility_id": home_depot,
-                    "capacity_override": float(r["capacity"]),
-                    "description": None,
-                },
-            )
-        resources_l3 = pd.DataFrame(resource_rows)
+            resource_rows.append({
+                "resource_id": str(r["resource_id"]),
+                "resource_category": RESOURCE_CATEGORY,
+                "home_facility_id": home_depot,
+                "capacity_override": float(r["capacity"]),
+                "description": None,
+            })
 
         rcost_rows: list[dict] = []
         tr = self._source.df_truck_rates
         if tr is not None and not tr.empty:
             for _, r in tr.iterrows():
-                rcost_rows.append(
+                rcost_rows.extend([
                     {
                         "resource_category": RESOURCE_CATEGORY,
                         "facility_id": home_depot,
@@ -386,8 +447,6 @@ class DataLoaderGraph:
                         "value": float(r["cost_per_km"]),
                         "value_unit": "USD/km",
                     },
-                )
-                rcost_rows.append(
                     {
                         "resource_category": RESOURCE_CATEGORY,
                         "facility_id": home_depot,
@@ -396,8 +455,6 @@ class DataLoaderGraph:
                         "value": float(r["cost_per_hour"]),
                         "value_unit": "USD/h",
                     },
-                )
-                rcost_rows.append(
                     {
                         "resource_category": RESOURCE_CATEGORY,
                         "facility_id": home_depot,
@@ -406,59 +463,20 @@ class DataLoaderGraph:
                         "value": float(r["fixed_dispatch_cost"]),
                         "value_unit": "USD",
                     },
-                )
-        resource_costs = pd.DataFrame(rcost_rows) if rcost_rows else None
+                ])
 
-        return RawModelData(
-            facilities=facilities,
-            commodity_categories=pd.DataFrame(
-                {
-                    "commodity_category_id": [COMMODITY_CATEGORY],
-                    "name": ["Working bike"],
-                    "unit": ["bike"],
-                },
-            ),
-            resource_categories=pd.DataFrame(
-                {
-                    "resource_category_id": [RESOURCE_CATEGORY],
-                    "name": ["Rebalancing truck"],
-                    "base_capacity": [float(self._source.df_resources["capacity"].max())],
-                    "capacity_unit": ["bike"],
-                },
-            ),
-            planning_horizon=planning_horizon,
-            planning_horizon_segments=planning_horizon_segments,
-            periods=periods,
-            facility_roles=facility_roles,
-            facility_operations=facility_operations,
-            edge_rules=edge_rules,
-            resources=resources_l3,
-            commodities=pd.DataFrame(
-                {
-                    "commodity_id": [COMMODITY_CATEGORY],
-                    "commodity_category": [COMMODITY_CATEGORY],
-                    "description": [""],
-                },
-            ),
-            resource_commodity_compatibility=pd.DataFrame(
-                {
-                    "resource_category": [RESOURCE_CATEGORY],
-                    "commodity_category": [COMMODITY_CATEGORY],
-                    "enabled": [True],
-                },
-            ),
-            resource_modal_compatibility=pd.DataFrame(
-                {
-                    "resource_category": [RESOURCE_CATEGORY],
-                    "modal_type": [ModalType.ROAD.value],
-                    "enabled": [True],
-                },
-            ),
-            resource_fleet=resource_fleet,
-            edges=edges_df,
-            edge_commodities=ec_df,
-            inventory_initial=inventory_initial,
-            operation_capacities=operation_capacities,
-            operation_costs=operation_costs,
-            resource_costs=resource_costs,
-        )
+        return {
+            "resource_fleet": resource_fleet,
+            "resources": pd.DataFrame(resource_rows),
+            "resource_commodity_compatibility": pd.DataFrame({
+                "resource_category": [RESOURCE_CATEGORY],
+                "commodity_category": [COMMODITY_CATEGORY],
+                "enabled": [True],
+            }),
+            "resource_modal_compatibility": pd.DataFrame({
+                "resource_category": [RESOURCE_CATEGORY],
+                "modal_type": [ModalType.ROAD.value],
+                "enabled": [True],
+            }),
+            "resource_costs": pd.DataFrame(rcost_rows) if rcost_rows else None,
+        }

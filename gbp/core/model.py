@@ -1,4 +1,30 @@
-"""Container contracts for raw and resolved tabular model data."""
+"""Container contracts for raw and resolved tabular model data.
+
+Tables are organized into logical groups for navigation while keeping
+a flat dataclass layout for backward compatibility.  Every group is
+accessible as a ``dict[str, pd.DataFrame]`` via a property:
+
+    >>> raw.entity_tables      # facilities, commodity_categories, ...
+    >>> raw.temporal_tables     # planning_horizon, segments, periods
+    >>> raw.flow_tables         # demand, supply, inventory_initial, ...
+    >>> raw.table_summary()     # quick overview of what's populated
+
+Groups (in reading order):
+    entity       — what exists in the network (3 required + 2 optional)
+    temporal     — planning horizon and period grid (3 required)
+    behavior     — roles, operations, availability, edge rules (4, 3 req.)
+    edge         — edge identity and attributes (5 optional)
+    flow_data    — demand, supply, inventory (4 optional)
+    transformation — N:M commodity conversion (3 optional)
+    resource     — fleet, compatibility, availability (4 optional)
+    parameters   — costs, capacities, pricing (6 optional)
+    hierarchy    — facility + commodity hierarchies (8 optional)
+    scenario     — run configuration and overrides (4 optional)
+
+ResolvedModelData adds:
+    generated    — edge_lead_time_resolved, transformation_resolved, fleet_capacity
+    spines       — assembled attribute spines per entity type
+"""
 
 from __future__ import annotations
 
@@ -59,6 +85,10 @@ from gbp.core.schemas import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _required_column_names(row_model: type[BaseModel]) -> list[str]:
     """Return field names that must appear as DataFrame columns."""
     return [name for name, fi in row_model.model_fields.items() if fi.is_required()]
@@ -76,45 +106,111 @@ def _validate_dataframe_columns(
     return []
 
 
+def _collect_group(obj: object, field_names: list[str]) -> dict[str, pd.DataFrame]:
+    """Return {name: df} for non-None DataFrames in *field_names*."""
+    result: dict[str, pd.DataFrame] = {}
+    for name in field_names:
+        val = getattr(obj, name, None)
+        if val is not None and isinstance(val, pd.DataFrame):
+            result[name] = val
+    return result
+
+
+def _table_summary(obj: object, groups: dict[str, list[str]], required: frozenset[str]) -> str:
+    """Human-readable overview: group → table (rows) or '—'."""
+    lines: list[str] = []
+    cls_name = type(obj).__name__
+    lines.append(f"{cls_name} — table summary")
+    lines.append("=" * len(lines[0]))
+
+    for group_name, field_names in groups.items():
+        lines.append(f"\n  {group_name}")
+        lines.append(f"  {'─' * len(group_name)}")
+        for fname in field_names:
+            val = getattr(obj, fname, None)
+            if val is not None and isinstance(val, pd.DataFrame):
+                tag = " (required)" if fname in required else ""
+                lines.append(f"    {fname}: {len(val)} rows{tag}")
+            elif fname in required:
+                lines.append(f"    {fname}: ✗ MISSING (required)")
+            else:
+                lines.append(f"    {fname}: —")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# RawModelData
+# ---------------------------------------------------------------------------
+
 @dataclass
 class RawModelData:
-    """Raw input tables keyed by ``date`` where time-varying (pre-resolution)."""
+    """Raw input tables keyed by ``date`` where time-varying (pre-resolution).
 
-    facilities: pd.DataFrame
-    commodity_categories: pd.DataFrame
-    resource_categories: pd.DataFrame
-    planning_horizon: pd.DataFrame
-    planning_horizon_segments: pd.DataFrame
-    periods: pd.DataFrame
-    facility_roles: pd.DataFrame
-    facility_operations: pd.DataFrame
-    edge_rules: pd.DataFrame
+    Tables are organized into logical groups — see module docstring.
+    Access groups via properties (``entity_tables``, ``temporal_tables``, etc.)
+    or call ``table_summary()`` for a quick overview.
 
-    resources: pd.DataFrame | None = None
-    commodities: pd.DataFrame | None = None
+    **Field ordering note:** Fields are grouped by domain rather than by
+    required/optional.  Because Python dataclasses require all fields with
+    defaults to come after those without, some required fields (marked
+    ``# required``) use ``= None`` as a syntactic workaround.  The
+    ``_REQUIRED`` set and ``validate()`` remain the real enforcement — always
+    call ``validate()`` after construction.  All existing code uses keyword
+    arguments, so this reordering does not break any call site.
+    """
+
+    # ── entity: what exists in the network ────────────────────────────
+    facilities: pd.DataFrame                          # required
+    commodity_categories: pd.DataFrame                # required
+    resource_categories: pd.DataFrame                 # required
+    commodities: pd.DataFrame | None = None           # L3 optional
+    resources: pd.DataFrame | None = None             # L3 optional
+
+    # ── temporal: planning horizon and period grid ────────────────────
+    planning_horizon: pd.DataFrame = None             # required  # type: ignore[assignment]
+    planning_horizon_segments: pd.DataFrame = None    # required  # type: ignore[assignment]
+    periods: pd.DataFrame = None                      # required  # type: ignore[assignment]
+
+    # ── behavior: roles, operations, rules ────────────────────────────
+    facility_roles: pd.DataFrame = None               # required  # type: ignore[assignment]
+    facility_operations: pd.DataFrame = None          # required  # type: ignore[assignment]
     facility_availability: pd.DataFrame | None = None
-    transformations: pd.DataFrame | None = None
-    transformation_inputs: pd.DataFrame | None = None
-    transformation_outputs: pd.DataFrame | None = None
-    resource_commodity_compatibility: pd.DataFrame | None = None
-    resource_modal_compatibility: pd.DataFrame | None = None
-    resource_fleet: pd.DataFrame | None = None
-    resource_availability: pd.DataFrame | None = None
+    edge_rules: pd.DataFrame = None                   # required  # type: ignore[assignment]
+
+    # ── edge: identity and attributes ─────────────────────────────────
     edges: pd.DataFrame | None = None
     edge_commodities: pd.DataFrame | None = None
     edge_capacities: pd.DataFrame | None = None
     edge_commodity_capacities: pd.DataFrame | None = None
     edge_vehicles: pd.DataFrame | None = None
+
+    # ── flow data: demand, supply, inventory ──────────────────────────
     demand: pd.DataFrame | None = None
     supply: pd.DataFrame | None = None
     inventory_initial: pd.DataFrame | None = None
     inventory_in_transit: pd.DataFrame | None = None
+
+    # ── transformation: N:M commodity conversion ──────────────────────
+    transformations: pd.DataFrame | None = None
+    transformation_inputs: pd.DataFrame | None = None
+    transformation_outputs: pd.DataFrame | None = None
+
+    # ── resource: fleet, compatibility, availability ──────────────────
+    resource_commodity_compatibility: pd.DataFrame | None = None
+    resource_modal_compatibility: pd.DataFrame | None = None
+    resource_fleet: pd.DataFrame | None = None
+    resource_availability: pd.DataFrame | None = None
+
+    # ── parameters: costs, capacities, pricing ────────────────────────
     operation_capacities: pd.DataFrame | None = None
     operation_costs: pd.DataFrame | None = None
     transport_costs: pd.DataFrame | None = None
     resource_costs: pd.DataFrame | None = None
     commodity_sell_price_tiers: pd.DataFrame | None = None
     commodity_procurement_cost_tiers: pd.DataFrame | None = None
+
+    # ── hierarchy: facility + commodity trees ─────────────────────────
     facility_hierarchy_types: pd.DataFrame | None = None
     facility_hierarchy_levels: pd.DataFrame | None = None
     facility_hierarchy_nodes: pd.DataFrame | None = None
@@ -123,31 +219,71 @@ class RawModelData:
     commodity_hierarchy_levels: pd.DataFrame | None = None
     commodity_hierarchy_nodes: pd.DataFrame | None = None
     commodity_hierarchy_memberships: pd.DataFrame | None = None
+
+    # ── scenario: run configuration ───────────────────────────────────
     scenarios: pd.DataFrame | None = None
     scenario_edge_rules: pd.DataFrame | None = None
     scenario_manual_edges: pd.DataFrame | None = None
     scenario_parameter_overrides: pd.DataFrame | None = None
 
+    # ── class-level metadata ──────────────────────────────────────────
+
+    _GROUPS: ClassVar[dict[str, list[str]]] = {
+        "entity": [
+            "facilities", "commodity_categories", "resource_categories",
+            "commodities", "resources",
+        ],
+        "temporal": [
+            "planning_horizon", "planning_horizon_segments", "periods",
+        ],
+        "behavior": [
+            "facility_roles", "facility_operations",
+            "facility_availability", "edge_rules",
+        ],
+        "edge": [
+            "edges", "edge_commodities", "edge_capacities",
+            "edge_commodity_capacities", "edge_vehicles",
+        ],
+        "flow_data": [
+            "demand", "supply", "inventory_initial", "inventory_in_transit",
+        ],
+        "transformation": [
+            "transformations", "transformation_inputs", "transformation_outputs",
+        ],
+        "resource": [
+            "resource_commodity_compatibility", "resource_modal_compatibility",
+            "resource_fleet", "resource_availability",
+        ],
+        "parameters": [
+            "operation_capacities", "operation_costs", "transport_costs",
+            "resource_costs", "commodity_sell_price_tiers",
+            "commodity_procurement_cost_tiers",
+        ],
+        "hierarchy": [
+            "facility_hierarchy_types", "facility_hierarchy_levels",
+            "facility_hierarchy_nodes", "facility_hierarchy_memberships",
+            "commodity_hierarchy_types", "commodity_hierarchy_levels",
+            "commodity_hierarchy_nodes", "commodity_hierarchy_memberships",
+        ],
+        "scenario": [
+            "scenarios", "scenario_edge_rules",
+            "scenario_manual_edges", "scenario_parameter_overrides",
+        ],
+    }
+
     _SCHEMAS: ClassVar[dict[str, type[BaseModel]]] = {
         "facilities": Facility,
         "commodity_categories": CommodityCategory,
         "resource_categories": ResourceCategory,
+        "commodities": Commodity,
+        "resources": Resource,
         "planning_horizon": PlanningHorizon,
         "planning_horizon_segments": PlanningHorizonSegment,
         "periods": Period,
         "facility_roles": FacilityRoleRecord,
         "facility_operations": FacilityOperation,
-        "edge_rules": EdgeRule,
-        "resources": Resource,
-        "commodities": Commodity,
         "facility_availability": FacilityAvailability,
-        "transformations": Transformation,
-        "transformation_inputs": TransformationInput,
-        "transformation_outputs": TransformationOutput,
-        "resource_commodity_compatibility": ResourceCommodityCompatibility,
-        "resource_modal_compatibility": ResourceModalCompatibility,
-        "resource_fleet": ResourceFleet,
-        "resource_availability": ResourceAvailability,
+        "edge_rules": EdgeRule,
         "edges": Edge,
         "edge_commodities": EdgeCommodity,
         "edge_capacities": EdgeCapacity,
@@ -157,6 +293,13 @@ class RawModelData:
         "supply": Supply,
         "inventory_initial": InventoryInitial,
         "inventory_in_transit": InventoryInTransit,
+        "transformations": Transformation,
+        "transformation_inputs": TransformationInput,
+        "transformation_outputs": TransformationOutput,
+        "resource_commodity_compatibility": ResourceCommodityCompatibility,
+        "resource_modal_compatibility": ResourceModalCompatibility,
+        "resource_fleet": ResourceFleet,
+        "resource_availability": ResourceAvailability,
         "operation_capacities": OperationCapacity,
         "operation_costs": OperationCost,
         "transport_costs": TransportCost,
@@ -177,19 +320,94 @@ class RawModelData:
         "scenario_parameter_overrides": ScenarioParameterOverrides,
     }
 
-    _REQUIRED: ClassVar[frozenset[str]] = frozenset(
-        {
-            "facilities",
-            "commodity_categories",
-            "resource_categories",
-            "planning_horizon",
-            "planning_horizon_segments",
-            "periods",
-            "facility_roles",
-            "facility_operations",
-            "edge_rules",
-        }
-    )
+    _REQUIRED: ClassVar[frozenset[str]] = frozenset({
+        "facilities",
+        "commodity_categories",
+        "resource_categories",
+        "planning_horizon",
+        "planning_horizon_segments",
+        "periods",
+        "facility_roles",
+        "facility_operations",
+        "edge_rules",
+    })
+
+    # ── group access properties ───────────────────────────────────────
+
+    @property
+    def entity_tables(self) -> dict[str, pd.DataFrame]:
+        """Core entities: facilities, commodity/resource categories, L3 items."""
+        return _collect_group(self, self._GROUPS["entity"])
+
+    @property
+    def temporal_tables(self) -> dict[str, pd.DataFrame]:
+        """Planning horizon, segments, and generated periods."""
+        return _collect_group(self, self._GROUPS["temporal"])
+
+    @property
+    def behavior_tables(self) -> dict[str, pd.DataFrame]:
+        """Facility roles, operations, availability, edge generation rules."""
+        return _collect_group(self, self._GROUPS["behavior"])
+
+    @property
+    def edge_tables(self) -> dict[str, pd.DataFrame]:
+        """Edge identity, commodities, capacities, vehicles."""
+        return _collect_group(self, self._GROUPS["edge"])
+
+    @property
+    def flow_tables(self) -> dict[str, pd.DataFrame]:
+        """Demand, supply, and inventory data."""
+        return _collect_group(self, self._GROUPS["flow_data"])
+
+    @property
+    def transformation_tables(self) -> dict[str, pd.DataFrame]:
+        """N:M commodity transformation definitions."""
+        return _collect_group(self, self._GROUPS["transformation"])
+
+    @property
+    def resource_tables(self) -> dict[str, pd.DataFrame]:
+        """Resource fleet, compatibility, and availability."""
+        return _collect_group(self, self._GROUPS["resource"])
+
+    @property
+    def parameter_tables(self) -> dict[str, pd.DataFrame]:
+        """Costs, capacities, and pricing tiers."""
+        return _collect_group(self, self._GROUPS["parameters"])
+
+    @property
+    def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
+        """Facility and commodity hierarchy trees."""
+        return _collect_group(self, self._GROUPS["hierarchy"])
+
+    @property
+    def scenario_tables(self) -> dict[str, pd.DataFrame]:
+        """Scenario configuration and overrides."""
+        return _collect_group(self, self._GROUPS["scenario"])
+
+    # ── navigation helpers ────────────────────────────────────────────
+
+    @property
+    def populated_tables(self) -> dict[str, pd.DataFrame]:
+        """All non-None DataFrames currently set on this instance."""
+        result: dict[str, pd.DataFrame] = {}
+        for f in fields(self):
+            if f.name.startswith("_"):
+                continue
+            val = getattr(self, f.name)
+            if isinstance(val, pd.DataFrame):
+                result[f.name] = val
+        return result
+
+    def table_summary(self) -> str:
+        """Human-readable overview of populated tables, grouped logically.
+
+        Usage::
+
+            print(raw.table_summary())
+        """
+        return _table_summary(self, self._GROUPS, self._REQUIRED)
+
+    # ── validation ────────────────────────────────────────────────────
 
     def validate(self) -> None:
         """Check required tables exist and columns match row schemas."""
@@ -210,48 +428,74 @@ class RawModelData:
             raise ValueError("RawModelData validation failed: " + "; ".join(errors))
 
 
+# ---------------------------------------------------------------------------
+# ResolvedModelData
+# ---------------------------------------------------------------------------
+
 @dataclass
 class ResolvedModelData:
-    """Tables after time resolution (``period_id``) plus generated artifacts."""
+    """Tables after time resolution (``period_id``) plus generated artifacts.
 
+    Inherits the same logical groups as ``RawModelData`` and adds:
+
+    - **generated**: ``edge_lead_time_resolved``, ``transformation_resolved``,
+      ``fleet_capacity`` — produced by ``build_model()``
+    - **spines**: assembled attribute DataFrames per entity type
+
+    See ``RawModelData`` docstring for field-ordering rationale.
+    """
+
+    # ── entity ────────────────────────────────────────────────────────
     facilities: pd.DataFrame
     commodity_categories: pd.DataFrame
     resource_categories: pd.DataFrame
-    planning_horizon: pd.DataFrame
-    planning_horizon_segments: pd.DataFrame
-    periods: pd.DataFrame
-    facility_roles: pd.DataFrame
-    facility_operations: pd.DataFrame
-    edge_rules: pd.DataFrame
-
-    resources: pd.DataFrame | None = None
     commodities: pd.DataFrame | None = None
+    resources: pd.DataFrame | None = None
+
+    # ── temporal ──────────────────────────────────────────────────────
+    planning_horizon: pd.DataFrame = None             # type: ignore[assignment]
+    planning_horizon_segments: pd.DataFrame = None    # type: ignore[assignment]
+    periods: pd.DataFrame = None                      # type: ignore[assignment]
+
+    # ── behavior ──────────────────────────────────────────────────────
+    facility_roles: pd.DataFrame = None               # type: ignore[assignment]
+    facility_operations: pd.DataFrame = None          # type: ignore[assignment]
     facility_availability: pd.DataFrame | None = None
-    transformations: pd.DataFrame | None = None
-    transformation_inputs: pd.DataFrame | None = None
-    transformation_outputs: pd.DataFrame | None = None
-    resource_commodity_compatibility: pd.DataFrame | None = None
-    resource_modal_compatibility: pd.DataFrame | None = None
-    resource_fleet: pd.DataFrame | None = None
-    resource_availability: pd.DataFrame | None = None
+    edge_rules: pd.DataFrame = None                   # type: ignore[assignment]
+
+    # ── edge ──────────────────────────────────────────────────────────
     edges: pd.DataFrame | None = None
     edge_commodities: pd.DataFrame | None = None
     edge_capacities: pd.DataFrame | None = None
     edge_commodity_capacities: pd.DataFrame | None = None
     edge_vehicles: pd.DataFrame | None = None
-    edge_lead_time_resolved: pd.DataFrame | None = None
-    transformation_resolved: pd.DataFrame | None = None
-    fleet_capacity: pd.DataFrame | None = None
+
+    # ── flow data ─────────────────────────────────────────────────────
     demand: pd.DataFrame | None = None
     supply: pd.DataFrame | None = None
     inventory_initial: pd.DataFrame | None = None
     inventory_in_transit: pd.DataFrame | None = None
+
+    # ── transformation ────────────────────────────────────────────────
+    transformations: pd.DataFrame | None = None
+    transformation_inputs: pd.DataFrame | None = None
+    transformation_outputs: pd.DataFrame | None = None
+
+    # ── resource ──────────────────────────────────────────────────────
+    resource_commodity_compatibility: pd.DataFrame | None = None
+    resource_modal_compatibility: pd.DataFrame | None = None
+    resource_fleet: pd.DataFrame | None = None
+    resource_availability: pd.DataFrame | None = None
+
+    # ── parameters ────────────────────────────────────────────────────
     operation_capacities: pd.DataFrame | None = None
     operation_costs: pd.DataFrame | None = None
     transport_costs: pd.DataFrame | None = None
     resource_costs: pd.DataFrame | None = None
     commodity_sell_price_tiers: pd.DataFrame | None = None
     commodity_procurement_cost_tiers: pd.DataFrame | None = None
+
+    # ── hierarchy ─────────────────────────────────────────────────────
     facility_hierarchy_types: pd.DataFrame | None = None
     facility_hierarchy_levels: pd.DataFrame | None = None
     facility_hierarchy_nodes: pd.DataFrame | None = None
@@ -260,14 +504,32 @@ class ResolvedModelData:
     commodity_hierarchy_levels: pd.DataFrame | None = None
     commodity_hierarchy_nodes: pd.DataFrame | None = None
     commodity_hierarchy_memberships: pd.DataFrame | None = None
+
+    # ── scenario ──────────────────────────────────────────────────────
     scenarios: pd.DataFrame | None = None
     scenario_edge_rules: pd.DataFrame | None = None
     scenario_manual_edges: pd.DataFrame | None = None
     scenario_parameter_overrides: pd.DataFrame | None = None
 
+    # ── generated by build_model() ────────────────────────────────────
+    edge_lead_time_resolved: pd.DataFrame | None = None
+    transformation_resolved: pd.DataFrame | None = None
+    fleet_capacity: pd.DataFrame | None = None
+
+    # ── assembled spines ──────────────────────────────────────────────
     facility_spines: dict[str, pd.DataFrame] | None = None
     edge_spines: dict[str, pd.DataFrame] | None = None
     resource_spines: dict[str, pd.DataFrame] | None = None
+
+    # ── class-level metadata ──────────────────────────────────────────
+
+    _GROUPS: ClassVar[dict[str, list[str]]] = {
+        **RawModelData._GROUPS,
+        "generated": [
+            "edge_lead_time_resolved", "transformation_resolved",
+            "fleet_capacity",
+        ],
+    }
 
     _SCHEMAS: ClassVar[dict[str, type[BaseModel]]] = {
         **RawModelData._SCHEMAS,
@@ -275,6 +537,93 @@ class ResolvedModelData:
     }
 
     _REQUIRED: ClassVar[frozenset[str]] = RawModelData._REQUIRED
+
+    # ── group access properties (same as Raw + generated + spines) ────
+
+    @property
+    def entity_tables(self) -> dict[str, pd.DataFrame]:
+        """Core entities: facilities, commodity/resource categories, L3 items."""
+        return _collect_group(self, self._GROUPS["entity"])
+
+    @property
+    def temporal_tables(self) -> dict[str, pd.DataFrame]:
+        """Planning horizon, segments, and generated periods."""
+        return _collect_group(self, self._GROUPS["temporal"])
+
+    @property
+    def behavior_tables(self) -> dict[str, pd.DataFrame]:
+        """Facility roles, operations, availability, edge generation rules."""
+        return _collect_group(self, self._GROUPS["behavior"])
+
+    @property
+    def edge_tables(self) -> dict[str, pd.DataFrame]:
+        """Edge identity, commodities, capacities, vehicles."""
+        return _collect_group(self, self._GROUPS["edge"])
+
+    @property
+    def flow_tables(self) -> dict[str, pd.DataFrame]:
+        """Demand, supply, and inventory data."""
+        return _collect_group(self, self._GROUPS["flow_data"])
+
+    @property
+    def transformation_tables(self) -> dict[str, pd.DataFrame]:
+        """N:M commodity transformation definitions."""
+        return _collect_group(self, self._GROUPS["transformation"])
+
+    @property
+    def resource_tables(self) -> dict[str, pd.DataFrame]:
+        """Resource fleet, compatibility, and availability."""
+        return _collect_group(self, self._GROUPS["resource"])
+
+    @property
+    def parameter_tables(self) -> dict[str, pd.DataFrame]:
+        """Costs, capacities, and pricing tiers."""
+        return _collect_group(self, self._GROUPS["parameters"])
+
+    @property
+    def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
+        """Facility and commodity hierarchy trees."""
+        return _collect_group(self, self._GROUPS["hierarchy"])
+
+    @property
+    def scenario_tables(self) -> dict[str, pd.DataFrame]:
+        """Scenario configuration and overrides."""
+        return _collect_group(self, self._GROUPS["scenario"])
+
+    @property
+    def generated_tables(self) -> dict[str, pd.DataFrame]:
+        """Tables produced by build_model(): lead times, transformations, fleet."""
+        return _collect_group(self, self._GROUPS["generated"])
+
+    @property
+    def spine_tables(self) -> dict[str, dict[str, pd.DataFrame]]:
+        """Assembled attribute spines per entity type."""
+        result: dict[str, dict[str, pd.DataFrame]] = {}
+        for name in ("facility_spines", "edge_spines", "resource_spines"):
+            val = getattr(self, name, None)
+            if val is not None:
+                result[name] = val
+        return result
+
+    # ── navigation helpers ────────────────────────────────────────────
+
+    @property
+    def populated_tables(self) -> dict[str, pd.DataFrame]:
+        """All non-None DataFrames currently set on this instance."""
+        result: dict[str, pd.DataFrame] = {}
+        for f in fields(self):
+            if f.name.startswith("_"):
+                continue
+            val = getattr(self, f.name)
+            if isinstance(val, pd.DataFrame):
+                result[f.name] = val
+        return result
+
+    def table_summary(self) -> str:
+        """Human-readable overview of populated tables, grouped logically."""
+        return _table_summary(self, self._GROUPS, self._REQUIRED)
+
+    # ── validation ────────────────────────────────────────────────────
 
     def validate(self) -> None:
         """Check required tables exist and columns match row schemas."""
@@ -288,9 +637,7 @@ class ResolvedModelData:
                     errors.append(f"{f.name} is required but is None")
                     continue
                 errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
-            else:
-                if df is None:
-                    continue
+            elif df is not None:
                 errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
 
         if errors:

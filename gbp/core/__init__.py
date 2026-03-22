@@ -12,6 +12,7 @@ from gbp.core.attributes import (
     get_resource_attribute_specs,
     plan_merges,
 )
+from gbp.core.factory import make_raw_model
 from gbp.core.enums import (
     AttributeKind,
     FacilityRole,
@@ -121,6 +122,7 @@ __all__ = [
     "FacilityType",
     "InventoryInitial",
     "InventoryInTransit",
+    "make_raw_model",
     "ModalType",
     "OperationCapacity",
     "OperationCost",
