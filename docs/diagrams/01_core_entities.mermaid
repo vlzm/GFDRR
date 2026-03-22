@@ -1,0 +1,55 @@
+---
+title: "1. Core Entities — The Three Pillars"
+---
+
+flowchart TB
+    subgraph Legend["Legend"]
+        direction LR
+        L1["L2 — Domain-agnostic"]
+        L2["L3 — Domain-specific<br/>(optional)"]
+    end
+
+    subgraph Facility["🏭 Facility — WHERE commodity resides"]
+        F_id["facility_id (PK)"]
+        F_type["facility_type"]
+        F_name["name, lat, lon"]
+        F_roles["Roles: SOURCE | SINK | STORAGE | TRANSSHIPMENT"]
+        F_ops["Operations: RECEIVING | STORAGE | DISPATCH | ..."]
+    end
+
+    subgraph Commodity["📦 Commodity — WHAT moves through the network"]
+        CC["CommodityCategory (L2)<br/>───────────<br/>commodity_category_id (PK)<br/>name, unit"]
+        C["Commodity (L3, optional)<br/>───────────<br/>commodity_id (PK)<br/>commodity_category (FK)"]
+        CC -->|"instance of"| C
+    end
+
+    subgraph Resource["🚚 Resource — HOW commodity is moved"]
+        RC["ResourceCategory (L2)<br/>───────────<br/>resource_category_id (PK)<br/>base_capacity, capacity_unit"]
+        R["Resource (L3, optional)<br/>───────────<br/>resource_id (PK)<br/>resource_category (FK)<br/>home_facility_id (FK)"]
+        RC -->|"instance of"| R
+    end
+
+    subgraph Edge["🔗 Edge — CONNECTION between facilities"]
+        E_pk["PK: source_id × target_id × modal_type"]
+        E_modal["ModalType: ROAD | RAIL | SEA | PIPELINE | AIR | DIGITAL"]
+        E_attrs["distance, lead_time_hours, reliability"]
+    end
+
+    Facility ---|"source_id"| Edge
+    Facility ---|"target_id"| Edge
+    Edge ---|"carries"| Commodity
+    Edge ---|"uses"| Resource
+    Resource ---|"home_facility_id"| Facility
+
+    %% Styling
+    classDef facility fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef commodity fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef resource fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef edge fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef legend fill:#f5f5f5,stroke:#9e9e9e
+
+    class Facility facility
+    class Commodity commodity
+    class Resource resource
+    class Edge edge
+    class Legend legend

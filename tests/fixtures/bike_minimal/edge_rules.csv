@@ -1,0 +1,3 @@
+source_type,target_type,commodity_category,modal_type,enabled
+depot,station,working_bike,road,True
+depot,station,working_bike,road,True

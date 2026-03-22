@@ -1,0 +1,42 @@
+---
+title: "4. Multi-Commodity Flow & Transformation"
+---
+
+flowchart TB
+    subgraph FlowModel["Multi-Commodity Flow Model"]
+        direction LR
+        FlowVar["Flow variable:<br/>flow[edge, commodity_category, period]"]
+        Conservation["Conservation per commodity per node:<br/>SOURCE: outflow ≤ supply<br/>SINK: inflow ≥ demand<br/>TRANSSHIPMENT: inflow = outflow<br/>STORAGE: inventory[t] = inventory[t-1] + in - out"]
+        SharedCap["Shared edge capacity:<br/>Σ flow[cc] × capacity_consumption[cc] ≤ capacity"]
+    end
+
+    subgraph TransformationModel["Transformation — N:M Commodity Conversion"]
+        direction TB
+        T_def["Transformation<br/>───────────<br/>transformation_id, facility_id<br/>operation_type, loss_rate, batch_size"]
+        T_in["TransformationInput<br/>───────────<br/>transformation_id<br/>commodity_category, ratio"]
+        T_out["TransformationOutput<br/>───────────<br/>transformation_id<br/>commodity_category, ratio"]
+        T_def --- T_in
+        T_def --- T_out
+    end
+
+    subgraph Examples["Transformation Examples"]
+        direction TB
+        Ex1["1→1 Conversion<br/>───────────<br/>Filling Plant:<br/>BULK_GAS ×1.0 → CYLINDERS ×85.0<br/>loss: 2%"]
+        Ex2["1→N Splitting<br/>───────────<br/>Refinery:<br/>CRUDE ×1.0 → GASOLINE ×0.45<br/>+ DIESEL ×0.30 + KEROSENE ×0.15<br/>loss: 10%"]
+        Ex3["N→1 Blending<br/>───────────<br/>Blender:<br/>REAGENT_A ×0.6 + REAGENT_B ×0.4<br/>→ PRODUCT ×1.0<br/>loss: 2%"]
+    end
+
+    subgraph EdgeCommodity["Edge-Commodity Filtering"]
+        EC["edge_commodity table<br/>───────────<br/>Each edge has a set of<br/>allowed commodity_categories<br/>+ capacity_consumption coefficient"]
+        EC_ex["Example:<br/>Terminal→FP (ROAD): only BULK_GAS<br/>FP→Depot (ROAD): only CYLINDERS<br/>FP→Customer (ROAD): only CYLINDERS"]
+    end
+
+    classDef flow fill:#e3f2fd,stroke:#1565c0
+    classDef transform fill:#fff3e0,stroke:#e65100
+    classDef example fill:#f5f5f5,stroke:#616161
+    classDef edgecomm fill:#e8f5e9,stroke:#2e7d32
+
+    class FlowModel flow
+    class TransformationModel transform
+    class Examples example
+    class EdgeCommodity edgecomm

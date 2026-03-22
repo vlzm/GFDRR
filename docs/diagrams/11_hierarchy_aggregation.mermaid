@@ -1,0 +1,70 @@
+---
+title: "11. Hierarchy & Aggregation"
+---
+
+flowchart TB
+    subgraph Pattern["Hierarchy Pattern (same for Facility & Commodity)"]
+        HType["HierarchyType<br/>───────────<br/>hierarchy_type_id (PK)<br/>name: 'geographic'"]
+        HLevel["HierarchyLevel<br/>───────────<br/>hierarchy_type_id (FK)<br/>level_index: 0, 1, 2<br/>level_name: 'country', 'region', 'city'"]
+        HNode["HierarchyNode<br/>───────────<br/>node_id (PK)<br/>hierarchy_type_id (FK)<br/>level_index<br/>parent_node_id (FK, null = root)"]
+        HMember["Membership<br/>───────────<br/>entity_id (FK)<br/>hierarchy_type_id (FK)<br/>node_id (FK)"]
+        HType --> HLevel
+        HType --> HNode
+        HNode --> HMember
+    end
+
+    subgraph FacilityHierarchy["Facility Hierarchy Example (Gas Logistics)"]
+        direction TB
+        France["France<br/>(level 0: country)"]
+        IDF["Île-de-France<br/>(level 1: region)"]
+        PACA["PACA<br/>(level 1: region)"]
+        Paris["Paris<br/>(level 2: city)"]
+        Marseille["Marseille<br/>(level 2: city)"]
+        
+        France --> IDF
+        France --> PACA
+        IDF --> Paris
+        PACA --> Marseille
+        
+        Paris -.->|"members"| D1F["Depot Paris-1<br/>Depot Paris-2<br/>Customer-01..10"]
+        Marseille -.->|"members"| D2F["Terminal Marseille<br/>Depot Marseille-1<br/>Customer-11..20"]
+    end
+
+    subgraph CommodityHierarchy["Commodity Hierarchy Example"]
+        direction TB
+        Gas["Gas<br/>(level 0)"]
+        Bulk["Bulk<br/>(level 1)"]
+        Packaged["Packaged<br/>(level 1)"]
+        GPL["GPL"]
+        GNL["GNL"]
+        Cylinders["Cylinders"]
+        
+        Gas --> Bulk
+        Gas --> Packaged
+        Bulk --> GPL
+        Bulk --> GNL
+        Packaged --> Cylinders
+    end
+
+    subgraph Aggregation["Aggregation Use Cases"]
+        PreSolve["Pre-Solve Aggregation<br/>───────────<br/>Facilities in region → super-node<br/>Demand summed, capacity summed<br/>Intra-region edges removed<br/>Inter-region edges kept"]
+        PostSolve["Post-Solve Disaggregation<br/>───────────<br/>Regional flows → specific routes<br/>Proportional allocation"]
+        Decomposition["Decomposition<br/>───────────<br/>Master problem at top level<br/>Sub-problems per region<br/>(Benders, Dantzig-Wolfe)"]
+        Reporting["Reporting<br/>───────────<br/>GROUP BY at any level:<br/>demand by region, load by unit,<br/>consumption by product group"]
+    end
+
+    subgraph ScenarioConfig["Scenario Configuration"]
+        SC["scenario<br/>───────────<br/>facility_hierarchy_type: 'geographic'<br/>facility_aggregation_level: 1 (region)<br/>commodity_hierarchy_type: 'product_group'<br/>commodity_aggregation_level: 0 (top)"]
+    end
+
+    classDef pattern fill:#e3f2fd,stroke:#1565c0
+    classDef fachier fill:#c8e6c9,stroke:#2e7d32
+    classDef comhier fill:#fff3e0,stroke:#e65100
+    classDef agg fill:#f3e5f5,stroke:#7b1fa2
+    classDef scenario fill:#fce4ec,stroke:#c2185b
+
+    class Pattern pattern
+    class FacilityHierarchy fachier
+    class CommodityHierarchy comhier
+    class Aggregation agg
+    class ScenarioConfig scenario

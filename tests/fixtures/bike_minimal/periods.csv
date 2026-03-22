@@ -1,0 +1,4 @@
+period_id,planning_horizon_id,segment_index,period_index,period_type,start_date,end_date
+p0,h1,0,0,day,2025-01-01,2025-01-02
+p1,h1,0,1,day,2025-01-02,2025-01-03
+p2,h1,0,2,day,2025-01-03,2025-01-04

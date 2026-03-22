@@ -1,0 +1,53 @@
+---
+title: "2. Facility — Type, Operations, Roles"
+---
+
+flowchart TB
+    subgraph ThreeLayers["Three Orthogonal Dimensions of a Facility"]
+        direction TB
+
+        subgraph FType["FacilityType — WHAT it is (physical)"]
+            FT["STATION | DEPOT | MAINTENANCE_HUB<br/>(domain-specific, L3)"]
+        end
+
+        subgraph FOps["Operations — WHAT it CAN DO (parameters)"]
+            OP["RECEIVING | STORAGE | DISPATCH | HANDLING | REPAIR<br/>Each has its own cost & capacity"]
+        end
+
+        subgraph FRoles["FacilityRole — HOW it behaves in the network (semantics)"]
+            SOURCE["SOURCE<br/>Introduces commodity into network<br/>Associated data: supply"]
+            SINK["SINK<br/>Consumes/removes commodity<br/>Associated data: demand"]
+            STORAGE["STORAGE<br/>Holds commodity over time<br/>Associated data: inventory"]
+            TRANSSHIPMENT["TRANSSHIPMENT<br/>Redirects commodity forward<br/>No production, no consumption"]
+        end
+    end
+
+    subgraph Derivation["Role Derivation Logic"]
+        D1["1. Start with DEFAULT_ROLES<br/>based on FacilityType"]
+        D2["2. Adjust by Operations<br/>(no STORAGE op → remove STORAGE role)"]
+        D3["3. Apply manual overrides<br/>(optional)"]
+        D1 --> D2 --> D3
+    end
+
+    subgraph Example["Gas Logistics Example"]
+        direction LR
+        Terminal["Terminal<br/>─────────<br/>Type: TERMINAL<br/>Ops: RECEIVING, STORAGE,<br/>HANDLING, DISPATCH<br/>Roles: SOURCE, STORAGE"]
+        FillingPlant["Filling Plant<br/>─────────<br/>Type: FILLING_PLANT<br/>Ops: RECEIVING, STORAGE,<br/>FILLING, HANDLING, DISPATCH<br/>Roles: TRANSSHIPMENT, STORAGE"]
+        Depot["Depot<br/>─────────<br/>Type: DEPOT<br/>Ops: RECEIVING, STORAGE,<br/>HANDLING, DISPATCH<br/>Roles: TRANSSHIPMENT, STORAGE"]
+        Customer["Customer<br/>─────────<br/>Type: CUSTOMER<br/>Ops: RECEIVING<br/>Roles: SINK"]
+    end
+
+    FType -->|"determines default"| FRoles
+    FOps -->|"adjusts"| FRoles
+
+    classDef typeBox fill:#e3f2fd,stroke:#1565c0
+    classDef opsBox fill:#fff3e0,stroke:#e65100
+    classDef roleBox fill:#e8f5e9,stroke:#2e7d32
+    classDef derivation fill:#fce4ec,stroke:#c2185b
+    classDef example fill:#f5f5f5,stroke:#616161
+
+    class FType typeBox
+    class FOps opsBox
+    class FRoles roleBox
+    class Derivation derivation
+    class Example example

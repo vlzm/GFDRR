@@ -86,4 +86,6 @@ warn_unused_ignores = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Default norecursedirs includes "build", which skips tests/unit/build; override explicitly.
+norecursedirs = [".git", ".tox", "dist", "venv", ".venv", "__pycache__", "*.egg", ".eggs", "node_modules"]
 addopts = "-v --cov=src --cov-report=term-missing"

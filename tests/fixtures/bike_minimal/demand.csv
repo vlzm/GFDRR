@@ -1,0 +1,4 @@
+facility_id,commodity_category,date,quantity,quantity_unit
+s1,working_bike,2025-01-01,1.0,bike
+s1,working_bike,2025-01-02,2.0,bike
+s2,working_bike,2025-01-01,3.0,bike

@@ -1,0 +1,61 @@
+---
+title: "6. Edge Model — Multi-Modal Edges with Attributes"
+---
+
+flowchart TB
+    subgraph Identity["Edge Identity"]
+        PK["PK: source_id × target_id × modal_type<br/>───────────<br/>Two facilities can have MULTIPLE edges<br/>with different modal_types"]
+        Modal["ModalType:<br/>ROAD | RAIL | SEA | PIPELINE | AIR | DIGITAL"]
+    end
+
+    subgraph EdgeTables["Edge Data Tables"]
+        direction TB
+
+        ET_edge["edge<br/>───────────<br/>source_id, target_id, modal_type (PK)<br/>distance, distance_unit<br/>lead_time_hours<br/>reliability (nullable)"]
+
+        ET_commodity["edge_commodity<br/>───────────<br/>edge (FK) + commodity_category<br/>enabled: bool<br/>capacity_consumption: float<br/>(units of shared capacity per 1 unit of commodity)"]
+
+        ET_capacity["edge_capacity<br/>───────────<br/>edge (FK) + date<br/>capacity (shared, all commodities)<br/>capacity_unit"]
+
+        ET_comm_cap["edge_commodity_capacity<br/>───────────<br/>edge (FK) + commodity_category + date<br/>min_shipment (nullable, LP-compatible)<br/>max_shipment, shipment_unit"]
+
+        ET_vehicle["edge_vehicle<br/>───────────<br/>edge (FK) + resource_category<br/>vehicle_capacity, vehicle_capacity_unit<br/>max_vehicles_per_period (nullable)"]
+
+        ET_leadtime["edge_lead_time_resolved (GENERATED)<br/>───────────<br/>edge (FK) + period_id<br/>lead_time_periods: int<br/>arrival_period_id (nullable = beyond horizon)"]
+    end
+
+    subgraph LeadTimeResolution["Lead Time Resolution"]
+        LT_raw["Raw: lead_time_hours = 48h"]
+        LT_day["DAY period (24h):<br/>lead_time_periods = 2"]
+        LT_week["WEEK period (168h):<br/>lead_time_periods = 0"]
+        LT_raw --> LT_day
+        LT_raw --> LT_week
+        LT_note["In multi-resolution planning,<br/>lead_time_periods depends on<br/>departure period type"]
+    end
+
+    subgraph SharedCapacity["Shared Capacity with Mixed Units"]
+        SC1["Edge capacity: 20 tons"]
+        SC2["BULK_GAS: capacity_consumption = 1.0<br/>(1 ton GAS = 1 ton capacity)"]
+        SC3["CYLINDERS: capacity_consumption = 0.012<br/>(1 cylinder = 0.012 tons capacity)"]
+        SC4["Constraint: Σ flow[cc] × consumption[cc] ≤ 20"]
+    end
+
+    subgraph EdgeRules["Edge Construction"]
+        Rules["edge_rules<br/>───────────<br/>source_type × target_type<br/>commodity_category (nullable = all)<br/>modal_type (nullable = all)<br/>enabled: bool"]
+        Manual["scenario_manual_edges<br/>───────────<br/>Explicit source_id × target_id<br/>pairs for overrides"]
+        Builder["build_edges()<br/>───────────<br/>Cross-join facilities by rules<br/>+ manual pairs<br/>+ distance matrix"]
+        Rules --> Builder
+        Manual --> Builder
+    end
+
+    classDef identity fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef tables fill:#e3f2fd,stroke:#1565c0
+    classDef leadtime fill:#fff3e0,stroke:#e65100
+    classDef capacity fill:#e8f5e9,stroke:#2e7d32
+    classDef rules fill:#fce4ec,stroke:#c2185b
+
+    class Identity identity
+    class EdgeTables tables
+    class LeadTimeResolution leadtime
+    class SharedCapacity capacity
+    class EdgeRules rules

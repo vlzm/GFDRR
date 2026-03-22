@@ -96,6 +96,7 @@ data/
 *.parquet
 *.csv
 !tests/fixtures/*.csv
+!tests/fixtures/**/*.csv
 
 # Logs
 logs/
