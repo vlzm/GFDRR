@@ -28,11 +28,13 @@ ResolvedModelData adds:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import ClassVar
 
 import pandas as pd
 from pydantic import BaseModel
+
+from gbp.core.attributes.registry import AttributeRegistry
 
 from gbp.core.schemas import (
     Commodity,
@@ -226,7 +228,12 @@ class RawModelData:
     scenario_manual_edges: pd.DataFrame | None = None
     scenario_parameter_overrides: pd.DataFrame | None = None
 
+    # ── parametric attribute system ───────────────────────────────────
+    attributes: AttributeRegistry = field(default_factory=AttributeRegistry)
+
     # ── class-level metadata ──────────────────────────────────────────
+
+    _NON_TABLE_FIELDS: ClassVar[frozenset[str]] = frozenset({"attributes"})
 
     _GROUPS: ClassVar[dict[str, list[str]]] = {
         "entity": [
@@ -371,8 +378,10 @@ class RawModelData:
 
     @property
     def parameter_tables(self) -> dict[str, pd.DataFrame]:
-        """Costs, capacities, and pricing tiers."""
-        return _collect_group(self, self._GROUPS["parameters"])
+        """Costs, capacities, and pricing tiers (fixed fields + registry)."""
+        result = _collect_group(self, self._GROUPS["parameters"])
+        result.update(self.attributes.to_dict())
+        return result
 
     @property
     def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
@@ -391,11 +400,12 @@ class RawModelData:
         """All non-None DataFrames currently set on this instance."""
         result: dict[str, pd.DataFrame] = {}
         for f in fields(self):
-            if f.name.startswith("_"):
+            if f.name.startswith("_") or f.name in self._NON_TABLE_FIELDS:
                 continue
             val = getattr(self, f.name)
             if isinstance(val, pd.DataFrame):
                 result[f.name] = val
+        result.update(self.attributes.to_dict())
         return result
 
     def table_summary(self) -> str:
@@ -405,7 +415,12 @@ class RawModelData:
 
             print(raw.table_summary())
         """
-        return _table_summary(self, self._GROUPS, self._REQUIRED)
+        base = _table_summary(self, self._GROUPS, self._REQUIRED)
+        if self.attributes:
+            base += "\n\n  parameters (via AttributeRegistry)\n"
+            base += f"  {'─' * 36}\n"
+            base += self.attributes.summary()
+        return base
 
     # ── validation ────────────────────────────────────────────────────
 
@@ -521,7 +536,12 @@ class ResolvedModelData:
     edge_spines: dict[str, pd.DataFrame] | None = None
     resource_spines: dict[str, pd.DataFrame] | None = None
 
+    # ── parametric attribute system ───────────────────────────────────
+    attributes: AttributeRegistry = field(default_factory=AttributeRegistry)
+
     # ── class-level metadata ──────────────────────────────────────────
+
+    _NON_TABLE_FIELDS: ClassVar[frozenset[str]] = frozenset({"attributes"})
 
     _GROUPS: ClassVar[dict[str, list[str]]] = {
         **RawModelData._GROUPS,
@@ -577,8 +597,10 @@ class ResolvedModelData:
 
     @property
     def parameter_tables(self) -> dict[str, pd.DataFrame]:
-        """Costs, capacities, and pricing tiers."""
-        return _collect_group(self, self._GROUPS["parameters"])
+        """Costs, capacities, and pricing tiers (fixed fields + registry)."""
+        result = _collect_group(self, self._GROUPS["parameters"])
+        result.update(self.attributes.to_dict())
+        return result
 
     @property
     def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
@@ -612,16 +634,22 @@ class ResolvedModelData:
         """All non-None DataFrames currently set on this instance."""
         result: dict[str, pd.DataFrame] = {}
         for f in fields(self):
-            if f.name.startswith("_"):
+            if f.name.startswith("_") or f.name in self._NON_TABLE_FIELDS:
                 continue
             val = getattr(self, f.name)
             if isinstance(val, pd.DataFrame):
                 result[f.name] = val
+        result.update(self.attributes.to_dict())
         return result
 
     def table_summary(self) -> str:
         """Human-readable overview of populated tables, grouped logically."""
-        return _table_summary(self, self._GROUPS, self._REQUIRED)
+        base = _table_summary(self, self._GROUPS, self._REQUIRED)
+        if self.attributes:
+            base += "\n\n  parameters (via AttributeRegistry)\n"
+            base += f"  {'─' * 36}\n"
+            base += self.attributes.summary()
+        return base
 
     # ── validation ────────────────────────────────────────────────────
 

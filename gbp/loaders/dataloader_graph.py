@@ -25,7 +25,8 @@ import pandas as pd
 import structlog
 
 from gbp.build.pipeline import build_model
-from gbp.core.enums import FacilityRole, ModalType, PeriodType
+from gbp.core.attributes.registry import AttributeRegistry
+from gbp.core.enums import AttributeKind, FacilityRole, ModalType, PeriodType
 from gbp.core.model import RawModelData, ResolvedModelData
 
 from .contracts import (
@@ -158,9 +159,12 @@ class DataLoaderGraph:
         entities = self._build_entities()
         behavior = self._build_behavior(entities)
         edge_data = self._build_edges(entities) if self._config.build_edges else {}
-        flow_and_ops = self._build_flow_and_operations(entities)
-        costs = self._build_costs(temporal)
         resources = self._build_resources(entities)
+
+        registry = AttributeRegistry()
+        flow_and_ops = self._build_flow_and_operations(entities, registry)
+        self._register_costs(registry, temporal)
+        resource_costs = self._build_resource_costs(entities)
 
         all_tables = {
             **temporal,
@@ -168,10 +172,14 @@ class DataLoaderGraph:
             **behavior,
             **edge_data,
             **flow_and_ops,
-            **costs,
             **resources,
         }
-        return RawModelData(**{k: v for k, v in all_tables.items() if v is not None})
+        if resource_costs is not None:
+            all_tables["resource_costs"] = resource_costs
+        return RawModelData(
+            **{k: v for k, v in all_tables.items() if v is not None},
+            attributes=registry,
+        )
 
     def _build_temporal(self) -> dict[str, pd.DataFrame]:
         """Planning horizon, segments, and daily periods from source timestamps."""
@@ -355,7 +363,11 @@ class DataLoaderGraph:
             "edge_commodities": pd.DataFrame(ec_records),
         }
 
-    def _build_flow_and_operations(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
+    def _build_flow_and_operations(
+        self,
+        entities: _EntityResult,
+        registry: AttributeRegistry,
+    ) -> dict[str, pd.DataFrame]:
         """Initial inventory and storage operation capacities from source."""
         station_ids = entities.station_ids
         stations = self._source.df_stations
@@ -378,13 +390,28 @@ class DataLoaderGraph:
                 "capacity_unit": "bike",
             })
 
+        op_cap_df = pd.DataFrame(op_cap_rows)
+        registry.register(
+            name="operation_capacity",
+            data=op_cap_df,
+            entity_type="facility",
+            kind=AttributeKind.CAPACITY,
+            grain=("facility_id", "operation_type", "commodity_category"),
+            value_column="capacity",
+            aggregation="min",
+        )
+
         return {
             "inventory_initial": inventory_initial,
-            "operation_capacities": pd.DataFrame(op_cap_rows),
+            "operation_capacities": op_cap_df,
         }
 
-    def _build_costs(self, temporal: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame | None]:
-        """Operation costs (station visit/handling) and resource costs (truck rates)."""
+    def _register_costs(
+        self,
+        registry: AttributeRegistry,
+        temporal: dict[str, pd.DataFrame],
+    ) -> None:
+        """Register operation costs (station visit/handling) in the attribute registry."""
         periods = temporal["periods"]
         horizon_dates = [p["start_date"] for _, p in periods.iterrows()]
 
@@ -410,12 +437,21 @@ class DataLoaderGraph:
                         "cost_per_unit": float(r["cost_per_bike_moved"]),
                         "cost_unit": "USD",
                     })
-        operation_costs = pd.DataFrame(cost_rows) if cost_rows else None
 
-        return {"operation_costs": operation_costs}
+        if cost_rows:
+            registry.register(
+                name="operation_cost",
+                data=pd.DataFrame(cost_rows),
+                entity_type="facility",
+                kind=AttributeKind.COST,
+                grain=("facility_id", "operation_type", "commodity_category", "date"),
+                value_column="cost_per_unit",
+                aggregation="mean",
+                unit="USD",
+            )
 
     def _build_resources(self, entities: _EntityResult) -> dict[str, pd.DataFrame | None]:
-        """Resource fleet, L3 resources, compatibility tables, and truck cost rates."""
+        """Resource fleet, L3 resources, and compatibility tables."""
         home_depot = entities.depot_ids[0]
 
         resource_fleet = pd.DataFrame({
@@ -434,6 +470,24 @@ class DataLoaderGraph:
                 "description": None,
             })
 
+        return {
+            "resource_fleet": resource_fleet,
+            "resources": pd.DataFrame(resource_rows),
+            "resource_commodity_compatibility": pd.DataFrame({
+                "resource_category": [RESOURCE_CATEGORY],
+                "commodity_category": [COMMODITY_CATEGORY],
+                "enabled": [True],
+            }),
+            "resource_modal_compatibility": pd.DataFrame({
+                "resource_category": [RESOURCE_CATEGORY],
+                "modal_type": [ModalType.ROAD.value],
+                "enabled": [True],
+            }),
+        }
+
+    def _build_resource_costs(self, entities: _EntityResult) -> pd.DataFrame | None:
+        """Build EAV resource cost table (legacy format, stored as old field)."""
+        home_depot = entities.depot_ids[0]
         rcost_rows: list[dict] = []
         tr = self._source.df_truck_rates
         if tr is not None and not tr.empty:
@@ -464,19 +518,4 @@ class DataLoaderGraph:
                         "value_unit": "USD",
                     },
                 ])
-
-        return {
-            "resource_fleet": resource_fleet,
-            "resources": pd.DataFrame(resource_rows),
-            "resource_commodity_compatibility": pd.DataFrame({
-                "resource_category": [RESOURCE_CATEGORY],
-                "commodity_category": [COMMODITY_CATEGORY],
-                "enabled": [True],
-            }),
-            "resource_modal_compatibility": pd.DataFrame({
-                "resource_category": [RESOURCE_CATEGORY],
-                "modal_type": [ModalType.ROAD.value],
-                "enabled": [True],
-            }),
-            "resource_costs": pd.DataFrame(rcost_rows) if rcost_rows else None,
-        }
+        return pd.DataFrame(rcost_rows) if rcost_rows else None

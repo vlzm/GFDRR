@@ -9,15 +9,98 @@ from typing import Any
 
 import pandas as pd
 
+from gbp.core.attributes.registry import AttributeRegistry
+from gbp.core.attributes.spec import AttributeSpec
+from gbp.core.enums import AttributeKind
 from gbp.core.model import RawModelData, ResolvedModelData
 
 _SPINE_FIELDS = frozenset({"facility_spines", "edge_spines", "resource_spines"})
+_NON_TABLE_FIELDS = frozenset({"attributes"})
 _SKIP_PREFIXES = ("_",)
 
 
 def _is_dataclass_df_field(name: str, obj: object) -> bool:
     val = getattr(obj, name, None)
     return isinstance(val, pd.DataFrame)
+
+
+def _save_attribute_registry(
+    registry: AttributeRegistry,
+    directory: Path,
+) -> dict[str, Any]:
+    """Serialize attribute registry to an ``attributes/`` sub-directory."""
+    if not registry:
+        return {}
+
+    attr_dir = directory / "attributes"
+    attr_dir.mkdir(exist_ok=True)
+
+    specs_list: list[dict[str, Any]] = []
+    for attr in registry.specs:
+        spec_dict: dict[str, Any] = {
+            "name": attr.name,
+            "kind": attr.kind.value,
+            "entity_type": attr.entity_type,
+            "grain": list(attr.grain),
+            "resolved_grain": list(attr.resolved_grain),
+            "value_column": attr.value_column,
+            "source_table": attr.source_table,
+            "aggregation": attr.aggregation,
+            "nullable": attr.nullable,
+        }
+        if attr.unit is not None:
+            spec_dict["unit"] = attr.unit
+        if attr.eav_filter:
+            spec_dict["eav_filter"] = dict(attr.eav_filter)
+        specs_list.append(spec_dict)
+
+        data = registry.get(attr.name).data
+        data.to_parquet(attr_dir / f"{attr.name}.parquet", index=False)
+
+    with open(attr_dir / "_specs.json", "w") as fh:
+        json.dump(specs_list, fh, indent=2)
+
+    return {"attribute_names": [s["name"] for s in specs_list]}
+
+
+def _load_attribute_registry(directory: Path) -> AttributeRegistry:
+    """Deserialize attribute registry from an ``attributes/`` sub-directory."""
+    registry = AttributeRegistry()
+    attr_dir = directory / "attributes"
+
+    if not attr_dir.exists():
+        return registry
+
+    specs_path = attr_dir / "_specs.json"
+    if not specs_path.exists():
+        return registry
+
+    with open(specs_path) as fh:
+        specs_list = json.load(fh)
+
+    for spec_dict in specs_list:
+        name = spec_dict["name"]
+        pq = attr_dir / f"{name}.parquet"
+        if not pq.exists():
+            continue
+
+        spec = AttributeSpec(
+            name=name,
+            kind=AttributeKind(spec_dict["kind"]),
+            entity_type=spec_dict["entity_type"],
+            grain=tuple(spec_dict["grain"]),
+            resolved_grain=tuple(spec_dict["resolved_grain"]),
+            value_column=spec_dict["value_column"],
+            source_table=spec_dict["source_table"],
+            unit=spec_dict.get("unit"),
+            aggregation=spec_dict.get("aggregation", "mean"),
+            nullable=spec_dict.get("nullable", True),
+            eav_filter=spec_dict.get("eav_filter"),
+        )
+        data = pd.read_parquet(pq)
+        registry.register_raw(spec, data)
+
+    return registry
 
 
 def _save_tables(
@@ -32,6 +115,8 @@ def _save_tables(
 
     for f in fields(obj):
         if any(f.name.startswith(p) for p in _SKIP_PREFIXES):
+            continue
+        if f.name in _NON_TABLE_FIELDS:
             continue
 
         if f.name in _SPINE_FIELDS:
@@ -53,6 +138,8 @@ def _save_tables(
         val.to_parquet(directory / f"{f.name}.parquet", index=False)
         tables.append(f.name)
 
+    attr_meta = _save_attribute_registry(obj.attributes, directory)
+
     meta: dict[str, Any] = {
         "format": format_name,
         "version": 1,
@@ -60,6 +147,8 @@ def _save_tables(
     }
     if spine_meta:
         meta["spines"] = spine_meta
+    if attr_meta:
+        meta["attributes"] = attr_meta
 
     with open(directory / "_metadata.json", "w") as fh:
         json.dump(meta, fh, indent=2)
@@ -113,6 +202,9 @@ def _load_tables(
             if gpq.exists():
                 spine_dict[gn] = pd.read_parquet(gpq)
         kwargs[spine_field] = spine_dict if spine_dict else None
+
+    if "attributes" in field_names:
+        kwargs["attributes"] = _load_attribute_registry(directory)
 
     return kwargs
 

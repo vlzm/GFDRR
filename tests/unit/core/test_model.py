@@ -129,23 +129,27 @@ def test_raw_model_data_validate_missing_column() -> None:
 
 
 def test_raw_groups_cover_all_fields() -> None:
-    """_GROUPS must reference every non-underscore dataclass field in RawModelData."""
+    """_GROUPS must reference every non-underscore DataFrame field in RawModelData."""
     all_group_fields = {f for names in RawModelData._GROUPS.values() for f in names}
-    dataclass_fields = {f.name for f in fields(RawModelData) if not f.name.startswith("_")}
+    excluded = RawModelData._NON_TABLE_FIELDS
+    dataclass_fields = {
+        f.name for f in fields(RawModelData)
+        if not f.name.startswith("_") and f.name not in excluded
+    }
     assert all_group_fields == dataclass_fields
 
 
 def test_resolved_groups_cover_all_dataframe_fields() -> None:
     """_GROUPS must reference every DataFrame field in ResolvedModelData.
 
-    Spine fields (dict[str, DataFrame]) are excluded — they are handled
-    by the separate ``spine_tables`` property.
+    Spine fields and non-table fields (AttributeRegistry) are excluded.
     """
     all_group_fields = {f for names in ResolvedModelData._GROUPS.values() for f in names}
     spine_fields = {"facility_spines", "edge_spines", "resource_spines"}
+    excluded = spine_fields | ResolvedModelData._NON_TABLE_FIELDS
     dataclass_fields = {
         f.name for f in fields(ResolvedModelData)
-        if not f.name.startswith("_") and f.name not in spine_fields
+        if not f.name.startswith("_") and f.name not in excluded
     }
     assert all_group_fields == dataclass_fields
 
