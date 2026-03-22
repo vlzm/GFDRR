@@ -7,7 +7,7 @@ flowchart TB
         direction TB
 
         subgraph FType["FacilityType — WHAT it is (physical)"]
-            FT["STATION | DEPOT | MAINTENANCE_HUB<br/>(domain-specific, L3)"]
+            FT["STATION | DEPOT | MAINTENANCE_HUB<br/>(L3 default in gbp/core)"]
         end
 
         subgraph FOps["Operations — WHAT it CAN DO (parameters)"]
@@ -23,18 +23,17 @@ flowchart TB
     end
 
     subgraph Derivation["Role Derivation Logic"]
-        D1["1. Start with DEFAULT_ROLES<br/>based on FacilityType"]
+        D1["1. Start with DEFAULT_ROLES<br/>from FacilityType (gbp.core.roles)"]
         D2["2. Adjust by Operations<br/>(no STORAGE op → remove STORAGE role)"]
         D3["3. Apply manual overrides<br/>(optional)"]
         D1 --> D2 --> D3
     end
 
-    subgraph Example["Gas Logistics Example"]
+    subgraph Example["Bike-sharing example"]
         direction LR
-        Terminal["Terminal<br/>─────────<br/>Type: TERMINAL<br/>Ops: RECEIVING, STORAGE,<br/>HANDLING, DISPATCH<br/>Roles: SOURCE, STORAGE"]
-        FillingPlant["Filling Plant<br/>─────────<br/>Type: FILLING_PLANT<br/>Ops: RECEIVING, STORAGE,<br/>FILLING, HANDLING, DISPATCH<br/>Roles: TRANSSHIPMENT, STORAGE"]
-        Depot["Depot<br/>─────────<br/>Type: DEPOT<br/>Ops: RECEIVING, STORAGE,<br/>HANDLING, DISPATCH<br/>Roles: TRANSSHIPMENT, STORAGE"]
-        Customer["Customer<br/>─────────<br/>Type: CUSTOMER<br/>Ops: RECEIVING<br/>Roles: SINK"]
+        Station["Station<br/>─────────<br/>Type: STATION<br/>Ops: RECEIVING, STORAGE,<br/>HANDLING, DISPATCH<br/>Roles: SOURCE, SINK, STORAGE"]
+        Depot["Depot<br/>─────────<br/>Type: DEPOT<br/>Ops: RECEIVING, STORAGE,<br/>HANDLING, DISPATCH<br/>Roles: STORAGE, TRANSSHIPMENT"]
+        Maint["Maintenance Hub<br/>─────────<br/>Type: MAINTENANCE_HUB<br/>Ops: + REPAIR<br/>Roles: TRANSSHIPMENT, STORAGE"]
     end
 
     FType -->|"determines default"| FRoles

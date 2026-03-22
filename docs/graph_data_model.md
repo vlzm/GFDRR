@@ -2,7 +2,7 @@
 
 ## Overview
 
-Данный документ описывает универсальную графовую модель данных для задач сетевых потоков. Платформа позволяет моделировать перемещение commodity (газ, велосипеды, деньги) через сеть объектов с использованием транспортных ресурсов. Модель данных построена на multi-commodity flow формулировке и табличных структурах для поддержки векторизированных операций (pandas, PySpark).
+Данный документ описывает универсальную графовую модель данных для задач сетевых потоков. Платформа позволяет моделировать перемещение commodity (велосипеды в шеринге, товары, деньги и др.) через сеть объектов с использованием транспортных ресурсов. Модель данных построена на multi-commodity flow формулировке и табличных структурах для поддержки векторизированных операций (pandas, PySpark).
 
 Документ описывает **только модель данных** — структуры, таблицы, грейны и отношения. Модель данных описывает "мир" (какие объекты, связи и параметры существуют) и является **общей** для разных потребителей: оптимизатор (все периоды одновременно), симулятор (шаг за шагом), аналитика (reporting). Каждый потребитель использует одну и ту же `ResolvedModelData`, но обрабатывает её по-своему (§15).
 
@@ -18,14 +18,14 @@
 
 **CommodityCategory (L2)** — тип потока в сети. Основная единица, по которой индексируются данные о потоках: `flow[edge, commodity_category, period]`. Каждый commodity category имеет свои demand/supply и свои пропускные способности.
 
-**Commodity (L3)** — конкретный экземпляр или лот. Нужен для instance-level tracking (какой именно баллон куда поехал). Опциональный уровень.
+**Commodity (L3)** — конкретный экземпляр или лот. Нужен для instance-level tracking (какой именно велосипед куда переместился). Опциональный уровень.
 
 
 | Домен                 | CommodityCategory (L2)    | Commodity (L3)              |
 | --------------------- | ------------------------- | --------------------------- |
-| Газовая логистика     | BULK_GAS, CYLINDERS       | Конкретный лот GPL-2024-001 |
 | Велошеринг            | WORKING_BIKE, BROKEN_BIKE | Велосипед #4521             |
 | Финансовые транзакции | USD, EUR                  | Перевод #TX-789             |
+| Розничная логистика   | SKU_A, SKU_B (пример)     | Партия LOT-2024-001         |
 
 
 ### 1.2. Resource — чем перемещается
@@ -39,9 +39,9 @@
 
 | Домен                 | ResourceCategory (L2)      | Resource (L3)      |
 | --------------------- | -------------------------- | ------------------ |
-| Газовая логистика     | Грузовик 20т, Цистерна     | Грузовик #TRK-042  |
-| Велошеринг            | Ребалансировочный грузовик | Грузовик #REB-07   |
+| Велошеринг            | REBALANCING_TRUCK          | Грузовик #REB-07   |
 | Финансовые транзакции | SWIFT, SEPA                | Канал SWIFT-EU-001 |
+| Розничная логистика   | Фургон доставки (пример)   | ТС #VAN-112        |
 
 
 ### 1.3. Facility — где commodity находится
@@ -51,12 +51,12 @@
 
 | Домен                 | Примеры                                  |
 | --------------------- | ---------------------------------------- |
-| Газовая логистика     | Terminal, Filling Plant, Depot, Customer |
-| Велошеринг            | Station, Depot, Maintenance Hub          |
+| Велошеринг            | Station, Depot, Maintenance Hub        |
 | Финансовые транзакции | Bank, Person, Payment Gateway            |
+| Розничная логистика   | Склад, магазин, хаб кросс-докинга       |
 
 
-**Почему warehouse и receiver объединены в Facility:** граница между хранилищем и получателем искусственная. Велосипедная станция одновременно хранит (warehouse) и выдаёт/принимает (receiver). Банк — и то и другое. Даже в газовом кейсе депот *принимает* газ с терминала и *отдаёт* клиентам. Вместо жёсткого разделения используются роли.
+**Почему warehouse и receiver объединены в Facility:** граница между хранилищем и получателем искусственная. Велосипедная станция одновременно хранит (warehouse) и выдаёт/принимает (receiver). Банк — и то и другое. Депо велошеринга *принимает* велосипеды со станций и *отдаёт* их обратно после ребалансировки или ремонта. Вместо жёсткого разделения используются роли.
 
 ---
 
@@ -70,10 +70,10 @@ Facility описывается тремя ортогональными изме
 
 ```python
 class FacilityType(Enum):
-    TERMINAL = "terminal"
-    FILLING_PLANT = "filling_plant"
+    """L3 default в gbp/core — велошеринг."""
+    STATION = "station"
     DEPOT = "depot"
-    CUSTOMER = "customer"
+    MAINTENANCE_HUB = "maintenance_hub"
 ```
 
 ### 2.2. Operations — что объект умеет делать
@@ -82,25 +82,25 @@ class FacilityType(Enum):
 
 ```python
 class OperationType(Enum):
+    """L3 default в gbp/core — велошеринг."""
     RECEIVING = "receiving"      # приём commodity
     STORAGE = "storage"          # хранение
-    FILLING = "filling"          # трансформация (наполнение баллонов)
+    DISPATCH = "dispatch"        # отправка (выдача / отгрузка)
     HANDLING = "handling"        # погрузка/разгрузка
-    DISPATCH = "dispatch"        # отправка
+    REPAIR = "repair"            # трансформация BROKEN_BIKE → WORKING_BIKE (Maintenance Hub)
 ```
 
-Маппинг типов на операции (газовый кейс):
+Маппинг типов на операции (велошеринг, как в `gbp/core`):
 
 
-| FacilityType  | RECEIVING | STORAGE | FILLING | HANDLING | DISPATCH |
-| ------------- | --------- | ------- | ------- | -------- | -------- |
-| Terminal      | ✓         | ✓       | —       | ✓        | ✓        |
-| Filling Plant | ✓         | ✓       | ✓       | ✓        | ✓        |
-| Depot         | ✓         | ✓       | —       | ✓        | ✓        |
-| Customer      | ✓         | —       | —       | —        | —        |
+| FacilityType     | RECEIVING | STORAGE | REPAIR | HANDLING | DISPATCH |
+| ---------------- | --------- | ------- | ------ | -------- | -------- |
+| Station          | ✓         | ✓       | —      | ✓        | ✓        |
+| Depot            | ✓         | ✓       | —      | ✓        | ✓        |
+| Maintenance Hub  | ✓         | ✓       | ✓      | ✓        | ✓        |
 
 
-Filling Plant — единственный тип с операцией FILLING, которая имеет уникальные filling_cost и filling_capacity.
+Maintenance Hub — тип с операцией REPAIR и связанными `operation_cost` / `operation_capacity` для восстановления велосипедов.
 
 ### 2.3. FacilityRole — семантическое поведение в сети
 
@@ -114,9 +114,9 @@ class FacilityRole(Enum):
     TRANSSHIPMENT = "transshipment"
 ```
 
-**SOURCE** — узел, который вводит commodity в сеть. У него нет входящего потока (или он пренебрежимо мал). В газовом кейсе: terminal, куда газ приходит «извне системы». Ассоциированные данные: `supply` (сколько доступно по периодам).
+**SOURCE** — узел, который вводит commodity в сеть. У него нет входящего потока (или он пренебрежимо мал). В велошеринге: например депо, откуда в сеть поступают велосипеды после обслуживания, или станция с моделируемым **supply** при ребалансировке. Ассоциированные данные: `supply` (сколько доступно по периодам).
 
-**SINK** — узел, который потребляет или выводит commodity из сети. В газовом кейсе: конечный клиент. Ассоциированные данные: `demand` (сколько требуется по периодам).
+**SINK** — узел, который потребляет или выводит commodity из сети. В велошеринге: станция или зона, где пользовательский спрос «забирает» велосипеды из моделируемой сети (net outflow), или абстрактный спрос на поездки. Ассоциированные данные: `demand` (сколько требуется по периодам).
 
 **STORAGE** — узел, который удерживает commodity во времени. Ключевое: есть ёмкость и состояние (сколько хранится сейчас). Ассоциированные данные: `storage_capacity`, `inventory_initial`.
 
@@ -125,12 +125,11 @@ class FacilityRole(Enum):
 Один узел может совмещать несколько ролей:
 
 
-| FacilityType  | Roles                  |
-| ------------- | ---------------------- |
-| Terminal      | SOURCE, STORAGE        |
-| Filling Plant | TRANSSHIPMENT, STORAGE |
-| Depot         | TRANSSHIPMENT, STORAGE |
-| Customer      | SINK                   |
+| FacilityType     | Roles                         |
+| ---------------- | ----------------------------- |
+| Station          | SOURCE, SINK, STORAGE         |
+| Depot            | STORAGE, TRANSSHIPMENT        |
+| Maintenance Hub  | TRANSSHIPMENT, STORAGE        |
 
 
 ### 2.4. Вывод ролей
@@ -138,11 +137,11 @@ class FacilityRole(Enum):
 Роли выводятся из типа (дефолтные) с возможностью корректировки по операциям и ручного override:
 
 ```python
+# Matches gbp.core.roles.DEFAULT_ROLES
 DEFAULT_ROLES: dict[FacilityType, set[FacilityRole]] = {
-    FacilityType.TERMINAL:       {SOURCE, STORAGE},
-    FacilityType.FILLING_PLANT:  {TRANSSHIPMENT, STORAGE},
-    FacilityType.DEPOT:          {TRANSSHIPMENT, STORAGE},
-    FacilityType.CUSTOMER:       {SINK},
+    FacilityType.STATION:           {SOURCE, SINK, STORAGE},
+    FacilityType.DEPOT:             {STORAGE, TRANSSHIPMENT},
+    FacilityType.MAINTENANCE_HUB:   {TRANSSHIPMENT, STORAGE},
 }
 
 class Facility:
@@ -176,9 +175,9 @@ class Facility:
 - **operations** → *что оно умеет и сколько стоит* (параметры)
 - **roles** → *как оно себя ведёт в потоковой сети* (семантика)
 
-Roles определяют **семантику** узла (SOURCE подаёт supply, SINK потребляет demand, STORAGE хранит inventory), operations определяют **параметры** (costs, capacities). Filling Plant и Depot имеют одинаковые roles (TRANSSHIPMENT + STORAGE), но разные operations и параметры.
+Roles определяют **семантику** узла (SOURCE подаёт supply, SINK потребляет demand, STORAGE хранит inventory), operations определяют **параметры** (costs, capacities). Depot и Maintenance Hub оба могут иметь TRANSSHIPMENT + STORAGE, но у Maintenance Hub есть REPAIR и трансформация BROKEN_BIKE → WORKING_BIKE; у Station — роли пользовательского спроса/предложения (SINK/SOURCE) плюс хранение.
 
-При переносе на новый домен (велосипеды, транзакции) facility_types и operations будут другими, но roles останутся те же — семантика переиспользуется без изменений.
+При переносе на новый домен facility_types и operations будут другими, но roles останутся те же — семантика переиспользуется без изменений.
 
 ---
 
@@ -286,28 +285,26 @@ def resolve_to_periods(
 
 **Per-commodity conservation:** для каждого commodity_category на каждом узле отдельно действуют правила в зависимости от роли (SOURCE: ограничен supply, SINK: удовлетворяет demand, TRANSSHIPMENT: вход = выход, STORAGE: баланс inventory).
 
-**Shared edge capacity:** все commodity_categories на ребре делят общую пропускную способность. Данные об этом хранятся в таблице `edge_capacity`. Поскольку разные commodity могут иметь разные единицы измерения (тонны, штуки), shared capacity выражается в **capacity-единицах ребра** (`edge_capacity.capacity_unit`). Для приведения flow к единицам capacity используется коэффициент `capacity_consumption` в таблице `edge_commodity` — сколько единиц capacity "стоит" одна единица данного commodity на данном ребре.
+**Shared edge capacity:** все commodity_categories на ребре делят общую пропускную способность. Данные об этом хранятся в таблице `edge_capacity`. Поскольку разные commodity могут иметь разные единицы измерения (штуки велосипедов, поездки, тонны в других доменах), shared capacity выражается в **capacity-единицах ребра** (`edge_capacity.capacity_unit`). Для приведения flow к единицам capacity используется коэффициент `capacity_consumption` в таблице `edge_commodity` — сколько единиц capacity "стоит" одна единица данного commodity на данном ребре.
 
 Для single-commodity задач commodity dimension тривиально схлопывается в один элемент, и `flow[edge, commodity_category, period]` ≡ `flow[edge, period]`. Никаких накладных расходов.
 
 ### 4.2. Допустимые commodity на рёбрах
 
-Каждое ребро (`source_id × target_id × modal_type`) имеет набор **допустимых commodity_categories** — фильтр, определяющий, какие типы потоков могут идти по этому ребру. Одно ребро может нести несколько commodity_categories (грузовик везёт и GPL и GNL, канал передаёт и USD и EUR).
+Каждое ребро (`source_id × target_id × modal_type`) имеет набор **допустимых commodity_categories** — фильтр, определяющий, какие типы потоков могут идти по этому ребру. Одно ребро может нести несколько commodity_categories (ребалансировочный грузовик везёт и WORKING_BIKE и BROKEN_BIKE; цифровой канал — USD и EUR).
 
 
-| Source        | Target        | Modal | Допустимые Commodity |
-| ------------- | ------------- | ----- | -------------------- |
-| Terminal      | Filling Plant | ROAD  | BULK_GAS             |
-| Filling Plant | Depot         | ROAD  | CYLINDERS            |
-| Filling Plant | Customer      | ROAD  | CYLINDERS            |
-| Depot         | Customer      | ROAD  | CYLINDERS            |
-| Terminal      | Depot         | ROAD  | BULK_GAS             |
-| Terminal      | Depot         | RAIL  | BULK_GAS             |
+| Source           | Target           | Modal | Допустимые Commodity        |
+| ---------------- | ---------------- | ----- | --------------------------- |
+| Depot            | Station          | ROAD  | WORKING_BIKE, BROKEN_BIKE   |
+| Station          | Depot            | ROAD  | WORKING_BIKE, BROKEN_BIKE   |
+| Maintenance Hub  | Depot            | ROAD  | WORKING_BIKE                |
+| Depot            | Maintenance Hub  | ROAD  | BROKEN_BIKE                 |
 
 
 ### 4.3. Transformation — трансформация commodity
 
-Некоторые facility преобразуют одни commodity_categories в другие. Filling Plant принимает BULK_GAS и выдаёт CYLINDERS. Maintenance Hub принимает BROKEN_BIKE и выдаёт WORKING_BIKE. Банк конвертирует USD в EUR. Нефтеперегонный завод принимает CRUDE и выдаёт GASOLINE + DIESEL + KEROSENE (splitting/co-production). Химическое производство смешивает два реагента в один продукт (blending).
+Некоторые facility преобразуют одни commodity_categories в другие. **Maintenance Hub** в велошеринге принимает BROKEN_BIKE и выдаёт WORKING_BIKE (операция REPAIR). Банк конвертирует USD в EUR. Нефтеперегонный завод принимает CRUDE и выдаёт GASOLINE + DIESEL + KEROSENE (splitting/co-production). Химическое производство смешивает два реагента в один продукт (blending).
 
 Трансформация — это **свойство facility**, привязанное к конкретной операции. Для поддержки произвольных N→M преобразований (blending, splitting, co-production) трансформация разбита на три таблицы:
 
@@ -315,28 +312,28 @@ def resolve_to_periods(
 class Transformation:
     transformation_id: str
     facility_id: str
-    operation_type: OperationType    # FILLING, REPAIR, CONVERSION, BLENDING
+    operation_type: OperationType    # REPAIR (велошеринг), CONVERSION, BLENDING, …
     loss_rate: float = 0.0          # общие потери процесса (0.02 = 2%)
     batch_size: float | None = None # кратность выхода (null = непрерывный)
 
 class TransformationInput:
     transformation_id: str
-    commodity_category: CommodityCategory  # BULK_GAS
+    commodity_category: CommodityCategory  # BROKEN_BIKE
     ratio: float                           # сколько единиц входа на 1 "цикл"
 
 class TransformationOutput:
     transformation_id: str
-    commodity_category: CommodityCategory  # CYLINDERS
+    commodity_category: CommodityCategory  # WORKING_BIKE
     ratio: float                           # сколько единиц выхода на 1 "цикл"
 ```
 
-Для простого 1→1 случая (Filling Plant: 1 ton BULK_GAS → 85 CYLINDERS): один TransformationInput (BULK_GAS, ratio=1.0) и один TransformationOutput (CYLINDERS, ratio=85.0). Для blending (2→1): два TransformationInput. Для splitting (1→2): два TransformationOutput.
+Для простого 1→1 случая (Maintenance Hub: 1 BROKEN_BIKE → 1 WORKING_BIKE с учётом `loss_rate`): один TransformationInput (BROKEN_BIKE, ratio=1.0) и один TransformationOutput (WORKING_BIKE, ratio=1.0). Для blending (2→1): два TransformationInput. Для splitting (1→2): два TransformationOutput.
 
 ### 4.4. Влияние на роли
 
 Роли **не меняются**. TRANSSHIPMENT по-прежнему означает "перевалочный пункт", но для узлов с трансформацией баланс потоков выражается через transformation ratios вместо прямого равенства. Роль описывает **семантику** узла, трансформация — **параметры** преобразования.
 
-Для узлов без трансформации (Depot, Terminal) ничего не меняется — inflow и outflow одного commodity, баланс остаётся `inflow = outflow`.
+Для узлов без трансформации (Depot, Station без REPAIR) ничего не меняется — inflow и outflow одного commodity, баланс остаётся `inflow = outflow`.
 
 ### 4.5. Примеры трансформаций
 
@@ -345,7 +342,6 @@ class TransformationOutput:
 
 | Домен      | Facility        | Operation  | Inputs           | Outputs           | Loss  |
 | ---------- | --------------- | ---------- | ---------------- | ----------------- | ----- |
-| Газ        | Filling Plant   | FILLING    | BULK_GAS ×1.0    | CYLINDERS ×85.0   | 0.02  |
 | Велошеринг | Maintenance Hub | REPAIR     | BROKEN_BIKE ×1.0 | WORKING_BIKE ×1.0 | 0.05  |
 | Финансы    | Bank            | CONVERSION | USD ×1.0         | EUR ×(по курсу)   | 0.001 |
 
@@ -430,19 +426,18 @@ class EdgeRule:
     enabled: bool = True
 ```
 
-Стандартный сценарий (газовая логистика):
+Стандартный сценарий (велошеринг, ребалансировка и ремонт):
 
 
-| Source        | Target        | Commodity | Modal |
-| ------------- | ------------- | --------- | ----- |
-| Terminal      | Filling Plant | BULK_GAS  | ROAD  |
-| Terminal      | Depot         | BULK_GAS  | ROAD  |
-| Filling Plant | Depot         | CYLINDERS | ROAD  |
-| Filling Plant | Customer      | CYLINDERS | ROAD  |
-| Depot         | Customer      | CYLINDERS | ROAD  |
+| Source           | Target           | Commodity                 | Modal |
+| ---------------- | ---------------- | ------------------------- | ----- |
+| Depot            | Station          | WORKING_BIKE, BROKEN_BIKE | ROAD  |
+| Station          | Depot            | WORKING_BIKE, BROKEN_BIKE | ROAD  |
+| Maintenance Hub  | Depot            | WORKING_BIKE              | ROAD  |
+| Depot            | Maintenance Hub  | BROKEN_BIKE               | ROAD  |
 
 
-Расширенный сценарий добавляет: Terminal → Depot (BULK_GAS, RAIL) — альтернативный канал с другим cost/lead_time.
+Расширенный сценарий добавляет, например: то же Depot → Station по **RAIL** (логистика между городами) — альтернативный канал с другим cost/lead_time.
 
 ### 5.5. Manual Edge Overrides
 
@@ -509,7 +504,7 @@ def build_edges(
 
 **Min order quantity на SINK** (`demand.min_order_quantity`) — клиент не принимает заказ меньше X единиц за период.
 
-**Batch size на трансформации** (`transformation.batch_size`) — выход кратен batch_size. Filling Plant наполняет партиями по 50 баллонов.
+**Batch size на трансформации** (`transformation.batch_size`) — выход кратен batch_size. Maintenance Hub может ремонтировать партиями по N велосипедов за цикл (nullable = непрерывный процесс).
 
 **Vehicle trips** (`edge_vehicle`) — дискретное количество рейсов с фиксированной vehicle capacity.
 
@@ -540,7 +535,7 @@ def build_edges(
 
 **Facility Hierarchy** — географическая/организационная группировка facility. Country → Region → City → District. Или Division → Business Unit → Depot. Один facility может принадлежать нескольким иерархиям разных типов одновременно.
 
-**Commodity Hierarchy** — группировка commodity_category. Gas → Bulk (GPL, GNL) → Packaged (Cylinders). Нужна для агрегации demand/supply на разных уровнях — стратегическое планирование на уровне "Gas" без разделения на GPL/GNL.
+**Commodity Hierarchy** — группировка commodity_category. В велошеринге: Bike → по состоянию (WORKING_BIKE / BROKEN_BIKE) или по продуктовой линейке. Нужна для агрегации demand/supply на разных уровнях — например планирование на уровне «все велосипеды» без разделения на исправные и неисправные.
 
 **Temporal Hierarchy** — multi-resolution planning (§3.2). Реализована через сегменты PlanningHorizon с разной гранулярностью, а не через отдельное дерево. Day → Week → Month выражается через segment_index.
 
@@ -578,9 +573,8 @@ membership         →  привязка leaf entity к node
 
 | Домен      | Type           | Levels                        |
 | ---------- | -------------- | ----------------------------- |
-| Газ        | geographic     | Country → Region → Department |
-| Газ        | organizational | Division → Zone → Depot       |
-| Велошеринг | geographic     | City → Arrondissement → Zone  |
+| Велошеринг | geographic     | City → District → Station zone |
+| Велошеринг | organizational | Operator → Region → Depot     |
 | Финансы    | organizational | Country → Bank → Branch       |
 
 
@@ -589,8 +583,8 @@ membership         →  привязка leaf entity к node
 
 | Домен      | Type           | Levels                                         |
 | ---------- | -------------- | ---------------------------------------------- |
-| Газ        | product_group  | Gas → Bulk (GPL, GNL) → Packaged (Cylinders)   |
-| Велошеринг | condition      | Bike → Working / Broken                        |
+| Велошеринг | condition      | Bike → WORKING_BIKE / BROKEN_BIKE              |
+| Велошеринг | product_line   | Fleet → e-bike / classic (пример)            |
 | Финансы    | currency_class | Currency → Major (USD, EUR) → Minor (CZK, PLN) |
 
 
@@ -599,8 +593,8 @@ membership         →  привязка leaf entity к node
 
 | Домен                    | Segments                                    |
 | ------------------------ | ------------------------------------------- |
-| Газ (tactical)           | 2 weeks DAY + 8 weeks WEEK + 3 months MONTH |
 | Велошеринг (operational) | 7 days DAY + 3 weeks WEEK                   |
+| Велошеринг (tactical)    | 2 weeks DAY + 8 weeks WEEK + 3 months MONTH |
 | Финансы (strategic)      | 1 month WEEK + 11 months MONTH              |
 
 
@@ -618,7 +612,7 @@ CommodityCategory, ResourceCategory, Facility (с ролями и операци
 
 ### L3 — домен-специфичная модель
 
-Конкретные типы: Terminal, Depot, GasLot, Truck. Конкретные операции: FILLING. Конкретные costs/capacities со своими grain'ами. Конкретные commodity instances (лот GPL-2024-001). Конкретные resource instances (грузовик #TRK-042 с расписанием и GPS). Реализуется через наследование или композицию от L2.
+Конкретные типы: Station, Depot, Maintenance Hub, REBALANCING_TRUCK. Конкретные операции: REPAIR, DISPATCH. Конкретные costs/capacities со своими grain'ами. Конкретные commodity instances (велосипед #4521). Конкретные resource instances (грузовик ребалансировки #REB-07 с GPS). Реализуется через наследование или композицию от L2.
 
 ---
 
@@ -637,7 +631,7 @@ CommodityCategory, ResourceCategory, Facility (с ролями и операци
 | storage_capacity | facility_id × commodity_category                         | facility_id × commodity_category                              | CAPACITY   |
 | throughput_rate  | facility_id × commodity_category × date                  | facility_id × commodity_category × period_id                  | RATE       |
 | handling_cost    | facility_id × operation_type × date                      | facility_id × operation_type × period_id                      | COST       |
-| filling_cost     | facility_id × operation_type × commodity_category × date | facility_id × operation_type × commodity_category × period_id | COST       |
+| repair_cost      | facility_id × operation_type × commodity_category × date | facility_id × operation_type × commodity_category × period_id | COST       |
 
 
 **Edge attributes** (entity_grain = `["source_id", "target_id", "modal_type"]`):
@@ -662,7 +656,7 @@ CommodityCategory, ResourceCategory, Facility (с ролями и операци
 | maintenance_cost      | resource_category × date | resource_category × period_id | COST     |
 
 
-Resource attributes — полностью кастомные. Пользователь определяет сколько угодно cost/rate/capacity атрибутов для ресурсов. В газовом кейсе — fuel + maintenance. В финансовом — license_fee + compliance_cost. Модель не навязывает, какие конкретно costs должны быть. Для location-dependent resource costs — grain расширяется: `resource_category × facility_id × date`.
+Resource attributes — полностью кастомные. Пользователь определяет сколько угодно cost/rate/capacity атрибутов для ресурсов. В велошеринге — fuel + maintenance + driver_time для REBALANCING_TRUCK. В финансовом — license_fee + compliance_cost. Модель не навязывает, какие конкретно costs должны быть. Для location-dependent resource costs — grain расширяется: `resource_category × facility_id × date`.
 
 ### 9.2. AttributeKind — семантическая классификация
 
@@ -782,8 +776,8 @@ class PriceTier:
 
 | Сценарий                 | Tier 0           | Tier 1       | Tier 2    |
 | ------------------------ | ---------------- | ------------ | --------- |
-| Volume discount (газ)    | 0–100 cyl: €15   | 100–500: €13 | 500+: €11 |
-| Flat (велошеринг)        | 0+: €0.50/hr     | —            | —         |
+| Corporate pass (велошеринг) | 0–500 поездок: €0.10/поездка | 500–2000: €0.08 | 2000+: €0.05 |
+| Flat (велошеринг, B2C)      | 0+: €0.50/hr                 | —               | —            |
 | Minimum charge (финансы) | 0–1000€: €5 flat | 1000+: 0.1%  | —         |
 
 
@@ -813,7 +807,7 @@ class GrainGroup:
 
 | Группа | Grain                                        | Атрибуты                          |
 | ------ | -------------------------------------------- | --------------------------------- |
-| A      | facility_id × commodity_category × period_id | storage_capacity, filling_rate    |
+| A      | facility_id × commodity_category × period_id | storage_capacity, dock_throughput |
 | B      | facility_id × operation_type × period_id     | handling_cost_base, handling_cost |
 | C      | facility_id                                  | facility_type                     |
 
@@ -914,7 +908,7 @@ facility
 
 resource_category
 ├── resource_category_id (PK)
-├── name                        # "truck_20t", "tanker", "swift"
+├── name                        # "rebalancing_truck", "swift", …
 ├── base_capacity: float        # базовая грузоподъёмность единицы
 ├── capacity_unit: str          # "ton", "unit", "transaction"
 ├── description
@@ -928,8 +922,8 @@ resource                        # L2/L3, опциональный (для indivi
 
 commodity_category
 ├── commodity_category_id (PK)
-├── name                        # "BULK_GAS", "CYLINDERS"
-├── unit: str                   # "ton", "cylinder", "USD"
+├── name                        # "WORKING_BIKE", "BROKEN_BIKE", …
+├── unit: str                   # "bike", "trip", "USD", …
 ├── description
 
 commodity                       # L3, опциональный
@@ -1002,7 +996,7 @@ edge_rule
 transformation
 ├── transformation_id (PK)
 ├── facility_id (FK)
-├── operation_type               # FILLING, REPAIR, CONVERSION, BLENDING, DISTILLATION
+├── operation_type               # REPAIR, CONVERSION, BLENDING, DISTILLATION, …
 ├── loss_rate: float             # 0.0–1.0, общие потери процесса
 ├── batch_size: float | null     # null = непрерывный (LP-compatible)
 ├── batch_size_unit: str | null
@@ -1038,7 +1032,7 @@ resource_modal_compatibility
 ├── enabled: bool
 ```
 
-Определяет, на каких типах рёбер (modal_type) работает данный resource_category. Например: TRUCK_20T → ROAD, TANKER → ROAD+RAIL, SWIFT → DIGITAL. Без этой таблицы невозможно определить, какие ресурсы обслуживают какие рёбра, и невозможно корректно вычислить fleet capacity.
+Определяет, на каких типах рёбер (modal_type) работает данный resource_category. Например: REBALANCING_TRUCK → ROAD, SWIFT → DIGITAL. Без этой таблицы невозможно определить, какие ресурсы обслуживают какие рёбра, и невозможно корректно вычислить fleet capacity.
 
 ```
 resource_fleet
@@ -1119,7 +1113,7 @@ edge_lead_time_resolved          # GENERATED при сборке (§13.4), не 
 
 `edge` — PK = `source_id × target_id × modal_type`. Между двумя facility может быть несколько рёбер (road и rail). `lead_time_hours` хранится в абсолютных единицах.
 
-`edge_commodity` — фильтр допустимых commodity_categories на ребре. `capacity_consumption` решает проблему shared capacity при разных единицах измерения: если capacity ребра в тоннах, а commodity — CYLINDERS (в штуках), то `capacity_consumption = 0.012` означает, что один баллон "стоит" 0.012 тонны shared capacity. Default = 1.0 для однородных единиц.
+`edge_commodity` — фильтр допустимых commodity_categories на ребре. `capacity_consumption` решает проблему shared capacity при разных единицах измерения: если capacity ребра в **рейсах** или **тоннах**, а commodity — велосипеды в **штуках**, то коэффициент переводит штуки в единицы ёмкости ребра (например e-bike «тяжелее» для одного слота кузова). Default = 1.0 для однородных единиц.
 
 `edge_capacity` — shared пропускная способность по всем commodity на ребре.
 
@@ -1286,7 +1280,7 @@ commodity_hierarchy_node
 ├── hierarchy_type_id (FK)
 ├── level_index: int
 ├── parent_node_id (FK → commodity_hierarchy_node, nullable)
-├── name: str                      # "Gas", "GPL", "GNL"
+├── name: str                      # "Bike", "WORKING_BIKE", …
 
 commodity_hierarchy_membership
 ├── commodity_category_id (FK)
@@ -1726,22 +1720,7 @@ def compute_fleet_capacity(
 
 ## 14. Примеры доменных конфигураций
 
-### 14.1. Газовая логистика
-
-
-| FacilityType  | Roles                  | Operations                                      | Transformation                             |
-| ------------- | ---------------------- | ----------------------------------------------- | ------------------------------------------ |
-| Terminal      | SOURCE, STORAGE        | RECEIVING, STORAGE, HANDLING, DISPATCH          | —                                          |
-| Filling Plant | TRANSSHIPMENT, STORAGE | RECEIVING, STORAGE, FILLING, HANDLING, DISPATCH | BULK_GAS → CYLINDERS (85 cyl/ton, loss 2%) |
-| Depot         | TRANSSHIPMENT, STORAGE | RECEIVING, STORAGE, HANDLING, DISPATCH          | —                                          |
-| Customer      | SINK                   | RECEIVING                                       | —                                          |
-
-
-CommodityCategories: BULK_GAS, CYLINDERS.
-
-ResourceCategories: TRUCK_20T (грузовик 20т, compatible: CYLINDERS, modal: ROAD), TANKER (цистерна, compatible: BULK_GAS, modal: ROAD+RAIL).
-
-### 14.2. Велошеринг
+### 14.1. Велошеринг (основной домен проекта, `gbp/core`)
 
 
 | FacilityType    | Roles                  | Operations                           | Transformation                            |
@@ -1753,9 +1732,9 @@ ResourceCategories: TRUCK_20T (грузовик 20т, compatible: CYLINDERS, mod
 
 CommodityCategories: WORKING_BIKE, BROKEN_BIKE.
 
-ResourceCategories: REBALANCING_TRUCK (compatible: WORKING_BIKE+BROKEN_BIKE, modal: ROAD).
+ResourceCategories: REBALANCING_TRUCK (compatible: WORKING_BIKE + BROKEN_BIKE, modal: ROAD).
 
-### 14.3. Финансовые транзакции
+### 14.2. Финансовые транзакции
 
 
 | FacilityType    | Roles                 | Operations                   | Transformation                  |
@@ -1775,7 +1754,7 @@ ResourceCategories: SWIFT (compatible: USD+EUR, modal: DIGITAL), SEPA (compatibl
 
 ### 15.1. Проблема
 
-Одни и те же сущности (facility, commodity, resource, edge) участвуют в принципиально разных вычислительных моделях. Газовая компания хочет: (a) найти оптимальный план доставок на квартал (Network Flow), (b) просимулировать ежедневную работу грузовиков с учётом их позиций (Simulation + VRP), (c) сравнить план с фактом (Analytics). Все три задачи оперируют одними и теми же данными — но обрабатывают их по-разному.
+Одни и те же сущности (facility, commodity, resource, edge) участвуют в принципиально разных вычислительных моделях. Оператор велошеринга хочет: (a) найти оптимальный ночной план ребалансировки на горизонте (Network Flow), (b) просимулировать дневные поездки пользователей и ночные рейсы грузовиков с учётом позиций (Simulation + VRP / rebalancing), (c) сравнить план с фактом (Analytics). Все три задачи оперируют одними и теми же данными — но обрабатывают их по-разному.
 
 ### 15.2. Общая архитектура
 
@@ -1802,7 +1781,7 @@ L1 Graph + L2 Data Model (shared)
 
 Видит **все периоды одновременно**. Строит математическую программу (LP/MILP) и находит оптимальное распределение потоков по всему горизонту.
 
-Ресурсы — это **capacity constraint** на facility: "из Depot A можно отправить не больше X тонн за период, потому что приписано 5 грузовиков". Optimizer не знает, какой конкретно грузовик поедет и где он окажется после доставки.
+Ресурсы — это **capacity constraint** на facility: «из Depot A можно отгрузить не больше X велосипедов за период, потому что приписано N ребалансировочных грузовиков с известной вместимостью». Optimizer не знает, какой конкретно грузовик поедет и где он окажется после доставки.
 
 Используемые данные из модели: demand, supply, edge capacities, costs, fleet capacity, transformation ratios. Output: `solution_flow`, `solution_inventory`, `solution_unmet_demand` (§11.12.1).
 
@@ -1823,10 +1802,10 @@ class SimulationState:
 
     # Где каждый ресурс и что он делает
     resource_state: pd.DataFrame
-    # resource_id | resource_category | facility_id | status     | available_at_period
-    # TRK-042     | truck_20t         | depot_A     | idle       | null
-    # TRK-043     | truck_20t         | null        | in_transit | 5
-    # TRK-044     | truck_20t         | customer_12 | unloading  | 4
+    # resource_id | resource_category   | facility_id | status     | available_at_period
+    # REB-042     | rebalancing_truck   | depot_A     | idle       | null
+    # REB-043     | rebalancing_truck   | null        | in_transit | 5
+    # REB-044     | rebalancing_truck   | station_12  | unloading  | 4
 
     # Сколько commodity на каждом facility прямо сейчас
     inventory: pd.DataFrame
@@ -1854,7 +1833,7 @@ def simulation_step(
     """
 ```
 
-**Step-solver** — сменный компонент. Для газовой логистики: VRP solver (формирует маршруты грузовиков). Для велошеринга: rebalancing algorithm (ночная перестановка). Для baseline: greedy (ближайший → первый).
+**Step-solver** — сменный компонент. Для велошеринга: rebalancing algorithm (ночная перестановка велосипедов) или VRP по рейсам грузовиков. Для baseline: greedy (ближайший дефицит → первый избыток). Другие домены подключают свои стратегии (VRP, жадные эвристики и т.д.).
 
 ```python
 class StepSolver(Protocol):
@@ -1887,9 +1866,9 @@ Output: `simulation_flow_log`, `simulation_inventory_log`, `simulation_resource_
 
 |Уровень|Resource model|Знает позицию?|Потребитель|Пример|
 |---|---|---|---|---|
-|Aggregate|`resource_fleet` (count × category)|Нет|Optimizer|"5 грузовиков на Depot A, capacity = 100 т/неделю"|
+|Aggregate|`resource_fleet` (count × category)|Нет|Optimizer|"3 грузовика на Depot A, capacity = 60 велосипедов/ночь"|
 |Round-trip aware|`resource_fleet` + `edge_vehicle`|Нет (implicit)|Optimizer с round-trip|"1 грузовик = 3 рейса/неделю (48ч round-trip)"|
-|Instance-level|`resource` (L3) + `SimulationState`|Да|Simulator|"Грузовик #42 сейчас на Customer_12, вернётся через 4ч"|
+|Instance-level|`resource` (L3) + `SimulationState`|Да|Simulator|"Грузовик #42 сейчас на station_12, вернётся через 4ч"|
 
 **Aggregate** — текущая модель в optimizer-режиме. `resource_fleet.count × base_capacity` = facility capacity constraint. Ресурс мгновенно "возвращается".
 
@@ -1902,7 +1881,7 @@ max_vehicles_per_period = effective_trips × vehicle_count
 
 Это вычисляется при сборке модели или потребителем. Модель данных хранит `lead_time_hours` и `handling_hours` (через `operation_cost` или отдельный атрибут) — потребитель сам считает effective trips.
 
-**Instance-level** — simulator с `SimulationState.resource_state`. Каждый ресурс имеет позицию, статус, время до доступности. Грузовик, уехавший из Depot A в Customer_12, **недоступен** для Depot A до возвращения. Simulator отслеживает это через `resource_state`.
+**Instance-level** — simulator с `SimulationState.resource_state`. Каждый ресурс имеет позицию, статус, время до доступности. Грузовик ребалансировки, уехавший из Depot A на station_12, **недоступен** для Depot A до возвращения. Simulator отслеживает это через `resource_state`.
 
 Все три уровня используют одну и ту же модель данных — разница в том, какие таблицы потребитель использует и как интерпретирует:
 
@@ -1923,17 +1902,11 @@ max_vehicles_per_period = effective_trips × vehicle_count
 
 ### 15.7. Доменные примеры
 
-**Газовая логистика — горизонт 1 год:**
-
-- Optimizer: оптимальный план доставок на квартал. Сколько газа отправить с каждого терминала на каждый depot в каждый период.
-- Simulator: ежедневная симуляция. Каждый день: проверить уровни газа у клиентов → сформировать кандидатов на доставку → построить edges (depot → candidates) → решить VRP → грузовики выезжают → обновить состояние. Грузовик может начать из Depot A, обслужить 5 клиентов, и вернуться в Depot B (если ближе).
-- Analytics: сравнить optimizer plan vs simulation output vs historical fact. Где optimizer был слишком оптимистичен? Где simulator не смог выполнить план из-за нехватки грузовиков?
-
 **Велошеринг — горизонт 1 год:**
 
-- Optimizer: оптимальное ночное перемещение велосипедов между станциями по неделям.
-- Simulator: днём — demand (пользователи берут/возвращают велосипеды, inventory меняется). Ночью — step-solver (rebalancing algorithm) перемещает велосипеды ребалансировочными грузовиками. На следующий день — новый demand на обновлённых inventory.
-- Analytics: как ребалансировка повлияла на service level (% станций с доступными велосипедами) по сравнению с baseline без ребалансировки.
+- Optimizer: оптимальный план ночной ребалансировки между станциями и депо по неделям/дням; сколько WORKING_BIKE/BROKEN_BIKE переместить по каждому ребру в каждом периоде.
+- Simulator: днём — demand (пользователи берут/возвращают велосипеды, inventory на станциях меняется). Ночью — step-solver (rebalancing / VRP) перемещает велосипеды грузовиками REBALANCING_TRUCK; отдельно можно моделировать поток BROKEN_BIKE → Maintenance Hub → WORKING_BIKE. На следующий день — новый demand на обновлённых остатках.
+- Analytics: сравнить optimizer plan vs simulation vs historical trips/inventory snapshots; service level (% станций с доступными велосипедами), недостача против плана, нехватка грузовиков.
 
 ---
 
@@ -1947,7 +1920,7 @@ max_vehicles_per_period = effective_trips × vehicle_count
 
 - L1: абстрактный граф (Node, Edge)
 - L2: логистическая модель (Facility с ролями, CommodityCategory, ResourceCategory, PlanningHorizon с segments, Transformation (N→M), Resource-Modal/Commodity compatibility, Solution tables, Facility/Commodity Hierarchies)
-- L3: конкретный домен (Terminal, Depot, Truck, GasLot)
+- L3: конкретный домен (Station, Depot, Maintenance Hub, REBALANCING_TRUCK, bike_id)
 
 ---
 

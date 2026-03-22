@@ -33,11 +33,11 @@ flowchart TB
         LT_note["In multi-resolution planning,<br/>lead_time_periods depends on<br/>departure period type"]
     end
 
-    subgraph SharedCapacity["Shared Capacity with Mixed Units"]
-        SC1["Edge capacity: 20 tons"]
-        SC2["BULK_GAS: capacity_consumption = 1.0<br/>(1 ton GAS = 1 ton capacity)"]
-        SC3["CYLINDERS: capacity_consumption = 0.012<br/>(1 cylinder = 0.012 tons capacity)"]
-        SC4["Constraint: Σ flow[cc] × consumption[cc] ≤ 20"]
+    subgraph SharedCapacity["Shared Capacity with Mixed Units (bike-sharing)"]
+        SC1["Edge capacity: 12 bike slots / trip (truck)"]
+        SC2["WORKING_BIKE: capacity_consumption = 1.0<br/>(one standard bike = one slot)"]
+        SC3["E_BIKE: capacity_consumption = 1.2<br/>(heavier / larger footprint)"]
+        SC4["Constraint: Σ flow[cc] × consumption[cc] ≤ 12"]
     end
 
     subgraph EdgeRules["Edge Construction"]

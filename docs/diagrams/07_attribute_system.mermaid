@@ -18,14 +18,14 @@ flowchart TB
         G1["facility_type<br/>grain: [facility_id]<br/>Simple: no expansion"]
         G2["storage_capacity<br/>grain: [facility_id, commodity_category]<br/>Medium: +1 dimension"]
         G3["handling_cost<br/>grain: [facility_id, operation_type, period_id]<br/>Complex: +2 dimensions"]
-        G4["filling_cost<br/>grain: [facility_id, operation_type,<br/>commodity_category, period_id]<br/>Most complex: +3 dimensions"]
+        G4["repair_cost<br/>grain: [facility_id, operation_type,<br/>commodity_category, period_id]<br/>Most complex: +3 dimensions (REPAIR at hub)"]
     end
 
     subgraph GrainGroups["GrainGroups — avoiding cross-join explosion"]
         direction TB
         GG_problem["Problem: merging independent dimensions<br/>(operation_type × commodity_category)<br/>causes cross-join explosion"]
         GG_solution["Solution: group attributes by<br/>chain-compatible grains<br/>(one is subset of another)"]
-        GroupA["Group A<br/>───────────<br/>grain: facility_id × commodity_category × period_id<br/>attrs: storage_capacity, filling_rate"]
+        GroupA["Group A<br/>───────────<br/>grain: facility_id × commodity_category × period_id<br/>attrs: storage_capacity, dock_throughput"]
         GroupB["Group B<br/>───────────<br/>grain: facility_id × operation_type × period_id<br/>attrs: handling_cost_base, handling_cost"]
         GroupC["Group C<br/>───────────<br/>grain: facility_id<br/>attrs: facility_type"]
     end

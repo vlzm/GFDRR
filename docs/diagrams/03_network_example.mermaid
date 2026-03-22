@@ -1,42 +1,42 @@
 ---
-title: "3. Network Graph — Gas Logistics Example"
+title: "3. Network Graph — Bike-Sharing Example"
 ---
 
 flowchart LR
-    subgraph Sources["SOURCES"]
-        T1["Terminal 1<br/>SOURCE + STORAGE<br/>supply: BULK_GAS"]
-        T2["Terminal 2<br/>SOURCE + STORAGE<br/>supply: BULK_GAS"]
+    subgraph Sources["SOURCES / high supply depots"]
+        D0["Central Depot<br/>SOURCE + STORAGE<br/>supply: WORKING_BIKE"]
+        D1["Regional Depot A<br/>SOURCE + STORAGE<br/>supply: WORKING_BIKE"]
     end
 
-    subgraph Processing["TRANSSHIPMENT + STORAGE"]
-        FP["Filling Plant<br/>TRANSSHIPMENT + STORAGE<br/>─────────<br/>Transformation:<br/>BULK_GAS → CYLINDERS<br/>(85 cyl/ton, 2% loss)"]
-        D1["Depot 1<br/>TRANSSHIPMENT + STORAGE"]
-        D2["Depot 2<br/>TRANSSHIPMENT + STORAGE"]
+    subgraph Processing["MAINTENANCE & transshipment"]
+        MH["Maintenance Hub<br/>TRANSSHIPMENT + STORAGE<br/>─────────<br/>Transformation:<br/>BROKEN_BIKE → WORKING_BIKE<br/>(1:1, 5% loss)"]
+        R1["Relay Depot 1<br/>TRANSSHIPMENT + STORAGE"]
+        R2["Relay Depot 2<br/>TRANSSHIPMENT + STORAGE"]
     end
 
-    subgraph Sinks["SINKS"]
-        C1["Customer 1<br/>SINK<br/>demand: CYLINDERS"]
-        C2["Customer 2<br/>SINK<br/>demand: CYLINDERS"]
-        C3["Customer 3<br/>SINK<br/>demand: CYLINDERS"]
+    subgraph Sinks["STATIONS / net demand"]
+        S1["Station 1<br/>SINK + STORAGE<br/>demand: trips"]
+        S2["Station 2<br/>SINK + STORAGE<br/>demand: trips"]
+        S3["Station 3<br/>SINK + STORAGE<br/>demand: trips"]
     end
 
-    T1 ==>|"BULK_GAS<br/>🚛 ROAD"| FP
-    T2 ==>|"BULK_GAS<br/>🚛 ROAD"| FP
-    T1 -.->|"BULK_GAS<br/>🚂 RAIL"| D1
+    D0 ==>|"WORKING_BIKE<br/>🚛 ROAD"| R1
+    D1 ==>|"WORKING_BIKE<br/>🚛 ROAD"| R2
+    R1 -.->|"BROKEN_BIKE<br/>🚛 ROAD"| MH
+    R2 ==>|"BROKEN_BIKE<br/>🚛 ROAD"| MH
 
-    FP ==>|"CYLINDERS<br/>🚛 ROAD"| D1
-    FP ==>|"CYLINDERS<br/>🚛 ROAD"| D2
-    FP -->|"CYLINDERS<br/>🚛 ROAD"| C1
+    MH ==>|"WORKING_BIKE<br/>🚛 ROAD"| R1
+    MH ==>|"WORKING_BIKE<br/>🚛 ROAD"| R2
 
-    D1 -->|"CYLINDERS<br/>🚛 ROAD"| C1
-    D1 -->|"CYLINDERS<br/>🚛 ROAD"| C2
-    D2 -->|"CYLINDERS<br/>🚛 ROAD"| C2
-    D2 -->|"CYLINDERS<br/>🚛 ROAD"| C3
+    R1 ==>|"WORKING_BIKE<br/>🚛 ROAD"| S1
+    R1 ==>|"WORKING_BIKE<br/>🚛 ROAD"| S2
+    R2 ==>|"WORKING_BIKE<br/>🚛 ROAD"| S2
+    R2 ==>|"WORKING_BIKE<br/>🚛 ROAD"| S3
 
     classDef source fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px
     classDef transship fill:#bbdefb,stroke:#1565c0,stroke-width:2px
     classDef sink fill:#ffcdd2,stroke:#c62828,stroke-width:2px
 
-    class T1,T2 source
-    class FP,D1,D2 transship
-    class C1,C2,C3 sink
+    class D0,D1 source
+    class MH,R1,R2 transship
+    class S1,S2,S3 sink

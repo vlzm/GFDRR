@@ -21,14 +21,14 @@ flowchart TB
 
     subgraph Examples["Transformation Examples"]
         direction TB
-        Ex1["1→1 Conversion<br/>───────────<br/>Filling Plant:<br/>BULK_GAS ×1.0 → CYLINDERS ×85.0<br/>loss: 2%"]
-        Ex2["1→N Splitting<br/>───────────<br/>Refinery:<br/>CRUDE ×1.0 → GASOLINE ×0.45<br/>+ DIESEL ×0.30 + KEROSENE ×0.15<br/>loss: 10%"]
-        Ex3["N→1 Blending<br/>───────────<br/>Blender:<br/>REAGENT_A ×0.6 + REAGENT_B ×0.4<br/>→ PRODUCT ×1.0<br/>loss: 2%"]
+        Ex1["1→1 Repair (bike-sharing)<br/>───────────<br/>Maintenance Hub:<br/>BROKEN_BIKE ×1.0 → WORKING_BIKE ×1.0<br/>loss: 5%"]
+        Ex2["1→N Splitting (other domain)<br/>───────────<br/>Refinery:<br/>CRUDE ×1.0 → GASOLINE ×0.45<br/>+ DIESEL ×0.30 + KEROSENE ×0.15<br/>loss: 10%"]
+        Ex3["N→1 Blending<br/>───────────<br/>Blender:<br/>REAGENT_A ×0.6, REAGENT_B ×0.4<br/>→ PRODUCT ×1.0<br/>loss: 2%"]
     end
 
     subgraph EdgeCommodity["Edge-Commodity Filtering"]
         EC["edge_commodity table<br/>───────────<br/>Each edge has a set of<br/>allowed commodity_categories<br/>+ capacity_consumption coefficient"]
-        EC_ex["Example:<br/>Terminal→FP (ROAD): only BULK_GAS<br/>FP→Depot (ROAD): only CYLINDERS<br/>FP→Customer (ROAD): only CYLINDERS"]
+        EC_ex["Bike-sharing example:<br/>Depot→Station (ROAD): WORKING_BIKE, BROKEN_BIKE<br/>Depot→Maintenance Hub (ROAD): BROKEN_BIKE<br/>Maintenance Hub→Depot (ROAD): WORKING_BIKE"]
     end
 
     classDef flow fill:#e3f2fd,stroke:#1565c0

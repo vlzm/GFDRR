@@ -80,20 +80,20 @@ flowchart LR
 
 ---
 
-## 3. Network Graph — Gas Logistics Example
+## 3. Network Graph — Bike-Sharing Example
 
 **What to learn:** How facilities and edges form a concrete network with commodity flows.
 
-This shows a gas logistics network: Terminals (SOURCE) supply BULK_GAS → Filling Plant transforms it into CYLINDERS → Depots and Customers (SINK) receive CYLINDERS. Multiple modal types (ROAD, RAIL) can connect the same pair of facilities.
+This shows a bike-sharing network: central/ regional depots supply **WORKING_BIKE** for rebalancing; **Maintenance Hub** repairs **BROKEN_BIKE → WORKING_BIKE**; relay depots and stations exchange bikes on **ROAD** (and optionally **RAIL** for inter-city legs).
 
 ```mermaid
 flowchart LR
-    T1["Terminal 1<br/>SOURCE"] ==>|"BULK_GAS 🚛"| FP["Filling Plant<br/>TRANSSHIPMENT"]
-    T1 -.->|"BULK_GAS 🚂"| D1["Depot 1"]
-    FP ==>|"CYLINDERS 🚛"| D1
-    FP ==>|"CYLINDERS 🚛"| D2["Depot 2"]
-    D1 -->|"CYLINDERS 🚛"| C1["Customer 1<br/>SINK"]
-    D2 -->|"CYLINDERS 🚛"| C2["Customer 2<br/>SINK"]
+    D0["Central Depot<br/>SOURCE"] ==>|"WORKING_BIKE 🚛"| R1["Relay 1"]
+    D1["Regional Depot<br/>SOURCE"] ==>|"WORKING_BIKE 🚛"| R2["Relay 2"]
+    R1 -.->|"BROKEN_BIKE 🚛"| MH["Maintenance Hub"]
+    MH ==>|"WORKING_BIKE 🚛"| R1
+    R1 ==>|"WORKING_BIKE 🚛"| S1["Station 1<br/>SINK"]
+    R2 ==>|"WORKING_BIKE 🚛"| S2["Station 2<br/>SINK"]
 ```
 
 > Full diagram: [`docs/diagrams/03_network_example.mermaid`](diagrams/03_network_example.mermaid)
@@ -108,7 +108,7 @@ Key concepts:
 - **Flow variable:** `flow[edge, commodity_category, period]`
 - **Conservation:** per-commodity balance at each node based on its role
 - **Shared edge capacity:** all commodities share the edge capacity via `capacity_consumption` coefficients
-- **Transformation:** N→M conversion at facilities (1→1 filling, 1→N refinery splitting, N→1 blending)
+- **Transformation:** N→M conversion at facilities (1→1 **REPAIR** at Maintenance Hub, 1→N refinery-style splitting, N→1 blending in other domains)
 
 > Full diagram: [`docs/diagrams/04_multi_commodity_flow.mermaid`](diagrams/04_multi_commodity_flow.mermaid)
 
