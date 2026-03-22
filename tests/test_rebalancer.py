@@ -10,7 +10,8 @@ from gbp.rebalancer.demand import compute_utilization_and_balance
 
 def _inject_imbalance(loaded_graph_loader, date: pd.Timestamp) -> None:
     """Create a deterministic imbalance for one timestamp."""
-    stations = loaded_graph_loader._source.df_stations.reset_index(drop=True)
+    stations = loaded_graph_loader.source.df_stations.reset_index(drop=True)
+    inv = loaded_graph_loader.source.df_inventory_ts
 
     for index, row in stations.iterrows():
         node_id = row["node_id"]
@@ -21,7 +22,7 @@ def _inject_imbalance(loaded_graph_loader, date: pd.Timestamp) -> None:
             quantity = 0
         else:
             quantity = capacity // 2
-        loaded_graph_loader._inventory_ts.loc[date, node_id] = quantity
+        inv.loc[date, node_id] = quantity
 
 
 def test_compute_utilization_and_balance_uses_quantity_column() -> None:

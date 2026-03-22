@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 import pandas as pd
 
 if TYPE_CHECKING:
-    from gbp.loaders.dataloader_graph import RebalancerGraphSnapshot
+    from gbp.core.model import RawModelData, ResolvedModelData
 
 
 class DataSourceProtocol(Protocol):
@@ -31,11 +31,18 @@ class DataSourceProtocol(Protocol):
 
 
 class GraphLoaderProtocol(Protocol):
-    """Temporal model loader: core tables + rebalancer-oriented snapshots."""
+    """Builds ``gbp.core`` model tables from a data source."""
+
+    @property
+    def raw(self) -> RawModelData: ...
+
+    @property
+    def resolved(self) -> ResolvedModelData: ...
+
+    @property
+    def source(self) -> DataSourceProtocol: ...
 
     @property
     def available_dates(self) -> pd.DatetimeIndex: ...
 
     def load_data(self) -> None: ...
-
-    def rebalancer_snapshot(self, date: pd.Timestamp) -> RebalancerGraphSnapshot: ...

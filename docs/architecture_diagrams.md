@@ -271,7 +271,7 @@ Aggregation level is configured per scenario (`scenario.facility_aggregation_lev
 - `DataSourceProtocol` — interface for any data source (CSV, DB, API, mock)
 - `DataLoaderMock` — generates synthetic Citi Bike-style data
 - `DataLoaderGraph` — source data → `RawModelData` + `build_model` → `ResolvedModelData`; Pandera validates sources
-- `GraphLoaderProtocol` — temporal access + `rebalancer_snapshot` for PDP
+- `GraphLoaderProtocol` — `raw`, `resolved`, `source`, `available_dates`, `rebalancer_snapshot` for PDP
 
 **I/O (`gbp.io`):**
 - Parquet: directory of `.parquet` files + `_metadata.json` manifest

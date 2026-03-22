@@ -18,12 +18,15 @@ from .demand import DemandCalculator
 
 
 class DataLoaderRebalancer:
-    """Build rebalancer data from ``DataLoaderGraph.rebalancer_snapshot`` (PDP inputs).
+    """Build PDP solver inputs from a ``GraphLoaderProtocol``.
+
+    Extracts what the rebalancer needs directly from ``resolved`` model and
+    the underlying ``source`` data — no intermediate snapshot format required.
 
     Node types used for filtering are read from *config*:
 
-    - ``inventory_node_type`` — nodes that carry rebalanceable inventory
-    - ``depot_node_type``     — nodes that serve as VRP depot (resource origin)
+    - ``inventory_node_type`` — facility_type that carries rebalanceable inventory
+    - ``depot_node_type``     — facility_type that serves as VRP depot
 
     After ``load_data(date)`` the following attributes are available:
 
@@ -43,70 +46,61 @@ class DataLoaderRebalancer:
         if date is None:
             date = self.dataloader_graph.available_dates[0]
 
-        snapshot = self.dataloader_graph.rebalancer_snapshot(date)
+        res = self.dataloader_graph.resolved
+        src = self.dataloader_graph.source
 
         inventory_type = self.config.inventory_node_type
         depot_type = self.config.depot_node_type
 
-        # Input boundary: validate snapshot provides required data
-        if snapshot.inventory is None:
-            raise ValueError("Snapshot must include inventory data")
-        if snapshot.coordinates is None:
-            raise ValueError("Snapshot must include coordinates")
-        if snapshot.resources is None:
-            raise ValueError("Snapshot must include resources")
-        if "inventory_capacity" not in snapshot.node_attributes:
-            raise ValueError("Snapshot must include inventory_capacity node attribute")
+        facilities = res.facilities
 
-        inv_nodes = snapshot.nodes[snapshot.nodes["node_type"] == inventory_type].copy()
-        if len(inv_nodes) == 0:
+        inv_facilities = facilities[facilities["facility_type"] == inventory_type].copy()
+        if len(inv_facilities) == 0:
             raise ValueError(
-                f"No nodes of type '{inventory_type}' found in snapshot"
+                f"No facilities of type '{inventory_type}' found in resolved model"
             )
 
-        depot_nodes = snapshot.nodes[snapshot.nodes["node_type"] == depot_type].copy()
-        if len(depot_nodes) == 0:
+        depot_facilities = facilities[facilities["facility_type"] == depot_type].copy()
+        if len(depot_facilities) == 0:
             raise ValueError(
-                f"No nodes of type '{depot_type}' found in snapshot"
+                f"No facilities of type '{depot_type}' found in resolved model"
             )
 
-        coordinates = snapshot.coordinates[["node_id", "latitude", "longitude"]].copy()
-        capacities = snapshot.node_attributes["inventory_capacity"].data[
-            ["node_id", "value"]
-        ].rename(columns={"value": "inventory_capacity"})
-        inventory = (
-            snapshot.inventory[["node_id", "quantity"]]
-            .groupby("node_id", as_index=False)["quantity"]
-            .sum()
+        inv_ids = inv_facilities["facility_id"].astype(str).tolist()
+
+        coordinates = inv_facilities[["facility_id", "lat", "lon"]].rename(
+            columns={"facility_id": "node_id", "lat": "latitude", "lon": "longitude"},
+        ).copy()
+
+        op_caps = res.operation_capacities
+        if op_caps is None or op_caps.empty:
+            raise ValueError("No operation capacities found in resolved model")
+        capacities = (
+            op_caps[op_caps["operation_type"] == "storage"]
+            [["facility_id", "capacity"]]
+            .rename(columns={"facility_id": "node_id", "capacity": "inventory_capacity"})
         )
 
-        # Build node state by joining filtered nodes with coordinates, attributes, and inventory
+        inv_ts = src.df_inventory_ts
+        if date not in inv_ts.index:
+            nearest = inv_ts.index[inv_ts.index.get_indexer([date], method="nearest")[0]]
+            date = pd.Timestamp(nearest)
+        row = inv_ts.loc[date]
+        inventory = pd.DataFrame({
+            "node_id": inv_ids,
+            "quantity": [int(row[sid]) for sid in inv_ids],
+        })
+
         df_node_state = (
-            inv_nodes[["id"]]
-            .merge(
-                coordinates,
-                left_on="id",
-                right_on="node_id",
-                how="left",
-            )
-            .drop(columns=["id"])
-            .merge(
-                capacities,
-                on="node_id",
-                how="left",
-            )
-            .merge(
-                inventory,
-                on="node_id",
-                how="left",
-            )
+            coordinates
+            .merge(capacities, on="node_id", how="left")
+            .merge(inventory, on="node_id", how="left")
         )
         df_node_state["quantity"] = df_node_state["quantity"].fillna(0).astype(int)
         if df_node_state["inventory_capacity"].isna().any():
             raise ValueError("Missing inventory_capacity for one or more inventory nodes")
         NodeStateSchema.validate(df_node_state)
 
-        # Demand calculation
         demand_calculator = DemandCalculator(df_node_state, self.config)
         self.df_node_demand, sources, destinations = demand_calculator.calculate_demand()
 
@@ -114,33 +108,24 @@ class DataLoaderRebalancer:
             self.data = None
             return
 
-        # Depot coords (centroid of depot-type nodes)
-        depot_coords_df = (
-            depot_nodes[["id"]]
-            .merge(
-                coordinates,
-                left_on="id",
-                right_on="node_id",
-                how="left",
-            )
-        )
         depot_coords = (
-            float(depot_coords_df["latitude"].mean()),
-            float(depot_coords_df["longitude"].mean()),
+            float(depot_facilities["lat"].mean()),
+            float(depot_facilities["lon"].mean()),
         )
 
-        resource_capacities = snapshot.resources["capacity"].astype(int).tolist()
+        resource_capacities = src.df_resources["capacity"].astype(int).tolist()
         if len(resource_capacities) == 0:
-            raise ValueError("No resources available in snapshot")
+            raise ValueError("No resources available in source data")
 
-        # PDP model
+        edge_distances = self._build_edge_distance_map(res.edges)
+
         pairs = self.create_pickup_delivery_pairs(sources, destinations)
 
         self.data = self._build_pdp_model(
             pairs=pairs,
             depot_coords=depot_coords,
             resource_capacities=resource_capacities,
-            distance_service=snapshot.distance_service,
+            edge_distances=edge_distances,
         )
 
     # ------------------------------------------------------------------
@@ -148,12 +133,24 @@ class DataLoaderRebalancer:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _build_edge_distance_map(
+        edges: pd.DataFrame | None,
+    ) -> dict[tuple[str, str], float]:
+        """Build {(source_id, target_id): distance_km} from resolved edges."""
+        if edges is None or edges.empty:
+            return {}
+        return {
+            (str(row["source_id"]), str(row["target_id"])): float(row["distance"])
+            for _, row in edges.iterrows()
+        }
+
+    @staticmethod
     def create_distance_matrix(
         locations: list[tuple[float, float]],
         graph_node_ids: list[str | None],
-        distance_service,
+        edge_distances: dict[tuple[str, str], float],
     ) -> np.ndarray:
-        """Build distance matrix in metres using graph distance when possible."""
+        """Build distance matrix in metres; uses edge distances when available."""
         n_locations = len(locations)
         matrix = np.zeros((n_locations, n_locations), dtype=int)
 
@@ -164,14 +161,11 @@ class DataLoaderRebalancer:
 
                 source_node_id = graph_node_ids[i]
                 target_node_id = graph_node_ids[j]
-                if (
-                    distance_service is not None and
-                    source_node_id is not None and
-                    target_node_id is not None
-                ):
-                    km = distance_service.get_distance(source_node_id, target_node_id)
-                    matrix[i, j] = int(round(km * 1000))
-                    continue
+                if source_node_id is not None and target_node_id is not None:
+                    km = edge_distances.get((source_node_id, target_node_id))
+                    if km is not None:
+                        matrix[i, j] = int(round(km * 1000))
+                        continue
 
                 matrix[i, j] = int(round(
                     DataLoaderRebalancer._haversine_distance_m(
@@ -250,7 +244,7 @@ class DataLoaderRebalancer:
         pairs: list[dict],
         depot_coords: tuple,
         resource_capacities: list[int],
-        distance_service,
+        edge_distances: dict[tuple[str, str], float],
     ) -> PdpModel:
         """Node layout: [depot, pickup_1, delivery_1, pickup_2, delivery_2, ...]"""
         locations: list[tuple[float, float]] = [depot_coords]
@@ -278,7 +272,7 @@ class DataLoaderRebalancer:
             "distance_matrix": self.create_distance_matrix(
                 locations=locations,
                 graph_node_ids=graph_node_ids,
-                distance_service=distance_service,
+                edge_distances=edge_distances,
             ),
             "demands": demands,
             "pickups_deliveries": pickups_deliveries,

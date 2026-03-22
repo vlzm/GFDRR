@@ -1,8 +1,9 @@
-"""Graph loader: mock/CSV sources → ``RawModelData`` → ``build_model`` → ``ResolvedModelData``.
+"""Assemble ``RawModelData`` from a ``DataSourceProtocol`` and run ``gbp.build.build_model``.
 
-Static network and cost tables are derived once in ``load_data()``.  Hourly inventory
-stays on the source as ``df_inventory_ts``; use ``inventory_timeseries`` or
-``rebalancer_snapshot(ts)`` for time-sliced views.
+This module only produces what lives in ``gbp.core`` / ``gbp.build``: validated
+``RawModelData``, then ``ResolvedModelData``.  Extra wide tables from the source
+(telemetry, trips, hourly inventory matrix, etc.) are **not** part of that model;
+read them from ``loader.source`` (the same object passed into the constructor).
 
 Usage::
 
@@ -12,14 +13,13 @@ Usage::
     loader = DataLoaderGraph(mock, GraphLoaderConfig())
     loader.load_data()
 
-    resolved = loader.resolved
-    snap = loader.rebalancer_snapshot(pd.Timestamp("2025-01-03 12:00"))
+    raw, resolved = loader.raw, loader.resolved
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+
 import pandas as pd
 import structlog
 
@@ -39,61 +39,6 @@ log = structlog.get_logger()
 
 COMMODITY_CATEGORY = "working_bike"
 RESOURCE_CATEGORY = "rebalancing_truck"
-
-
-@dataclass
-class SnapshotAttributeTable:
-    """Subset of legacy ``AttributeTable`` fields used by ``DataLoaderRebalancer``."""
-
-    name: str
-    entity_type: str
-    attribute_class: str
-    granularity_keys: list[str]
-    value_columns: list[str]
-    value_types: dict[str, str]
-    data: pd.DataFrame
-
-
-@dataclass
-class RebalancerGraphSnapshot:
-    """Minimal graph-shaped view for ``DataLoaderRebalancer`` (legacy PDP pipeline)."""
-
-    nodes: pd.DataFrame
-    coordinates: pd.DataFrame
-    resources: pd.DataFrame
-    node_attributes: dict[str, SnapshotAttributeTable]
-    inventory: pd.DataFrame
-    distance_service: EdgeDistanceLookup | None
-
-
-class EdgeDistanceLookup:
-    """Directed road distance (km) from resolved edges, with coordinate fallback."""
-
-    def __init__(
-        self,
-        edges: pd.DataFrame | None,
-        latlon_by_id: dict[str, tuple[float, float]],
-        *,
-        backend: str,
-    ) -> None:
-        self._backend = backend
-        self._latlon = latlon_by_id
-        self._km: dict[tuple[str, str], float] = {}
-        if edges is not None and not edges.empty and "distance" in edges.columns:
-            sub = edges[edges.get("modal_type", ModalType.ROAD.value) == ModalType.ROAD.value]
-            for _, row in sub.iterrows():
-                a, b = str(row["source_id"]), str(row["target_id"])
-                self._km[(a, b)] = float(row["distance"])
-
-    def get_distance(self, source_id: str, target_id: str) -> float:
-        key = (source_id, target_id)
-        if key in self._km:
-            return self._km[key]
-        p0 = self._latlon.get(source_id)
-        p1 = self._latlon.get(target_id)
-        if p0 is None or p1 is None:
-            return 0.0
-        return _pair_distance_km(p0[0], p0[1], p1[0], p1[1], self._backend)
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -133,7 +78,6 @@ class DataLoaderGraph:
         self._log = log.bind(loader="graph_core")
         self._raw: RawModelData | None = None
         self._resolved: ResolvedModelData | None = None
-        self._inventory_ts: pd.DataFrame | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -148,7 +92,6 @@ class DataLoaderGraph:
         self._raw = self._build_raw_model()
         self._raw.validate()
         self._resolved = build_model(self._raw)
-        self._inventory_ts = self._source.df_inventory_ts
 
         n_fac = len(self._resolved.facilities)
         n_e = len(self._resolved.edges) if self._resolved.edges is not None else 0
@@ -171,160 +114,9 @@ class DataLoaderGraph:
         return self._source.timestamps
 
     @property
-    def inventory_timeseries(self) -> pd.DataFrame:
-        if self._inventory_ts is None:
-            return pd.DataFrame()
-        return self._inventory_ts
-
-    @property
-    def inventory_ts(self) -> pd.DataFrame:
-        """Alias for tests and notebooks that mutate hourly inventory in place."""
-        if self._inventory_ts is None:
-            raise ValueError("Data is not loaded. Call load_data() first.")
-        return self._inventory_ts
-
-    @property
-    def telemetry_ts(self) -> pd.DataFrame:
-        return self._source.df_telemetry_ts
-
-    @property
-    def trip_flows_hourly(self) -> pd.DataFrame:
-        """Aggregated hourly trip counts (source station → target station), from ``df_trips``."""
-        return _trip_flows_hourly(self._source.df_trips)
-
-    def rebalancer_snapshot(self, date: pd.Timestamp) -> RebalancerGraphSnapshot:
-        """Thin view for ``DataLoaderRebalancer`` (nodes, coords, inventory, distances)."""
-        res = self.resolved
-        src = self._source
-        inv_ts = self.inventory_ts
-        if date not in inv_ts.index:
-            nearest = inv_ts.index[inv_ts.index.get_indexer([date], method="nearest")[0]]
-            date = pd.Timestamp(nearest)
-
-        stations = src.df_stations
-        depots = src.df_depots
-        station_ids = list(stations["node_id"].astype(str))
-        depot_ids = list(depots["node_id"].astype(str))
-
-        nodes = pd.concat(
-            [
-                pd.DataFrame({"id": station_ids, "node_type": "station"}),
-                pd.DataFrame({"id": depot_ids, "node_type": "depot"}),
-            ],
-            ignore_index=True,
-        )
-
-        coord_rows = []
-        for _, r in stations.iterrows():
-            coord_rows.append(
-                {
-                    "node_id": str(r["node_id"]),
-                    "latitude": float(r["lat"]),
-                    "longitude": float(r["lon"]),
-                },
-            )
-        for _, r in depots.iterrows():
-            coord_rows.append(
-                {
-                    "node_id": str(r["node_id"]),
-                    "latitude": float(r["lat"]),
-                    "longitude": float(r["lon"]),
-                },
-            )
-        coordinates = pd.DataFrame(coord_rows)
-
-        latlon = {row["node_id"]: (row["latitude"], row["longitude"]) for _, row in coordinates.iterrows()}
-
-        resources = pd.DataFrame(
-            {
-                "id": src.df_resources["resource_id"].values,
-                "resource_type": "vehicle",
-                "capacity": src.df_resources["capacity"].values,
-            },
-        )
-        tr = src.df_truck_rates
-        if tr is not None and not tr.empty:
-            resources = resources.merge(tr, left_on="id", right_on="resource_id", how="left").drop(
-                columns=["resource_id"], errors="ignore",
-            )
-
-        cap_data = stations[["node_id", "inventory_capacity"]].rename(
-            columns={"inventory_capacity": "value"},
-        )
-        node_attributes: dict[str, SnapshotAttributeTable] = {
-            "inventory_capacity": SnapshotAttributeTable(
-                name="inventory_capacity",
-                entity_type="node",
-                attribute_class="capacity",
-                granularity_keys=["node_id"],
-                value_columns=["value"],
-                value_types={"value": "int"},
-                data=cap_data,
-            ),
-        }
-
-        costs = src.df_station_costs
-        if costs is not None and not costs.empty:
-            fc = costs.rename(columns={"station_id": "node_id"})[["node_id", "fixed_cost_per_visit"]].rename(
-                columns={"fixed_cost_per_visit": "value"},
-            )
-            vc = costs.rename(columns={"station_id": "node_id"})[["node_id", "cost_per_bike_moved"]].rename(
-                columns={"cost_per_bike_moved": "value"},
-            )
-            node_attributes["station_fixed_cost"] = SnapshotAttributeTable(
-                name="station_fixed_cost",
-                entity_type="node",
-                attribute_class="cost",
-                granularity_keys=["node_id"],
-                value_columns=["value"],
-                value_types={"value": "float"},
-                data=fc,
-            )
-            node_attributes["station_variable_cost"] = SnapshotAttributeTable(
-                name="station_variable_cost",
-                entity_type="node",
-                attribute_class="cost",
-                granularity_keys=["node_id"],
-                value_columns=["value"],
-                value_types={"value": "float"},
-                data=vc,
-            )
-
-        if {"node_id", "name", "short_name"}.issubset(stations.columns):
-            node_attributes["station_info"] = SnapshotAttributeTable(
-                name="station_info",
-                entity_type="node",
-                attribute_class="property",
-                granularity_keys=["node_id"],
-                value_columns=["name", "short_name"],
-                value_types={"name": "str", "short_name": "str"},
-                data=stations[["node_id", "name", "short_name"]].copy(),
-            )
-
-        row = inv_ts.loc[date]
-        inventory = pd.DataFrame(
-            {
-                "node_id": station_ids,
-                "commodity_id": ["bike"] * len(station_ids),
-                "quantity": [int(row[sid]) for sid in station_ids],
-            },
-        )
-
-        edges_for_dist = (
-            res.edges
-            if self._config.build_edges and res.edges is not None and not res.edges.empty
-            else None
-        )
-        dist = EdgeDistanceLookup(edges_for_dist, latlon, backend=self._config.distance_backend)
-
-        return RebalancerGraphSnapshot(
-            nodes=nodes,
-            coordinates=coordinates,
-            resources=resources,
-            node_attributes=node_attributes,
-            inventory=inventory,
-            distance_service=dist,
-        )
+    def source(self) -> DataSourceProtocol:
+        """Underlying data source (raw DataFrames, including non-core tables)."""
+        return self._source
 
     # ------------------------------------------------------------------
     # Internal
@@ -670,47 +462,3 @@ class DataLoaderGraph:
             operation_costs=operation_costs,
             resource_costs=resource_costs,
         )
-
-
-def _trip_flows_hourly(trips: pd.DataFrame) -> pd.DataFrame:
-    if trips is None or trips.empty:
-        return pd.DataFrame(columns=["source_id", "target_id", "period", "value"])
-    t = trips.copy()
-    return (
-        t.assign(
-            source_id=t["start_station_id"].astype(str),
-            target_id=t["end_station_id"].astype(str),
-            period=pd.to_datetime(t["started_at"]).dt.floor("h"),
-        )
-        .groupby(["source_id", "target_id", "period"], as_index=False)
-        .size()
-        .rename(columns={"size": "value"})
-    )
-
-
-def _telemetry_long(df: pd.DataFrame) -> pd.DataFrame:
-    """Citi Bike-like wide telemetry → long [node_id, metric, timestamp, value]."""
-    if df is None or df.empty:
-        return pd.DataFrame(columns=["node_id", "metric", "timestamp", "value"])
-    metrics = [
-        "num_bikes_available",
-        "num_ebikes_available",
-        "num_docks_available",
-        "num_docks_disabled",
-        "num_bikes_disabled",
-    ]
-    present = [m for m in metrics if m in df.columns]
-    if not present:
-        return pd.DataFrame(columns=["node_id", "metric", "timestamp", "value"])
-    id_vars = ["timestamp", "station_id"]
-    long = df[id_vars + present].melt(
-        id_vars=id_vars,
-        var_name="metric",
-        value_name="value",
-    )
-    return long.rename(columns={"station_id": "node_id"})
-
-
-def telemetry_long_from_source(df_telemetry_ts: pd.DataFrame) -> pd.DataFrame:
-    """Public helper for notebooks: long telemetry from mock/CSV shape."""
-    return _telemetry_long(df_telemetry_ts)

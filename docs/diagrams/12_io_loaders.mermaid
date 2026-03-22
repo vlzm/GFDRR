@@ -13,7 +13,7 @@ flowchart TB
         DSP["DataSourceProtocol<br/>───────────<br/>load_data() → populates DataFrames"]
         GLC["GraphLoaderConfig<br/>───────────<br/>distance_backend: haversine|euclidean<br/>default_speed_kmh: 50.0<br/>build_edges: true"]
         DLG["DataLoaderGraph<br/>───────────<br/>load_data():<br/>Pandera validate source<br/>→ assemble RawModelData<br/>→ build_model() → ResolvedModelData"]
-        GLP["GraphLoaderProtocol<br/>───────────<br/>available_dates<br/>rebalancer_snapshot(date)"]
+        GLP["GraphLoaderProtocol<br/>───────────<br/>raw, resolved, source<br/>available_dates<br/>rebalancer_snapshot(date)"]
     end
 
     subgraph CoreModel["gbp.core"]

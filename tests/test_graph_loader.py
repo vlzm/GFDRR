@@ -1,4 +1,4 @@
-"""Tests for ``DataLoaderGraph`` → ``RawModelData`` / ``ResolvedModelData`` / rebalancer snapshot."""
+"""Tests for ``DataLoaderGraph`` → ``RawModelData`` / ``ResolvedModelData``."""
 
 from __future__ import annotations
 
@@ -7,12 +7,7 @@ import pandas as pd
 from gbp.core.enums import ModalType
 from gbp.core.model import RawModelData, ResolvedModelData
 from gbp.loaders import DataLoaderGraph, DataLoaderMock, GraphLoaderConfig
-from gbp.loaders.dataloader_graph import (
-    COMMODITY_CATEGORY,
-    RESOURCE_CATEGORY,
-    RebalancerGraphSnapshot,
-    telemetry_long_from_source,
-)
+from gbp.loaders.dataloader_graph import COMMODITY_CATEGORY, RESOURCE_CATEGORY
 
 N_STATIONS = 8
 N_DEPOTS = 2
@@ -32,11 +27,6 @@ class TestLoading:
     def test_raw_and_resolved_types(self, loaded_graph_loader: DataLoaderGraph) -> None:
         assert isinstance(loaded_graph_loader.raw, RawModelData)
         assert isinstance(loaded_graph_loader.resolved, ResolvedModelData)
-
-    def test_rebalancer_snapshot_type(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        date = loaded_graph_loader.available_dates[0]
-        snap = loaded_graph_loader.rebalancer_snapshot(date)
-        assert isinstance(snap, RebalancerGraphSnapshot)
 
 
 # =============================================================================
@@ -84,80 +74,19 @@ class TestResolvedModel:
 
 
 # =============================================================================
-# Rebalancer snapshot (legacy PDP inputs)
-# =============================================================================
-
-
-class TestRebalancerSnapshot:
-    def test_nodes_and_coordinates(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
-        assert len(snap.nodes) == N_TOTAL
-        assert set(snap.nodes["node_type"]) == {"station", "depot"}
-        assert len(snap.coordinates) == N_TOTAL
-        assert {"node_id", "latitude", "longitude"}.issubset(snap.coordinates.columns)
-
-    def test_resources_and_rates(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
-        assert "id" in snap.resources.columns
-        assert "capacity" in snap.resources.columns
-        assert {
-            "cost_per_km",
-            "cost_per_hour",
-            "fixed_dispatch_cost",
-        }.issubset(snap.resources.columns)
-
-    def test_inventory_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
-        assert {"node_id", "commodity_id", "quantity"}.issubset(snap.inventory.columns)
-        assert len(snap.inventory) == N_STATIONS
-        assert (snap.inventory["quantity"] >= 0).all()
-
-    def test_distance_lookup(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
-        assert snap.distance_service is not None
-        ids = list(snap.nodes["id"][:2])
-        d = snap.distance_service.get_distance(ids[0], ids[1])
-        assert d > 0
-        d_ba = snap.distance_service.get_distance(ids[1], ids[0])
-        assert abs(d - d_ba) < 1e-3
-
-
-# =============================================================================
-# Node attributes on snapshot
-# =============================================================================
-
-
-class TestSnapshotNodeAttributes:
-    def test_inventory_capacity_attribute(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
-        assert "inventory_capacity" in snap.node_attributes
-        attr = snap.node_attributes["inventory_capacity"]
-        assert attr.entity_type == "node"
-        assert "node_id" in attr.granularity_keys
-        assert len(attr.data) == N_STATIONS
-        assert (attr.data["value"] > 0).all()
-
-    def test_cost_and_station_info(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
-        assert "station_fixed_cost" in snap.node_attributes
-        assert "station_variable_cost" in snap.node_attributes
-        assert "station_info" in snap.node_attributes
-
-
-# =============================================================================
 # Inventory time series
 # =============================================================================
 
 
-class TestInventoryTimeseries:
-    def test_inventory_timeseries_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        ts = loaded_graph_loader.inventory_timeseries
+class TestSourceInventoryWide:
+    def test_inventory_wide_matrix_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        ts = loaded_graph_loader.source.df_inventory_ts
         assert ts.shape == (48, N_STATIONS)
 
-    def test_different_snapshots_may_differ(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        dates = loaded_graph_loader.available_dates
-        a = loaded_graph_loader.rebalancer_snapshot(dates[0]).inventory["quantity"].sum()
-        b = loaded_graph_loader.rebalancer_snapshot(dates[-1]).inventory["quantity"].sum()
+    def test_different_timestamps_may_differ(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        ts = loaded_graph_loader.source.df_inventory_ts
+        a = ts.iloc[0].sum()
+        b = ts.iloc[-1].sum()
         assert a >= 0
         assert b >= 0
 
@@ -284,27 +213,12 @@ class TestMockExtras:
         }.issubset(mock.df_truck_rates.columns)
 
 
-# =============================================================================
-# Enrichment helpers (telemetry, trips, tags)
-# =============================================================================
+class TestSourceExposed:
+    def test_region_id_on_stations(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        assert "region_id" in loaded_graph_loader.source.df_stations.columns
 
-
-class TestEnrichmentHelpers:
-    def test_telemetry_long_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        long_df = telemetry_long_from_source(loaded_graph_loader.telemetry_ts)
-        assert {"node_id", "metric", "timestamp", "value"}.issubset(long_df.columns)
-        assert {"num_bikes_available", "num_ebikes_available"}.issubset(set(long_df["metric"]))
-
-    def test_trip_flows_hourly(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        tf = loaded_graph_loader.trip_flows_hourly
-        assert {"source_id", "target_id", "period", "value"}.issubset(tf.columns)
-
-    def test_region_tags_from_source(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        st = loaded_graph_loader._source.df_stations
-        assert "region_id" in st.columns
-
-    def test_loader_exposes_telemetry_and_timestamps(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        assert loaded_graph_loader.telemetry_ts is not None
+    def test_telemetry_on_source(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        assert loaded_graph_loader.source.df_telemetry_ts is not None
         assert len(loaded_graph_loader.available_dates) == 48
 
 
@@ -325,7 +239,7 @@ class TestCoreTableAccess:
         inv = raw.inventory_initial
         assert inv is not None
         assert len(inv) == N_STATIONS
-        ts0 = loaded_graph_loader.inventory_timeseries.iloc[0]
+        ts0 = loaded_graph_loader.source.df_inventory_ts.iloc[0]
         for _, row in inv.iterrows():
             fid = str(row["facility_id"])
             assert int(row["quantity"]) == int(ts0[fid])
