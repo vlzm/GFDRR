@@ -17,9 +17,11 @@ Groups (in reading order):
     flow_data    — demand, supply, inventory (4 optional)
     transformation — N:M commodity conversion (3 optional)
     resource     — fleet, compatibility, availability (4 optional)
-    parameters   — costs, capacities, pricing (6 optional)
     hierarchy    — facility + commodity hierarchies (8 optional)
     scenario     — run configuration and overrides (4 optional)
+
+Parametric data (costs, capacities, pricing) lives in ``attributes``
+(``AttributeRegistry``), accessible via ``parameter_tables``.
 
 ResolvedModelData adds:
     generated    — edge_lead_time_resolved, transformation_resolved, fleet_capacity
@@ -43,8 +45,6 @@ from gbp.core.schemas import (
     CommodityHierarchyMembership,
     CommodityHierarchyNode,
     CommodityHierarchyType,
-    CommodityProcurementCostTier,
-    CommoditySellPriceTier,
     Demand,
     Edge,
     EdgeCapacity,
@@ -63,8 +63,6 @@ from gbp.core.schemas import (
     FacilityRoleRecord,
     InventoryInitial,
     InventoryInTransit,
-    OperationCapacity,
-    OperationCost,
     Period,
     PlanningHorizon,
     PlanningHorizonSegment,
@@ -72,7 +70,6 @@ from gbp.core.schemas import (
     ResourceAvailability,
     ResourceCategory,
     ResourceCommodityCompatibility,
-    ResourceCost,
     ResourceFleet,
     ResourceModalCompatibility,
     Scenario,
@@ -83,7 +80,6 @@ from gbp.core.schemas import (
     Transformation,
     TransformationInput,
     TransformationOutput,
-    TransportCost,
 )
 
 
@@ -204,14 +200,6 @@ class RawModelData:
     resource_fleet: pd.DataFrame | None = None
     resource_availability: pd.DataFrame | None = None
 
-    # ── parameters: costs, capacities, pricing ────────────────────────
-    operation_capacities: pd.DataFrame | None = None
-    operation_costs: pd.DataFrame | None = None
-    transport_costs: pd.DataFrame | None = None
-    resource_costs: pd.DataFrame | None = None
-    commodity_sell_price_tiers: pd.DataFrame | None = None
-    commodity_procurement_cost_tiers: pd.DataFrame | None = None
-
     # ── hierarchy: facility + commodity trees ─────────────────────────
     facility_hierarchy_types: pd.DataFrame | None = None
     facility_hierarchy_levels: pd.DataFrame | None = None
@@ -261,11 +249,6 @@ class RawModelData:
             "resource_commodity_compatibility", "resource_modal_compatibility",
             "resource_fleet", "resource_availability",
         ],
-        "parameters": [
-            "operation_capacities", "operation_costs", "transport_costs",
-            "resource_costs", "commodity_sell_price_tiers",
-            "commodity_procurement_cost_tiers",
-        ],
         "hierarchy": [
             "facility_hierarchy_types", "facility_hierarchy_levels",
             "facility_hierarchy_nodes", "facility_hierarchy_memberships",
@@ -307,12 +290,6 @@ class RawModelData:
         "resource_modal_compatibility": ResourceModalCompatibility,
         "resource_fleet": ResourceFleet,
         "resource_availability": ResourceAvailability,
-        "operation_capacities": OperationCapacity,
-        "operation_costs": OperationCost,
-        "transport_costs": TransportCost,
-        "resource_costs": ResourceCost,
-        "commodity_sell_price_tiers": CommoditySellPriceTier,
-        "commodity_procurement_cost_tiers": CommodityProcurementCostTier,
         "facility_hierarchy_types": FacilityHierarchyType,
         "facility_hierarchy_levels": FacilityHierarchyLevel,
         "facility_hierarchy_nodes": FacilityHierarchyNode,
@@ -378,10 +355,8 @@ class RawModelData:
 
     @property
     def parameter_tables(self) -> dict[str, pd.DataFrame]:
-        """Costs, capacities, and pricing tiers (fixed fields + registry)."""
-        result = _collect_group(self, self._GROUPS["parameters"])
-        result.update(self.attributes.to_dict())
-        return result
+        """All registered parametric attribute tables."""
+        return self.attributes.to_dict()
 
     @property
     def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
@@ -397,7 +372,7 @@ class RawModelData:
 
     @property
     def populated_tables(self) -> dict[str, pd.DataFrame]:
-        """All non-None DataFrames currently set on this instance."""
+        """All non-None DataFrames: structural fields + registry attributes."""
         result: dict[str, pd.DataFrame] = {}
         for f in fields(self):
             if f.name.startswith("_") or f.name in self._NON_TABLE_FIELDS:
@@ -415,12 +390,16 @@ class RawModelData:
 
             print(raw.table_summary())
         """
-        base = _table_summary(self, self._GROUPS, self._REQUIRED)
+        summary = _table_summary(self, self._GROUPS, self._REQUIRED)
         if self.attributes:
-            base += "\n\n  parameters (via AttributeRegistry)\n"
-            base += f"  {'─' * 36}\n"
-            base += self.attributes.summary()
-        return base
+            summary += "\n\n  parameters (AttributeRegistry)"
+            summary += f"\n  {'─' * 31}"
+            summary += "\n" + self.attributes.summary()
+        else:
+            summary += "\n\n  parameters (AttributeRegistry)"
+            summary += f"\n  {'─' * 31}"
+            summary += "\n    (no attributes registered)"
+        return summary
 
     # ── validation ────────────────────────────────────────────────────
 
@@ -501,14 +480,6 @@ class ResolvedModelData:
     resource_modal_compatibility: pd.DataFrame | None = None
     resource_fleet: pd.DataFrame | None = None
     resource_availability: pd.DataFrame | None = None
-
-    # ── parameters ────────────────────────────────────────────────────
-    operation_capacities: pd.DataFrame | None = None
-    operation_costs: pd.DataFrame | None = None
-    transport_costs: pd.DataFrame | None = None
-    resource_costs: pd.DataFrame | None = None
-    commodity_sell_price_tiers: pd.DataFrame | None = None
-    commodity_procurement_cost_tiers: pd.DataFrame | None = None
 
     # ── hierarchy ─────────────────────────────────────────────────────
     facility_hierarchy_types: pd.DataFrame | None = None
@@ -597,10 +568,8 @@ class ResolvedModelData:
 
     @property
     def parameter_tables(self) -> dict[str, pd.DataFrame]:
-        """Costs, capacities, and pricing tiers (fixed fields + registry)."""
-        result = _collect_group(self, self._GROUPS["parameters"])
-        result.update(self.attributes.to_dict())
-        return result
+        """All registered parametric attribute tables."""
+        return self.attributes.to_dict()
 
     @property
     def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
@@ -631,7 +600,7 @@ class ResolvedModelData:
 
     @property
     def populated_tables(self) -> dict[str, pd.DataFrame]:
-        """All non-None DataFrames currently set on this instance."""
+        """All non-None DataFrames: structural fields + registry attributes."""
         result: dict[str, pd.DataFrame] = {}
         for f in fields(self):
             if f.name.startswith("_") or f.name in self._NON_TABLE_FIELDS:
@@ -644,12 +613,16 @@ class ResolvedModelData:
 
     def table_summary(self) -> str:
         """Human-readable overview of populated tables, grouped logically."""
-        base = _table_summary(self, self._GROUPS, self._REQUIRED)
+        summary = _table_summary(self, self._GROUPS, self._REQUIRED)
         if self.attributes:
-            base += "\n\n  parameters (via AttributeRegistry)\n"
-            base += f"  {'─' * 36}\n"
-            base += self.attributes.summary()
-        return base
+            summary += "\n\n  parameters (AttributeRegistry)"
+            summary += f"\n  {'─' * 31}"
+            summary += "\n" + self.attributes.summary()
+        else:
+            summary += "\n\n  parameters (AttributeRegistry)"
+            summary += f"\n  {'─' * 31}"
+            summary += "\n    (no attributes registered)"
+        return summary
 
     # ── validation ────────────────────────────────────────────────────
 

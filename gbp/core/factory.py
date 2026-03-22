@@ -37,6 +37,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
+from gbp.core.attributes.registry import AttributeRegistry
 from gbp.core.enums import FacilityRole, ModalType, OperationType, PeriodType
 from gbp.core.model import RawModelData
 from gbp.core.roles import DEFAULT_ROLES, derive_roles
@@ -55,6 +56,7 @@ def make_raw_model(
     edge_rules: pd.DataFrame | None = None,
     demand: pd.DataFrame | None = None,
     supply: pd.DataFrame | None = None,
+    attributes: AttributeRegistry | None = None,
     **extra_tables: pd.DataFrame,
 ) -> RawModelData:
     """Create a valid ``RawModelData`` from minimal inputs.
@@ -76,8 +78,9 @@ def make_raw_model(
         edge_rules: Custom edge rules. If *None*, a single all-to-all ROAD rule is used.
         demand: Optional demand table.
         supply: Optional supply table.
+        attributes: Pre-populated ``AttributeRegistry`` for parametric data.
         **extra_tables: Any additional tables to pass through to ``RawModelData``
-            (e.g. ``inventory_initial``, ``edges``, ``operation_costs``).
+            (e.g. ``inventory_initial``, ``edges``).
 
     Returns:
         A validated ``RawModelData`` instance ready for ``build_model()``.
@@ -112,6 +115,8 @@ def make_raw_model(
         kwargs["demand"] = demand
     if supply is not None:
         kwargs["supply"] = supply
+    if attributes is not None:
+        kwargs["attributes"] = attributes
     kwargs.update(extra_tables)
 
     raw = RawModelData(**kwargs)

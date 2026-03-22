@@ -177,6 +177,8 @@ def _load_tables(
             if name in required:
                 raise FileNotFoundError(f"Required table {name}.parquet not found in {directory}")
             continue
+        if name not in field_names:
+            continue
         kwargs[name] = pd.read_parquet(pq)
 
     for name in required:

@@ -162,20 +162,18 @@ class DataLoaderGraph:
         resources = self._build_resources(entities)
 
         registry = AttributeRegistry()
-        flow_and_ops = self._build_flow_and_operations(entities, registry)
+        flow_data = self._build_flow_data(entities, registry)
         self._register_costs(registry, temporal)
-        resource_costs = self._build_resource_costs(entities)
+        self._register_resource_costs(registry, entities)
 
         all_tables = {
             **temporal,
             **entities.tables,
             **behavior,
             **edge_data,
-            **flow_and_ops,
+            **flow_data,
             **resources,
         }
-        if resource_costs is not None:
-            all_tables["resource_costs"] = resource_costs
         return RawModelData(
             **{k: v for k, v in all_tables.items() if v is not None},
             attributes=registry,
@@ -363,12 +361,12 @@ class DataLoaderGraph:
             "edge_commodities": pd.DataFrame(ec_records),
         }
 
-    def _build_flow_and_operations(
+    def _build_flow_data(
         self,
         entities: _EntityResult,
         registry: AttributeRegistry,
     ) -> dict[str, pd.DataFrame]:
-        """Initial inventory and storage operation capacities from source."""
+        """Initial inventory and operation capacities from source."""
         station_ids = entities.station_ids
         stations = self._source.df_stations
 
@@ -390,10 +388,9 @@ class DataLoaderGraph:
                 "capacity_unit": "bike",
             })
 
-        op_cap_df = pd.DataFrame(op_cap_rows)
         registry.register(
             name="operation_capacity",
-            data=op_cap_df,
+            data=pd.DataFrame(op_cap_rows),
             entity_type="facility",
             kind=AttributeKind.CAPACITY,
             grain=("facility_id", "operation_type", "commodity_category"),
@@ -401,10 +398,7 @@ class DataLoaderGraph:
             aggregation="min",
         )
 
-        return {
-            "inventory_initial": inventory_initial,
-            "operation_capacities": op_cap_df,
-        }
+        return {"inventory_initial": inventory_initial}
 
     def _register_costs(
         self,
@@ -485,37 +479,38 @@ class DataLoaderGraph:
             }),
         }
 
-    def _build_resource_costs(self, entities: _EntityResult) -> pd.DataFrame | None:
-        """Build EAV resource cost table (legacy format, stored as old field)."""
+    def _register_resource_costs(
+        self,
+        registry: AttributeRegistry,
+        entities: _EntityResult,
+    ) -> None:
+        """Register per-resource cost attributes (cost_per_km, cost_per_hour, fixed_dispatch)."""
         home_depot = entities.depot_ids[0]
-        rcost_rows: list[dict] = []
         tr = self._source.df_truck_rates
-        if tr is not None and not tr.empty:
+        if tr is None or tr.empty:
+            return
+
+        for cost_attr, col in [
+            ("resource_cost_per_km", "cost_per_km"),
+            ("resource_cost_per_hour", "cost_per_hour"),
+            ("resource_fixed_dispatch", "fixed_dispatch_cost"),
+        ]:
+            rows = []
             for _, r in tr.iterrows():
-                rcost_rows.extend([
-                    {
-                        "resource_category": RESOURCE_CATEGORY,
-                        "facility_id": home_depot,
-                        "attribute_name": f"{r['resource_id']}_cost_per_km",
-                        "date": None,
-                        "value": float(r["cost_per_km"]),
-                        "value_unit": "USD/km",
-                    },
-                    {
-                        "resource_category": RESOURCE_CATEGORY,
-                        "facility_id": home_depot,
-                        "attribute_name": f"{r['resource_id']}_cost_per_hour",
-                        "date": None,
-                        "value": float(r["cost_per_hour"]),
-                        "value_unit": "USD/h",
-                    },
-                    {
-                        "resource_category": RESOURCE_CATEGORY,
-                        "facility_id": home_depot,
-                        "attribute_name": f"{r['resource_id']}_fixed_dispatch",
-                        "date": None,
-                        "value": float(r["fixed_dispatch_cost"]),
-                        "value_unit": "USD",
-                    },
-                ])
-        return pd.DataFrame(rcost_rows) if rcost_rows else None
+                rows.append({
+                    "resource_category": RESOURCE_CATEGORY,
+                    "facility_id": home_depot,
+                    "resource_id": str(r["resource_id"]),
+                    "value": float(r[col]),
+                })
+            if rows:
+                registry.register(
+                    name=cost_attr,
+                    data=pd.DataFrame(rows),
+                    entity_type="resource",
+                    kind=AttributeKind.COST,
+                    grain=("resource_category", "facility_id", "resource_id"),
+                    value_column="value",
+                    aggregation="mean",
+                    unit="USD",
+                )

@@ -72,8 +72,10 @@ class DataLoaderRebalancer:
             columns={"facility_id": "node_id", "lat": "latitude", "lon": "longitude"},
         ).copy()
 
-        op_caps = res.operation_capacities
-        if op_caps is None or op_caps.empty:
+        if "operation_capacity" not in res.attributes:
+            raise ValueError("No operation capacities found in resolved model")
+        op_caps = res.attributes.get("operation_capacity").data
+        if op_caps.empty:
             raise ValueError("No operation capacities found in resolved model")
         capacities = (
             op_caps[op_caps["operation_type"] == "storage"]

@@ -88,127 +88,39 @@ def get_structural_attribute_specs() -> list[AttributeSpec]:
     ]
 
 
-# ── Legacy parametric specs (kept for backward compatibility) ────────────
+# ── Legacy spec helpers (structural only after parametric cleanup) ────────
 
 def get_facility_attribute_specs() -> list[AttributeSpec]:
-    """Facility-level attributes mapped to core model tables."""
-    return [
-        AttributeSpec(
-            name="operation_cost",
-            kind=AttributeKind.COST,
-            entity_type="facility",
-            grain=(
-                "facility_id",
-                "operation_type",
-                "commodity_category",
-                "date",
-            ),
-            resolved_grain=(
-                "facility_id",
-                "operation_type",
-                "commodity_category",
-                "period_id",
-            ),
-            value_column="cost_per_unit",
-            source_table="operation_costs",
-            unit=None,
-            aggregation="mean",
-            nullable=True,
-        ),
-        AttributeSpec(
-            name="operation_capacity",
-            kind=AttributeKind.CAPACITY,
-            entity_type="facility",
-            grain=("facility_id", "operation_type", "commodity_category"),
-            resolved_grain=("facility_id", "operation_type", "commodity_category"),
-            value_column="capacity",
-            source_table="operation_capacities",
-            unit=None,
-            aggregation="min",
-            nullable=True,
-        ),
-    ]
+    """DEPRECATED: use ``register_bike_sharing_defaults()`` + ``get_structural_attribute_specs()``.
+
+    Returns structural facility specs (none currently — parametric data
+    is now in ``AttributeRegistry``).
+    """
+    return [s for s in get_structural_attribute_specs() if s.entity_type == "facility"]
 
 
 def get_edge_attribute_specs() -> list[AttributeSpec]:
-    """Edge-level attributes (structural + parametric)."""
-    structural = [s for s in get_structural_attribute_specs() if s.entity_type == "edge"]
-    parametric = [
-        AttributeSpec(
-            name="transport_cost",
-            kind=AttributeKind.COST,
-            entity_type="edge",
-            grain=("source_id", "target_id", "modal_type", "resource_category", "date"),
-            resolved_grain=(
-                "source_id",
-                "target_id",
-                "modal_type",
-                "resource_category",
-                "period_id",
-            ),
-            value_column="cost_per_unit",
-            source_table="transport_costs",
-            unit=None,
-            aggregation="mean",
-            nullable=True,
-        ),
-        AttributeSpec(
-            name="edge_capacity",
-            kind=AttributeKind.CAPACITY,
-            entity_type="edge",
-            grain=("source_id", "target_id", "modal_type", "date"),
-            resolved_grain=("source_id", "target_id", "modal_type", "period_id"),
-            value_column="capacity",
-            source_table="edge_capacities",
-            unit=None,
-            aggregation="min",
-            nullable=True,
-        ),
-    ]
-    return structural + parametric
+    """DEPRECATED: use ``register_bike_sharing_defaults()`` + ``get_structural_attribute_specs()``.
+
+    Returns structural edge specs only.
+    """
+    return [s for s in get_structural_attribute_specs() if s.entity_type == "edge"]
 
 
 def get_resource_attribute_specs() -> list[AttributeSpec]:
-    """Resource-category attributes (structural + EAV ``resource_costs``)."""
-    structural = [s for s in get_structural_attribute_specs() if s.entity_type == "resource"]
-    parametric = [
-        AttributeSpec(
-            name="resource_fixed_cost",
-            kind=AttributeKind.COST,
-            entity_type="resource",
-            grain=("resource_category", "date"),
-            resolved_grain=("resource_category", "period_id"),
-            value_column="value",
-            source_table="resource_costs",
-            unit=None,
-            aggregation="mean",
-            nullable=True,
-            eav_filter={"attribute_name": "fixed_cost_per_period"},
-        ),
-        AttributeSpec(
-            name="resource_maintenance_cost",
-            kind=AttributeKind.COST,
-            entity_type="resource",
-            grain=("resource_category", "date"),
-            resolved_grain=("resource_category", "period_id"),
-            value_column="value",
-            source_table="resource_costs",
-            unit=None,
-            aggregation="mean",
-            nullable=True,
-            eav_filter={"attribute_name": "maintenance_cost"},
-        ),
-    ]
-    return structural + parametric
+    """DEPRECATED: use ``register_bike_sharing_defaults()`` + ``get_structural_attribute_specs()``.
+
+    Returns structural resource specs only.
+    """
+    return [s for s in get_structural_attribute_specs() if s.entity_type == "resource"]
 
 
 def get_all_default_specs() -> list[AttributeSpec]:
-    """All default bike-sharing attribute specs (structural + parametric)."""
-    return (
-        get_facility_attribute_specs()
-        + get_edge_attribute_specs()
-        + get_resource_attribute_specs()
-    )
+    """DEPRECATED: use ``register_bike_sharing_defaults()`` + ``get_structural_attribute_specs()``.
+
+    Returns structural specs only (parametric data lives in ``AttributeRegistry``).
+    """
+    return get_structural_attribute_specs()
 
 
 # ── Convenience registration for bike-sharing ────────────────────────────

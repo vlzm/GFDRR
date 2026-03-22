@@ -2,15 +2,19 @@
 
 from gbp.core.attributes import (
     AttributeBuilder,
+    AttributeRegistry,
     AttributeSpec,
     GrainGroup,
     MergePlan,
+    RegisteredAttribute,
     auto_group_attributes,
     get_all_default_specs,
     get_edge_attribute_specs,
     get_facility_attribute_specs,
     get_resource_attribute_specs,
+    get_structural_attribute_specs,
     plan_merges,
+    register_bike_sharing_defaults,
 )
 from gbp.core.factory import make_raw_model
 from gbp.core.enums import (
@@ -83,16 +87,20 @@ from gbp.core.schemas import (
 
 __all__ = [
     "AttributeBuilder",
-    "AttributeSpec",
     "AttributeKind",
+    "AttributeRegistry",
+    "AttributeSpec",
     "GrainGroup",
     "MergePlan",
+    "RegisteredAttribute",
     "auto_group_attributes",
     "get_all_default_specs",
     "get_edge_attribute_specs",
     "get_facility_attribute_specs",
     "get_resource_attribute_specs",
+    "get_structural_attribute_specs",
     "plan_merges",
+    "register_bike_sharing_defaults",
     "Commodity",
     "CommodityCategory",
     "CommodityHierarchyLevel",

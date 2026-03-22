@@ -229,8 +229,8 @@ class TestSourceExposed:
 
 class TestCoreTableAccess:
     def test_operation_capacities_for_stations(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        oc = loaded_graph_loader.raw.operation_capacities
-        assert oc is not None
+        assert "operation_capacity" in loaded_graph_loader.raw.attributes
+        oc = loaded_graph_loader.raw.attributes.get("operation_capacity").data
         assert len(oc) == N_STATIONS
         assert (oc["operation_type"] == "storage").all()
 

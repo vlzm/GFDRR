@@ -19,4 +19,4 @@ def test_csv_folder_to_resolved_model() -> None:
     assert len(resolved.periods) == 3
     assert resolved.edges is not None
     assert resolved.resource_spines is not None
-    assert resolved.facility_spines is not None
+    assert resolved.edge_spines is not None
