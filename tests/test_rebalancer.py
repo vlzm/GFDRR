@@ -1,4 +1,4 @@
-"""Tests for rebalancer migration to GraphData API."""
+"""Tests for rebalancer on ``DataLoaderGraph`` + ``rebalancer_snapshot``."""
 
 from __future__ import annotations
 

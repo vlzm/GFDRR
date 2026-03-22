@@ -122,7 +122,7 @@ project_root/
 │   │   ├── __init__.py             # Public exports
 │   │   ├── base.py                 # ABC: AbstractStorage, AbstractSolver, AbstractDataLoader
 │   │   ├── database.py             # Async Postgres engine (DatabaseManager)
-│   │   ├── graph_model.py          # Pydantic models: Node, Edge, TimeSeries, GraphData
+│   │   ├── core/                   # L2 logistics model: RawModelData, schemas, enums
 │   │   ├── observability.py        # OpenTelemetry + structlog setup
 │   │   ├── storage.py              # MinIOStorage implementation
 │   │   ├── exceptions.py           # Domain exception hierarchy

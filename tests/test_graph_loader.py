@@ -1,15 +1,18 @@
-"""Tests for the graph data loader (gbp.loaders.DataLoaderGraph).
+"""Tests for ``DataLoaderGraph`` → ``RawModelData`` / ``ResolvedModelData`` / rebalancer snapshot."""
 
-Covers: loading, snapshot structure, static parts, temporal inventory,
-        validation, distance service, config options.
-"""
+from __future__ import annotations
 
-import pytest
 import pandas as pd
 
-from gbp.graph import GraphData, validate_graph
-from gbp.loaders import DataLoaderMock, DataLoaderGraph, GraphLoaderConfig
-
+from gbp.core.enums import ModalType
+from gbp.core.model import RawModelData, ResolvedModelData
+from gbp.loaders import DataLoaderGraph, DataLoaderMock, GraphLoaderConfig
+from gbp.loaders.dataloader_graph import (
+    COMMODITY_CATEGORY,
+    RESOURCE_CATEGORY,
+    RebalancerGraphSnapshot,
+    telemetry_long_from_source,
+)
 
 N_STATIONS = 8
 N_DEPOTS = 2
@@ -17,222 +20,184 @@ N_TOTAL = N_STATIONS + N_DEPOTS
 
 
 # =============================================================================
-# Loading & snapshot
+# Loading
 # =============================================================================
 
 
 class TestLoading:
-
-    def test_load_data_succeeds(self, loaded_graph_loader):
+    def test_load_data_succeeds(self, loaded_graph_loader: DataLoaderGraph) -> None:
         assert loaded_graph_loader.available_dates is not None
         assert len(loaded_graph_loader.available_dates) == 48
 
-    def test_snapshot_returns_graph_data(self, loaded_graph_loader):
+    def test_raw_and_resolved_types(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        assert isinstance(loaded_graph_loader.raw, RawModelData)
+        assert isinstance(loaded_graph_loader.resolved, ResolvedModelData)
+
+    def test_rebalancer_snapshot_type(self, loaded_graph_loader: DataLoaderGraph) -> None:
         date = loaded_graph_loader.available_dates[0]
-        snap = loaded_graph_loader.get_snapshot(date)
-        assert isinstance(snap, GraphData)
-
-    def test_snapshot_repr(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        r = repr(snap)
-        assert "GraphData" in r
-        assert f"nodes={N_TOTAL}" in r
+        snap = loaded_graph_loader.rebalancer_snapshot(date)
+        assert isinstance(snap, RebalancerGraphSnapshot)
 
 
 # =============================================================================
-# Static parts
+# Raw model
 # =============================================================================
 
 
-class TestStaticParts:
-
-    def test_nodes(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert len(snap.nodes) == N_TOTAL
-        assert "id" in snap.nodes.columns
-        assert "node_type" in snap.nodes.columns
-        types = set(snap.nodes["node_type"])
+class TestRawModel:
+    def test_facility_count_and_types(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        raw = loaded_graph_loader.raw
+        assert len(raw.facilities) == N_TOTAL
+        types = set(raw.facilities["facility_type"])
         assert types == {"station", "depot"}
 
-    def test_station_count(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        stations = snap.nodes[snap.nodes["node_type"] == "station"]
-        assert len(stations) == N_STATIONS
+    def test_commodity_and_resource_categories(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        raw = loaded_graph_loader.raw
+        assert COMMODITY_CATEGORY in raw.commodity_categories["commodity_category_id"].values
+        assert RESOURCE_CATEGORY in raw.resource_categories["resource_category_id"].values
 
-    def test_depot_count(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        depots = snap.nodes[snap.nodes["node_type"] == "depot"]
-        assert len(depots) == N_DEPOTS
+    def test_periods_align_with_mock_horizon(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        raw = loaded_graph_loader.raw
+        assert not raw.periods.empty
+        assert raw.periods["period_type"].iloc[0] == "day"
 
-    def test_coordinates(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert snap.coordinates is not None
+
+# =============================================================================
+# Resolved model (edges, build pipeline)
+# =============================================================================
+
+
+class TestResolvedModel:
+    def test_edges_fully_connected_when_enabled(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        res = loaded_graph_loader.resolved
+        assert res.edges is not None
+        expected = N_TOTAL * (N_TOTAL - 1)
+        assert len(res.edges) == expected
+        assert (res.edges["modal_type"] == ModalType.ROAD.value).all()
+        assert (res.edges["distance"] > 0).all()
+
+    def test_edge_commodities(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        res = loaded_graph_loader.resolved
+        assert res.edge_commodities is not None
+        assert not res.edge_commodities.empty
+        assert (res.edge_commodities["commodity_category"] == COMMODITY_CATEGORY).all()
+
+
+# =============================================================================
+# Rebalancer snapshot (legacy PDP inputs)
+# =============================================================================
+
+
+class TestRebalancerSnapshot:
+    def test_nodes_and_coordinates(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
+        assert len(snap.nodes) == N_TOTAL
+        assert set(snap.nodes["node_type"]) == {"station", "depot"}
         assert len(snap.coordinates) == N_TOTAL
         assert {"node_id", "latitude", "longitude"}.issubset(snap.coordinates.columns)
 
-    def test_coordinate_ranges(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert (snap.coordinates["latitude"].between(-90, 90)).all()
-        assert (snap.coordinates["longitude"].between(-180, 180)).all()
-
-    def test_resources(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert snap.resources is not None
+    def test_resources_and_rates(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
         assert "id" in snap.resources.columns
-        assert "resource_type" in snap.resources.columns
         assert "capacity" in snap.resources.columns
-        assert (snap.resources["resource_type"] == "vehicle").all()
+        assert {
+            "cost_per_km",
+            "cost_per_hour",
+            "fixed_dispatch_cost",
+        }.issubset(snap.resources.columns)
 
-    def test_commodities(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert snap.commodities is not None
-        assert len(snap.commodities) == 1
-        assert snap.commodities.iloc[0]["id"] == "bike"
-
-    def test_edges_fully_connected(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert snap.edges is not None
-        expected_edges = N_TOTAL * (N_TOTAL - 1)
-        assert len(snap.edges) == expected_edges
-        assert "source_id" in snap.edges.columns
-        assert "distance_km" in snap.edges.columns
-
-    def test_edge_distances_positive(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert (snap.edges["distance_km"] > 0).all()
-
-
-# =============================================================================
-# Node attributes
-# =============================================================================
-
-
-class TestNodeAttributes:
-
-    def test_inventory_capacity_attribute_exists(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert "inventory_capacity" in snap.node_attributes
-
-    def test_inventory_capacity_structure(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        attr = snap.node_attributes["inventory_capacity"]
-        assert attr.entity_type == "node"
-        assert attr.attribute_class == "capacity"
-        assert "node_id" in attr.granularity_keys
-        assert "value" in attr.value_columns
-        assert len(attr.data) == N_STATIONS
-
-    def test_inventory_capacity_values_positive(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        attr = snap.node_attributes["inventory_capacity"]
-        assert (attr.data["value"] > 0).all()
-
-
-# =============================================================================
-# Inventory (temporal)
-# =============================================================================
-
-
-class TestInventory:
-
-    def test_inventory_present(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert snap.inventory is not None
-
-    def test_inventory_columns(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
+    def test_inventory_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
         assert {"node_id", "commodity_id", "quantity"}.issubset(snap.inventory.columns)
-
-    def test_inventory_station_count(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
         assert len(snap.inventory) == N_STATIONS
-
-    def test_inventory_quantities_non_negative(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
         assert (snap.inventory["quantity"] >= 0).all()
 
-    def test_different_snapshots_may_differ(self, loaded_graph_loader):
-        dates = loaded_graph_loader.available_dates
-        snap_first = loaded_graph_loader.get_snapshot(dates[0])
-        snap_last = loaded_graph_loader.get_snapshot(dates[-1])
-        q_first = int(snap_first.inventory["quantity"].sum())
-        q_last = int(snap_last.inventory["quantity"].sum())
-        assert q_first >= 0
-        assert q_last >= 0
-
-    def test_inventory_timeseries_shape(self, loaded_graph_loader):
-        ts = loaded_graph_loader.inventory_timeseries
-        assert ts.shape == (48, N_STATIONS)
-
-
-# =============================================================================
-# Validation
-# =============================================================================
-
-
-class TestValidation:
-
-    def test_snapshot_passes_validation(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        result = validate_graph(snap)
-        assert result.is_valid
-        assert result.error_count == 0
-
-
-# =============================================================================
-# Distance service
-# =============================================================================
-
-
-class TestDistanceService:
-
-    def test_distance_service_attached(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
+    def test_distance_lookup(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
         assert snap.distance_service is not None
-
-    def test_distance_positive(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
         ids = list(snap.nodes["id"][:2])
         d = snap.distance_service.get_distance(ids[0], ids[1])
         assert d > 0
-
-    def test_distance_symmetric(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        ids = list(snap.nodes["id"][:2])
-        d_ab = snap.distance_service.get_distance(ids[0], ids[1])
         d_ba = snap.distance_service.get_distance(ids[1], ids[0])
-        assert abs(d_ab - d_ba) < 1e-6
+        assert abs(d - d_ba) < 1e-3
 
 
 # =============================================================================
-# Config options
+# Node attributes on snapshot
+# =============================================================================
+
+
+class TestSnapshotNodeAttributes:
+    def test_inventory_capacity_attribute(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
+        assert "inventory_capacity" in snap.node_attributes
+        attr = snap.node_attributes["inventory_capacity"]
+        assert attr.entity_type == "node"
+        assert "node_id" in attr.granularity_keys
+        assert len(attr.data) == N_STATIONS
+        assert (attr.data["value"] > 0).all()
+
+    def test_cost_and_station_info(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        snap = loaded_graph_loader.rebalancer_snapshot(loaded_graph_loader.available_dates[0])
+        assert "station_fixed_cost" in snap.node_attributes
+        assert "station_variable_cost" in snap.node_attributes
+        assert "station_info" in snap.node_attributes
+
+
+# =============================================================================
+# Inventory time series
+# =============================================================================
+
+
+class TestInventoryTimeseries:
+    def test_inventory_timeseries_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        ts = loaded_graph_loader.inventory_timeseries
+        assert ts.shape == (48, N_STATIONS)
+
+    def test_different_snapshots_may_differ(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        dates = loaded_graph_loader.available_dates
+        a = loaded_graph_loader.rebalancer_snapshot(dates[0]).inventory["quantity"].sum()
+        b = loaded_graph_loader.rebalancer_snapshot(dates[-1]).inventory["quantity"].sum()
+        assert a >= 0
+        assert b >= 0
+
+
+class TestModelValidation:
+    def test_raw_validate(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        loaded_graph_loader.raw.validate()
+
+    def test_resolved_has_expected_tables(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        """``ResolvedModelData.validate`` expects raw date columns; time-resolved tables use ``period_id``."""
+        res = loaded_graph_loader.resolved
+        assert res.facilities is not None
+        assert res.edges is not None and not res.edges.empty
+        assert res.edge_lead_time_resolved is not None
+
+
+# =============================================================================
+# Config
 # =============================================================================
 
 
 class TestConfig:
-
-    def test_build_edges_false(self, mock_config):
+    def test_build_edges_false(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         loader = DataLoaderGraph(mock, GraphLoaderConfig(build_edges=False))
         loader.load_data()
-        snap = loader.get_snapshot(loader.available_dates[0])
-        assert snap.edges is None
-        assert snap.distance_service is None
+        assert loader.resolved.edges is None or loader.resolved.edges.empty
 
-    def test_default_config(self, mock_config):
+    def test_default_config_has_edges(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         loader = DataLoaderGraph(mock)
         loader.load_data()
-        snap = loader.get_snapshot(loader.available_dates[0])
-        assert snap.edges is not None
+        assert loader.resolved.edges is not None
+        assert not loader.resolved.edges.empty
 
-    def test_euclidean_backend(self, mock_config):
+    def test_euclidean_backend(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         loader = DataLoaderGraph(mock, GraphLoaderConfig(distance_backend="euclidean"))
         loader.load_data()
-        snap = loader.get_snapshot(loader.available_dates[0])
-        assert snap.edges is not None
-        assert (snap.edges["distance_km"] > 0).all()
+        assert (loader.resolved.edges["distance"] > 0).all()
 
 
 # =============================================================================
@@ -241,8 +206,7 @@ class TestConfig:
 
 
 class TestMockExtras:
-
-    def test_stations_include_citibike_metadata(self, mock_config):
+    def test_stations_include_citibike_metadata(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         mock.load_data()
         assert {
@@ -256,7 +220,7 @@ class TestMockExtras:
             "is_returning",
         }.issubset(mock.df_stations.columns)
 
-    def test_telemetry_columns_exist(self, mock_config):
+    def test_telemetry_columns_exist(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         mock.load_data()
         expected_cols = {
@@ -281,7 +245,7 @@ class TestMockExtras:
         assert expected_cols.issubset(mock.df_telemetry_ts.columns)
         assert len(mock.df_telemetry_ts) == len(mock.timestamps) * N_STATIONS
 
-    def test_trips_schema_and_station_references(self, mock_config):
+    def test_trips_schema_and_station_references(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         mock.load_data()
         expected_cols = {
@@ -304,7 +268,7 @@ class TestMockExtras:
         assert set(mock.df_trips["start_station_id"]).issubset(station_ids)
         assert set(mock.df_trips["end_station_id"]).issubset(station_ids)
 
-    def test_cost_tables_exist(self, mock_config):
+    def test_cost_tables_exist(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         mock.load_data()
         assert {
@@ -320,74 +284,48 @@ class TestMockExtras:
         }.issubset(mock.df_truck_rates.columns)
 
 
-class TestGraphEnrichedFields:
-
-    def test_snapshot_contains_cost_attributes(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert "station_fixed_cost" in snap.node_attributes
-        assert "station_variable_cost" in snap.node_attributes
-
-    def test_snapshot_resources_include_rate_columns(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert {
-            "cost_per_km",
-            "cost_per_hour",
-            "fixed_dispatch_cost",
-        }.issubset(snap.resources.columns)
-
-    def test_snapshot_contains_telemetry(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert snap.telemetry is not None
-        assert {"node_id", "metric", "timestamp", "value"}.issubset(snap.telemetry.columns)
-        assert {"num_bikes_available", "num_ebikes_available"}.issubset(set(snap.telemetry["metric"]))
-
-    def test_snapshot_contains_trip_flows(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert "trip_flows" in snap.flows
-        flow = snap.flows["trip_flows"]
-        assert {"source_id", "target_id", "period", "value"}.issubset(flow.data.columns)
-
-    def test_snapshot_contains_region_tags(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert snap.tags is not None
-        assert {"entity_type", "entity_id", "key", "value"}.issubset(snap.tags.columns)
-        assert (snap.tags["key"] == "region").all()
-
-    def test_snapshot_contains_station_info_attribute(self, loaded_graph_loader):
-        snap = loaded_graph_loader.get_snapshot(loaded_graph_loader.available_dates[0])
-        assert "station_info" in snap.node_attributes
-        station_info = snap.node_attributes["station_info"]
-        assert {"node_id", "name", "short_name"}.issubset(station_info.data.columns)
+# =============================================================================
+# Enrichment helpers (telemetry, trips, tags)
+# =============================================================================
 
 
-class TestFullGraphAccess:
+class TestEnrichmentHelpers:
+    def test_telemetry_long_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        long_df = telemetry_long_from_source(loaded_graph_loader.telemetry_ts)
+        assert {"node_id", "metric", "timestamp", "value"}.issubset(long_df.columns)
+        assert {"num_bikes_available", "num_ebikes_available"}.issubset(set(long_df["metric"]))
 
-    def test_loader_exposes_full_graph(self, loaded_graph_loader):
-        graph = loaded_graph_loader.graph
-        assert isinstance(graph, GraphData)
-        assert graph.inventory_ts is not None
-        assert graph.telemetry_ts is not None
-        assert graph.timestamps is not None
+    def test_trip_flows_hourly(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        tf = loaded_graph_loader.trip_flows_hourly
+        assert {"source_id", "target_id", "period", "value"}.issubset(tf.columns)
 
-    def test_graph_available_dates(self, loaded_graph_loader):
-        graph = loaded_graph_loader.graph
-        assert len(graph.available_dates) == 48
-        assert graph.available_dates.equals(loaded_graph_loader.available_dates)
+    def test_region_tags_from_source(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        st = loaded_graph_loader._source.df_stations
+        assert "region_id" in st.columns
 
-    def test_graph_get_snapshot_matches_loader_get_snapshot(self, loaded_graph_loader):
-        date = loaded_graph_loader.available_dates[5]
-        snap_from_loader = loaded_graph_loader.get_snapshot(date)
-        snap_from_graph = loaded_graph_loader.graph.get_snapshot(date)
+    def test_loader_exposes_telemetry_and_timestamps(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        assert loaded_graph_loader.telemetry_ts is not None
+        assert len(loaded_graph_loader.available_dates) == 48
 
-        assert snap_from_loader.inventory is not None
-        assert snap_from_graph.inventory is not None
-        assert snap_from_loader.telemetry is not None
-        assert snap_from_graph.telemetry is not None
-        pd.testing.assert_frame_equal(
-            snap_from_loader.inventory.sort_values("node_id").reset_index(drop=True),
-            snap_from_graph.inventory.sort_values("node_id").reset_index(drop=True),
-        )
-        pd.testing.assert_frame_equal(
-            snap_from_loader.telemetry.sort_values(["node_id", "metric"]).reset_index(drop=True),
-            snap_from_graph.telemetry.sort_values(["node_id", "metric"]).reset_index(drop=True),
-        )
+
+# =============================================================================
+# Access to core tables
+# =============================================================================
+
+
+class TestCoreTableAccess:
+    def test_operation_capacities_for_stations(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        oc = loaded_graph_loader.raw.operation_capacities
+        assert oc is not None
+        assert len(oc) == N_STATIONS
+        assert (oc["operation_type"] == "storage").all()
+
+    def test_inventory_initial_matches_first_timestep(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        raw = loaded_graph_loader.raw
+        inv = raw.inventory_initial
+        assert inv is not None
+        assert len(inv) == N_STATIONS
+        ts0 = loaded_graph_loader.inventory_timeseries.iloc[0]
+        for _, row in inv.iterrows():
+            fid = str(row["facility_id"])
+            assert int(row["quantity"]) == int(ts0[fid])

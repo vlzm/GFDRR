@@ -18,7 +18,7 @@ from .demand import DemandCalculator
 
 
 class DataLoaderRebalancer:
-    """Build rebalancer data from a GraphData snapshot.
+    """Build rebalancer data from ``DataLoaderGraph.rebalancer_snapshot`` (PDP inputs).
 
     Node types used for filtering are read from *config*:
 
@@ -43,7 +43,7 @@ class DataLoaderRebalancer:
         if date is None:
             date = self.dataloader_graph.available_dates[0]
 
-        snapshot = self.dataloader_graph.get_snapshot(date)
+        snapshot = self.dataloader_graph.rebalancer_snapshot(date)
 
         inventory_type = self.config.inventory_node_type
         depot_type = self.config.depot_node_type
