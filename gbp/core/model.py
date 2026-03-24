@@ -624,6 +624,100 @@ class ResolvedModelData:
             summary += "\n    (no attributes registered)"
         return summary
 
+    # ── factory ────────────────────────────────────────────────────────
+
+    @classmethod
+    def from_raw(
+        cls,
+        raw: RawModelData,
+        *,
+        periods: pd.DataFrame,
+        resolved_time: dict[str, pd.DataFrame],
+        resolved_attrs: AttributeRegistry,
+        edges: pd.DataFrame | None,
+        edge_commodities: pd.DataFrame | None,
+        edge_lead_time_resolved: pd.DataFrame | None,
+        transformation_resolved: pd.DataFrame | None,
+        fleet_capacity: pd.DataFrame | None,
+    ) -> ResolvedModelData:
+        """Build ``ResolvedModelData`` from raw tables and build artifacts.
+
+        Centralizes the ``raw.field → resolved.field`` mapping so that
+        ``build_model()`` and notebooks share one canonical constructor call.
+
+        Args:
+            raw: Validated raw model data.
+            periods: Period grid (possibly modified copy of ``raw.periods``).
+            resolved_time: Time-resolved structural tables from
+                ``resolve_all_time_varying``.
+            resolved_attrs: Registry with ``date → period_id`` resolved.
+            edges: Edge table (from raw or ``build_edges``).
+            edge_commodities: Edge-commodity table (from raw or built).
+            edge_lead_time_resolved: Lead-time resolution output.
+            transformation_resolved: N:M transformation output.
+            fleet_capacity: Fleet capacity output.
+        """
+
+        def _coalesce(key: str, raw_df: pd.DataFrame | None) -> pd.DataFrame | None:
+            """Prefer time-resolved table when present; otherwise pass through raw."""
+            if key in resolved_time and not resolved_time[key].empty:
+                return resolved_time[key]
+            return raw_df
+
+        return cls(
+            facilities=raw.facilities,
+            commodity_categories=raw.commodity_categories,
+            resource_categories=raw.resource_categories,
+            planning_horizon=raw.planning_horizon,
+            planning_horizon_segments=raw.planning_horizon_segments,
+            periods=periods,
+            facility_roles=raw.facility_roles,
+            facility_operations=raw.facility_operations,
+            edge_rules=raw.edge_rules,
+            resources=raw.resources,
+            commodities=raw.commodities,
+            facility_availability=_coalesce(
+                "facility_availability", raw.facility_availability,
+            ),
+            transformations=raw.transformations,
+            transformation_inputs=raw.transformation_inputs,
+            transformation_outputs=raw.transformation_outputs,
+            resource_commodity_compatibility=raw.resource_commodity_compatibility,
+            resource_modal_compatibility=raw.resource_modal_compatibility,
+            resource_fleet=raw.resource_fleet,
+            resource_availability=raw.resource_availability,
+            edges=edges,
+            edge_commodities=(
+                edge_commodities if edge_commodities is not None
+                else raw.edge_commodities
+            ),
+            edge_capacities=_coalesce("edge_capacities", raw.edge_capacities),
+            edge_commodity_capacities=_coalesce(
+                "edge_commodity_capacities", raw.edge_commodity_capacities,
+            ),
+            edge_vehicles=raw.edge_vehicles,
+            edge_lead_time_resolved=edge_lead_time_resolved,
+            transformation_resolved=transformation_resolved,
+            fleet_capacity=fleet_capacity,
+            demand=_coalesce("demand", raw.demand),
+            supply=_coalesce("supply", raw.supply),
+            inventory_initial=raw.inventory_initial,
+            inventory_in_transit=raw.inventory_in_transit,
+            facility_hierarchy_types=raw.facility_hierarchy_types,
+            facility_hierarchy_levels=raw.facility_hierarchy_levels,
+            facility_hierarchy_nodes=raw.facility_hierarchy_nodes,
+            facility_hierarchy_memberships=raw.facility_hierarchy_memberships,
+            commodity_hierarchy_types=raw.commodity_hierarchy_types,
+            commodity_hierarchy_levels=raw.commodity_hierarchy_levels,
+            commodity_hierarchy_nodes=raw.commodity_hierarchy_nodes,
+            commodity_hierarchy_memberships=raw.commodity_hierarchy_memberships,
+            scenarios=raw.scenarios,
+            scenario_edge_rules=raw.scenario_edge_rules,
+            scenario_manual_edges=raw.scenario_manual_edges,
+            scenario_parameter_overrides=raw.scenario_parameter_overrides,
+            attributes=resolved_attrs,
+        )
+
     # ── validation ────────────────────────────────────────────────────
 
     def validate(self) -> None:
