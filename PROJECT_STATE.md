@@ -50,19 +50,18 @@ Core library `gbp` с моделью данных, build pipeline, mock данн
 
 ### What Remains in This Phase
 
-- Refactoring steps 2-4 from `docs/REFACTORING_SPEC.md` (Step 1 done)
-- Stabilize AttributeRegistry edge cases
+- ~~Stabilize AttributeRegistry edge cases~~ ✅ (aggregation validation, duplicate detection, empty+non-nullable, all-NaN rejection, improved error messages)
 - Update `docs/graph_data_model.md` to match current code
-- Notebook with full walkthrough
+- ~~Notebook with full walkthrough~~ ✅ (`notebooks/05_pipeline_walkthrough.ipynb`)
 
-### Refactoring Progress (see `docs/REFACTORING_SPEC.md`)
+### Refactoring Progress (see `docs/design/refactoring.md`)
 
 | Step | Description | Status |
 |------|-------------|--------|
 | 1 | `model.py` field grouping + group properties + `table_summary()` | **Done** |
-| 2 | `_build_raw_model()` decomposition into methods | Not started |
-| 3 | Protocol separation (`BikeShareSourceProtocol` vs `GenericSourceProtocol`) | Not started |
-| 4 | `make_raw_model()` factory function | Not started |
+| 2 | `_build_raw_model()` decomposition into methods | **Done** |
+| 3 | Protocol separation (`BikeShareSourceProtocol` vs `GenericSourceProtocol`) | **Done** |
+| 4 | `make_raw_model()` factory function (`gbp/core/factory.py`) | **Done** |
 
 ---
 

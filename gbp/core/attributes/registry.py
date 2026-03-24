@@ -55,6 +55,12 @@ class AttributeRegistry:
         Raises:
             ValueError: on validation failure.
         """
+        if name in self._attributes:
+            raise ValueError(
+                f"Attribute {name!r} is already registered. "
+                f"Use a unique name for each attribute."
+            )
+
         resolved_grain = tuple(
             "period_id" if g == "date" else g for g in grain
         )
@@ -83,7 +89,13 @@ class AttributeRegistry:
                 f"have {list(data.columns)}"
             )
 
-        _validate_numeric_series(spec, data[value_column])
+        if not data.empty:
+            _validate_numeric_series(spec, data[value_column])
+        elif not nullable:
+            raise ValueError(
+                f"Attribute {name!r}: data is empty but nullable=False. "
+                f"Provide at least one row or set nullable=True."
+            )
 
         self._attributes[name] = RegisteredAttribute(spec=spec, data=data)
 

@@ -14,10 +14,18 @@ def _validate_numeric_series(spec: AttributeSpec, series: pd.Series) -> None:
     """Raise ``ValueError`` if values violate kind constraints."""
     if series.empty:
         return
-    numeric = pd.to_numeric(series, errors="coerce")
+    # Distinguish "all values are None/NaN" (legitimate for nullable) from
+    # "all non-null values failed numeric coercion" (always an error).
+    non_null = series.dropna()
+    if non_null.empty:
+        return
+    numeric = pd.to_numeric(non_null, errors="coerce")
     mask = numeric.notna()
     if not mask.any():
-        return
+        raise ValueError(
+            f"Attribute {spec.name!r}: value column contains no numeric values "
+            f"(all {len(non_null)} non-null values coerced to NaN)"
+        )
     v = numeric[mask]
 
     if spec.kind in (AttributeKind.COST, AttributeKind.REVENUE, AttributeKind.RATE):
@@ -148,7 +156,10 @@ class AttributeBuilder:
                 if not merge_keys:
                     raise ValueError(
                         f"Attribute {spec.name!r}: no join keys shared between spine "
-                        f"{list(spine.columns)} and right {list(right.columns)}"
+                        f"{list(spine.columns)} and right {list(right.columns)}. "
+                        f"Expected merge on resolved_grain={spec.resolved_merge_grain()}. "
+                        f"Common causes: grain mismatch between spec and data, "
+                        f"or missing time resolution (date→period_id)."
                     )
 
                 spine = spine.merge(right, on=merge_keys, how="left")

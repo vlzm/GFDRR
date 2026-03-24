@@ -113,6 +113,120 @@ class TestRegister:
                 value_column="capacity",
             )
 
+    def test_duplicate_registration_raises(self) -> None:
+        reg = AttributeRegistry()
+        reg.register(
+            name="op_cost",
+            data=_cost_df(),
+            entity_type="facility",
+            kind=AttributeKind.COST,
+            grain=("facility_id", "operation_type", "commodity_category", "date"),
+            value_column="cost_per_unit",
+        )
+        with pytest.raises(ValueError, match="already registered"):
+            reg.register(
+                name="op_cost",
+                data=_cost_df(),
+                entity_type="facility",
+                kind=AttributeKind.COST,
+                grain=("facility_id", "operation_type", "commodity_category", "date"),
+                value_column="cost_per_unit",
+            )
+
+    def test_all_non_numeric_values_raises(self) -> None:
+        df = pd.DataFrame({
+            "facility_id": ["s1", "s2"],
+            "value": ["abc", "def"],
+        })
+        reg = AttributeRegistry()
+        with pytest.raises(ValueError, match="no numeric values"):
+            reg.register(
+                name="bad_vals",
+                data=df,
+                entity_type="facility",
+                kind=AttributeKind.ADDITIONAL,
+                grain=("facility_id",),
+                value_column="value",
+            )
+
+    def test_all_none_values_accepted(self) -> None:
+        """All-None values are legitimate for nullable attributes."""
+        df = pd.DataFrame({
+            "facility_id": ["s1", "s2"],
+            "value": [None, None],
+        })
+        reg = AttributeRegistry()
+        reg.register(
+            name="nullable_attr",
+            data=df,
+            entity_type="facility",
+            kind=AttributeKind.ADDITIONAL,
+            grain=("facility_id",),
+            value_column="value",
+        )
+        assert "nullable_attr" in reg
+
+    def test_invalid_aggregation_raises(self) -> None:
+        reg = AttributeRegistry()
+        with pytest.raises(ValueError, match="aggregation.*not valid"):
+            reg.register(
+                name="bad_agg",
+                data=_capacity_df(),
+                entity_type="facility",
+                kind=AttributeKind.ADDITIONAL,
+                grain=("facility_id", "operation_type", "commodity_category"),
+                value_column="capacity",
+                aggregation="median",
+            )
+
+    def test_valid_aggregations_accepted(self) -> None:
+        reg = AttributeRegistry()
+        for i, agg in enumerate(("mean", "sum", "min", "max", "first", "last")):
+            reg.register(
+                name=f"attr_{agg}_{i}",
+                data=_capacity_df(),
+                entity_type="facility",
+                kind=AttributeKind.ADDITIONAL,
+                grain=("facility_id", "operation_type", "commodity_category"),
+                value_column="capacity",
+                aggregation=agg,
+            )
+        assert len(reg) == 6
+
+    def test_empty_data_non_nullable_raises(self) -> None:
+        df = pd.DataFrame({
+            "facility_id": pd.Series([], dtype="str"),
+            "capacity": pd.Series([], dtype="float64"),
+        })
+        reg = AttributeRegistry()
+        with pytest.raises(ValueError, match="empty but nullable=False"):
+            reg.register(
+                name="empty_req",
+                data=df,
+                entity_type="facility",
+                kind=AttributeKind.CAPACITY,
+                grain=("facility_id",),
+                value_column="capacity",
+                nullable=False,
+            )
+
+    def test_empty_data_nullable_accepted(self) -> None:
+        df = pd.DataFrame({
+            "facility_id": pd.Series([], dtype="str"),
+            "capacity": pd.Series([], dtype="float64"),
+        })
+        reg = AttributeRegistry()
+        reg.register(
+            name="empty_opt",
+            data=df,
+            entity_type="facility",
+            kind=AttributeKind.CAPACITY,
+            grain=("facility_id",),
+            value_column="capacity",
+            nullable=True,
+        )
+        assert "empty_opt" in reg
+
     def test_source_table_equals_name(self) -> None:
         reg = AttributeRegistry()
         reg.register(

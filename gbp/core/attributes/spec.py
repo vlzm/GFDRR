@@ -8,6 +8,8 @@ from typing import Any
 
 from gbp.core.enums import AttributeKind
 
+VALID_AGGREGATIONS: frozenset[str] = frozenset({"mean", "sum", "min", "max", "first", "last"})
+
 _ENTITY_GRAINS: dict[str, tuple[str, ...]] = {
     "facility": ("facility_id",),
     "edge": ("source_id", "target_id", "modal_type"),
@@ -37,7 +39,12 @@ class AttributeSpec:
     eav_filter: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        """Validate entity grains and time-varying consistency."""
+        """Validate entity grains, aggregation, and time-varying consistency."""
+        if self.aggregation not in VALID_AGGREGATIONS:
+            raise ValueError(
+                f"Attribute {self.name!r}: aggregation {self.aggregation!r} is not valid; "
+                f"choose from {sorted(VALID_AGGREGATIONS)}"
+            )
         if self.entity_type not in _ENTITY_GRAINS:
             raise ValueError(
                 f"entity_type must be one of {sorted(_ENTITY_GRAINS)}, got {self.entity_type!r}"

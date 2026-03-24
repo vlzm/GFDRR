@@ -115,6 +115,37 @@ def test_zero_capacity_raises() -> None:
         b.build_spines(pd.DataFrame({"facility_id": ["a"]}), {"cap": data})
 
 
+def test_all_non_numeric_values_raises() -> None:
+    """Value column with all non-numeric strings is rejected."""
+    s = _fac_spec("bad", ("facility_id",))
+    b = AttributeBuilder("facility")
+    b.register(s)
+    data = pd.DataFrame({"facility_id": ["a", "b"], "v": ["foo", "bar"]})
+    with pytest.raises(ValueError, match="no numeric values"):
+        b.build_spines(pd.DataFrame({"facility_id": ["a", "b"]}), {"bad": data})
+
+
+def test_no_shared_join_keys_error_is_actionable() -> None:
+    """Error message includes resolved_grain, and hints about common causes."""
+    from unittest.mock import patch
+
+    s = _fac_spec("cost", ("facility_id", "period_id"))
+    b = AttributeBuilder("facility")
+    b.register(s)
+    data = pd.DataFrame({"facility_id": ["a"], "period_id": ["p0"], "v": [1.0]})
+    base = pd.DataFrame({"facility_id": ["a"]})
+
+    # Patch _prepare_attribute_frame to return a frame with no overlapping columns
+    no_overlap = pd.DataFrame({"alien_col": [1.0], "cost": [1.0]})
+    with patch(
+        "gbp.core.attributes.builder._prepare_attribute_frame", return_value=no_overlap
+    ):
+        with pytest.raises(ValueError, match="resolved_grain") as exc_info:
+            b.build_spines(base, {"cost": data})
+    msg = str(exc_info.value)
+    assert "time resolution" in msg
+
+
 def test_eav_filter() -> None:
     """EAV filter selects rows before merge."""
     s = AttributeSpec(
