@@ -1,6 +1,6 @@
 # Project State
 
-> Last updated: 2026-03-24
+> Last updated: 2026-03-26
 
 ## Vision
 
@@ -20,8 +20,8 @@
 
 ## Roadmap
 
-1. **Foundation** — модель данных, build pipeline, loader ← ТЕКУЩАЯ ФАЗА
-2. **Environment** — step-by-step engine, state management (следующая фаза)
+1. ~~**Foundation** — модель данных, build pipeline, loader~~ ✓
+2. **Environment** — step-by-step engine, state management ← ТЕКУЩАЯ ФАЗА
 3. **Rebalancer** — первая задача внутри Environment (VRP)
 4. **Trip Generator** — синтетический поток поездок для симуляции
 5. **UI** — визуализация Environment (Streamlit)
@@ -33,35 +33,37 @@
 
 ---
 
-## Current Phase: Foundation (стабилизация)
+## Current Phase: Environment
 
-Core library `gbp` с моделью данных, build pipeline, mock данные для велошеринга. Всё локально, Python, без инфраструктуры.
+Design doc: `docs/design/environment_design.md` (READY FOR IMPLEMENTATION).
 
-### What Works Today
+Step-by-step simulation engine поверх `ResolvedModelData`. Immutable state, pluggable phases, Task-based solver architecture.
 
-- **Data model** (`gbp/core/model.py`): RawModelData (~46 tables) and ResolvedModelData (~52 tables) with Pydantic row schemas, grouped table access properties, and `table_summary()` introspection.
-- **Build pipeline** (`gbp/build/pipeline.py`): `build_model(raw)` runs validation → time resolution → edge building → lead time resolution → transformation resolution → fleet capacity → spine assembly. All steps tested.
-- **Attribute system** (`gbp/core/attributes/`): `AttributeRegistry` with grain-aware registration, kind validation (COST ≥ 0, CAPACITY > 0), grain groups, and spine assembly.
-- **Bike-sharing loader** (`gbp/loaders/dataloader_graph.py`): Transforms bike-sharing source data (stations, depots, trips, telemetry) into a complete `RawModelData`.
-- **Validation** (`gbp/build/validation.py`): Unit consistency, referential integrity, resource completeness, temporal coverage, graph connectivity (BFS).
-- **Serialization** (`gbp/io/`): `raw_to_dict` / `dict_to_raw` for persistence.
-- **Rebalancer prototype** (`gbp/rebalancer/`): PDP solver using OR-Tools. Early prototype, not connected to attribute system. Will be redesigned as a task inside Environment.
-- **Tests**: Unit tests for core, build, loading modules. Integration test for full pipeline.
+### Implementation Progress
 
-### What Remains in This Phase
+| Step | Description | Files | Status |
+|------|-------------|-------|--------|
+| 1 | SimulationState + init_state | `state.py` | Not started |
+| 2 | Phase Protocol + PhaseResult + Schedule | `phases.py` | Not started |
+| 3 | SimulationLog | `log.py` | Not started |
+| 4 | Built-in phases (DemandPhase, ArrivalsPhase) | `built_in_phases.py` | Not started |
+| 5 | Task Protocol + DispatchPhase | `task.py`, `dispatch_phase.py` | Not started |
+| 6 | Environment class + Config | `engine.py`, `config.py` | Not started |
+| 7 | NoopTask + Integration test | `tasks/noop.py`, `tests/` | Not started |
 
-- ~~Stabilize AttributeRegistry edge cases~~ ✅ (aggregation validation, duplicate detection, empty+non-nullable, all-NaN rejection, improved error messages)
-- Update `docs/graph_data_model.md` to match current code
-- ~~Notebook with full walkthrough~~ ✅ (`notebooks/05_pipeline_walkthrough.ipynb`)
+All files in `gbp/consumers/simulator/`. Steps 3-4-5 can be done in parallel (depend only on 1-2). Step 6 assembles everything. Step 7 is the smoke test.
 
-### Refactoring Progress (see `docs/design/refactoring.md`)
+### Key Design Decisions (from design doc)
 
-| Step | Description | Status |
-|------|-------------|--------|
-| 1 | `model.py` field grouping + group properties + `table_summary()` | **Done** |
-| 2 | `_build_raw_model()` decomposition into methods | **Done** |
-| 3 | Protocol separation (`BikeShareSourceProtocol` vs `GenericSourceProtocol`) | **Done** |
-| 4 | `make_raw_model()` factory function (`gbp/core/factory.py`) | **Done** |
+- **Immutable state** — `SimulationState` is `frozen=True`, phases return new state via `with_*` methods
+- **Logical phases, not temporal** — sub-steps within a period are DEMAND, ARRIVALS, DISPATCH (order of processing, not time-of-day)
+- **Three-layer architecture** — Phase (when + validate + apply) → Task (prepare + solve + postprocess) → Solver (pure math)
+- **Dispatches as DataFrame** — unified format, 1 dispatch = 1 commodity + 1 resource
+- **Phase returns PhaseResult** — (state, flow_events, unmet_demand, rejected_dispatches)
+- **Instance-level resource tracking** — each resource has position, status, available_at_period
+- **Resource stays where it arrived** — solver manages positioning
+- **Reject + log** — no dispatch queue; if no resource available, reject and log
+- **MVP: current period only** — no multi-stop routes across periods
 
 ---
 
@@ -69,10 +71,9 @@ Core library `gbp` с моделью данных, build pipeline, mock данн
 
 These components are planned but **NOT being worked on** in the current phase. Do not create files, write code, or set up infrastructure for these.
 
-- **Environment** — step-by-step engine. Will have its own design doc (next phase after Foundation).
-- **Rebalancer redesign** — VRP task inside Environment. Current `gbp/rebalancer/` is an early prototype; do not extend it until design doc.
-- **Trip Generator** — synthetic trip stream for simulation.
-- **Strategic Optimizer** — LP/MILP over full planning horizon. Separate consumer, separate design doc. Phase 6.
+- **Rebalancer redesign** — first real Task inside Environment. Phase 3, will have its own design doc. Current `gbp/rebalancer/` is an early prototype; do not extend.
+- **Trip Generator** — synthetic trip stream for simulation. Phase 4.
+- **Strategic Optimizer** — LP/MILP over full planning horizon. Separate consumer, phase 6.
 - **ML / forecasting** — demand forecasting, GNN for trip duration. See `docs/IDEAS.md`.
 - **API** — FastAPI. Not needed until UI.
 - **UI** — Streamlit. Not needed until Environment works.
@@ -80,6 +81,7 @@ These components are planned but **NOT being worked on** in the current phase. D
 - **DevOps** — Docker, CI/CD. Running locally.
 - **Cloud** — Azure, Terraform. Separate phase.
 - **Observability** — OpenTelemetry. Not needed without production.
+- **Multi-stop routes** — Task creating future dispatches across periods. Future extension.
 
 ---
 
@@ -113,7 +115,20 @@ These decisions were made during collaborative design sessions and should not be
 
 ## Completed Phases
 
-(пока пусто — Foundation ещё в процессе)
+### Foundation
+
+Core library `gbp` with data model, build pipeline, bike-sharing loader. All refactoring steps completed.
+
+**What was built:**
+- `gbp/core` — RawModelData (~46 tables), ResolvedModelData (~52 tables), Pydantic schemas, grouped table access, `table_summary()`
+- `gbp/core/attributes` — AttributeRegistry with grain-aware registration, kind validation, grain groups, spine assembly
+- `gbp/build` — `build_model()` pipeline: validation → time resolution → edge building → lead times → transformations → fleet capacity → spines
+- `gbp/loaders` — DataLoaderMock, DataLoaderGraph, BikeShareSourceProtocol, GenericSourceProtocol
+- `gbp/core/factory` — `make_raw_model()` quick-start helper
+- `gbp/io` — Parquet + JSON serialization with AttributeRegistry support
+- `gbp/build/validation` — unit consistency, referential integrity, resource completeness, graph connectivity (BFS)
+- Refactoring: model.py grouping, `_build_raw_model()` decomposition, protocol separation, factory function — all done
+- Tests: unit + integration, full pipeline coverage
 
 ---
 
@@ -122,12 +137,13 @@ These decisions were made during collaborative design sessions and should not be
 | Need to understand... | Read this |
 |----------------------|-----------|
 | Table schemas and structure | `gbp/core/model.py` + `gbp/core/schemas/` |
-| Data model design rationale | `docs/graph_data_model.md` |
+| Data model design rationale | `docs/design/graph_data_model.md` |
 | Build pipeline flow | `gbp/build/pipeline.py` + `docs/diagrams/08_build_pipeline.mermaid` |
-| Attribute system design | `docs/ATTRIBUTE_SYSTEM_DESIGN.md` |
+| Attribute system design | `docs/design/attribute_system.md` |
+| Environment design | `docs/design/environment_design.md` |
 | Architecture overview (visual) | `docs/architecture_diagrams.md` |
 | Data journey end-to-end | `docs/DATA_JOURNEY.md` |
-| Refactoring plan | `docs/REFACTORING_SPEC.md` |
+| Refactoring plan | `docs/design/refactoring.md` |
 | Repository structure | `docs/repo_struct.md` |
 | Future ideas (ML, GNN, etc.) | `docs/IDEAS.md` |
 | Project vision and roadmap | `PROJECT.md` |
