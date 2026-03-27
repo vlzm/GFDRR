@@ -3,8 +3,8 @@
 # Usage: bash docs/build_docs.sh
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -W 2>/dev/null || pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -W 2>/dev/null || pwd)"
 OUT_DIR="${SCRIPT_DIR}/_build/html"
 
 # Locate sphinx-build: prefer .venv (Windows Scripts/ or Linux bin/), fallback to PATH
