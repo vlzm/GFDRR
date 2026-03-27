@@ -1,0 +1,72 @@
+---
+title: "11. Hierarchy & Aggregation"
+---
+
+flowchart TB
+    subgraph Pattern["Hierarchy Pattern (same for Facility & Commodity)"]
+        HType["HierarchyType<br/>───────────<br/>hierarchy_type_id (PK)<br/>name: 'geographic'"]
+        HLevel["HierarchyLevel<br/>───────────<br/>hierarchy_type_id (FK)<br/>level_index: 0, 1, 2<br/>level_name: 'city', 'district', 'zone'"]
+        HNode["HierarchyNode<br/>───────────<br/>node_id (PK)<br/>hierarchy_type_id (FK)<br/>level_index<br/>parent_node_id (FK, null = root)"]
+        HMember["Membership<br/>───────────<br/>entity_id (FK)<br/>hierarchy_type_id (FK)<br/>node_id (FK)"]
+        HType --> HLevel
+        HType --> HNode
+        HNode --> HMember
+    end
+
+    subgraph FacilityHierarchy["Facility Hierarchy Example (bike-sharing)"]
+        direction TB
+        City["Paris<br/>(level 0: city)"]
+        Arr1["Arrondissement 10<br/>(level 1)"]
+        Arr2["Arrondissement 11<br/>(level 1)"]
+        Z1["Rebalance zone North<br/>(level 2)"]
+        Z2["Rebalance zone South<br/>(level 2)"]
+
+        City --> Arr1
+        City --> Arr2
+        Arr1 --> Z1
+        Arr2 --> Z2
+
+        Z1 -.->|"members"| D1F["Station cluster A<br/>Depot North<br/>…"]
+        Z2 -.->|"members"| D2F["Station cluster B<br/>Maintenance Hub East<br/>…"]
+    end
+
+    subgraph CommodityHierarchy["Commodity Hierarchy Example (bike-sharing)"]
+        direction TB
+        Bike["Bike (fleet)<br/>(level 0)"]
+        Cond["By condition<br/>(level 1)"]
+        Prod["By product line (optional)<br/>(level 1)"]
+        WB["WORKING_BIKE"]
+        BB["BROKEN_BIKE"]
+        Classic["Classic bike"]
+        EBike["E-bike"]
+
+        Bike --> Cond
+        Bike --> Prod
+        Cond --> WB
+        Cond --> BB
+        Prod --> Classic
+        Prod --> EBike
+    end
+
+    subgraph Aggregation["Aggregation Use Cases"]
+        PreSolve["Pre-Solve Aggregation<br/>───────────<br/>Facilities in zone → super-node<br/>Demand summed, capacity summed<br/>Intra-zone edges removed<br/>Inter-zone edges kept"]
+        PostSolve["Post-Solve Disaggregation<br/>───────────<br/>Zonal flows → station-level routes<br/>Proportional allocation"]
+        Decomposition["Decomposition<br/>───────────<br/>Master problem at city level<br/>Sub-problems per zone<br/>(Benders, Dantzig-Wolfe)"]
+        Reporting["Reporting<br/>───────────<br/>GROUP BY at any level:<br/>demand by arrondissement,<br/>load per depot, trips by product line"]
+    end
+
+    subgraph ScenarioConfig["Scenario Configuration"]
+        SC["scenario<br/>───────────<br/>facility_hierarchy_type: 'geographic'<br/>facility_aggregation_level: 1 (district)<br/>commodity_hierarchy_type: 'condition'<br/>commodity_aggregation_level: 0 (root)"]
+    end
+
+    classDef pattern fill:#e3f2fd,stroke:#1565c0
+    classDef fachier fill:#c8e6c9,stroke:#2e7d32
+    classDef comhier fill:#fff3e0,stroke:#e65100
+    classDef agg fill:#f3e5f5,stroke:#7b1fa2
+    classDef scenario fill:#fce4ec,stroke:#c2185b
+
+    class Pattern pattern
+    class FacilityHierarchy fachier
+    class CommodityHierarchy comhier
+    class Aggregation agg
+    class ScenarioConfig scenario

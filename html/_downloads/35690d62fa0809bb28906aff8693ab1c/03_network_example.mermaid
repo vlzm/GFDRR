@@ -1,0 +1,42 @@
+---
+title: "3. Network Graph — Bike-Sharing Example"
+---
+
+flowchart LR
+    subgraph Sources["SOURCES / high supply depots"]
+        D0["Central Depot<br/>SOURCE + STORAGE<br/>supply: WORKING_BIKE"]
+        D1["Regional Depot A<br/>SOURCE + STORAGE<br/>supply: WORKING_BIKE"]
+    end
+
+    subgraph Processing["MAINTENANCE & transshipment"]
+        MH["Maintenance Hub<br/>TRANSSHIPMENT + STORAGE<br/>─────────<br/>Transformation:<br/>BROKEN_BIKE → WORKING_BIKE<br/>(1:1, 5% loss)"]
+        R1["Relay Depot 1<br/>TRANSSHIPMENT + STORAGE"]
+        R2["Relay Depot 2<br/>TRANSSHIPMENT + STORAGE"]
+    end
+
+    subgraph Sinks["STATIONS / net demand"]
+        S1["Station 1<br/>SINK + STORAGE<br/>demand: trips"]
+        S2["Station 2<br/>SINK + STORAGE<br/>demand: trips"]
+        S3["Station 3<br/>SINK + STORAGE<br/>demand: trips"]
+    end
+
+    D0 ==>|"WORKING_BIKE<br/>🚛 ROAD"| R1
+    D1 ==>|"WORKING_BIKE<br/>🚛 ROAD"| R2
+    R1 -.->|"BROKEN_BIKE<br/>🚛 ROAD"| MH
+    R2 ==>|"BROKEN_BIKE<br/>🚛 ROAD"| MH
+
+    MH ==>|"WORKING_BIKE<br/>🚛 ROAD"| R1
+    MH ==>|"WORKING_BIKE<br/>🚛 ROAD"| R2
+
+    R1 ==>|"WORKING_BIKE<br/>🚛 ROAD"| S1
+    R1 ==>|"WORKING_BIKE<br/>🚛 ROAD"| S2
+    R2 ==>|"WORKING_BIKE<br/>🚛 ROAD"| S2
+    R2 ==>|"WORKING_BIKE<br/>🚛 ROAD"| S3
+
+    classDef source fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px
+    classDef transship fill:#bbdefb,stroke:#1565c0,stroke-width:2px
+    classDef sink fill:#ffcdd2,stroke:#c62828,stroke-width:2px
+
+    class D0,D1 source
+    class MH,R1,R2 transship
+    class S1,S2,S3 sink

@@ -1,0 +1,56 @@
+---
+title: "7. Attribute System — Specs, Grains, Groups, Spines"
+---
+
+flowchart TB
+    subgraph AttrSpec["AttributeSpec — unified attribute description"]
+        Spec["AttributeSpec<br/>───────────<br/>name: 'handling_cost'<br/>kind: COST | REVENUE | RATE | CAPACITY | ADDITIONAL<br/>entity_type: facility | edge | resource<br/>grain: [facility_id, operation_type, date]<br/>resolved_grain: [facility_id, operation_type, period_id]<br/>value_column: 'cost_per_unit'<br/>aggregation: mean | sum | min<br/>nullable: bool"]
+    end
+
+    subgraph EntityGrains["Entity Grains"]
+        EG_fac["Facility: [facility_id]"]
+        EG_edge["Edge: [source_id, target_id, modal_type]"]
+        EG_res["Resource: [resource_category]"]
+    end
+
+    subgraph GrainExamples["Grain Examples — Facility Attributes"]
+        direction TB
+        G1["facility_type<br/>grain: [facility_id]<br/>Simple: no expansion"]
+        G2["storage_capacity<br/>grain: [facility_id, commodity_category]<br/>Medium: +1 dimension"]
+        G3["handling_cost<br/>grain: [facility_id, operation_type, period_id]<br/>Complex: +2 dimensions"]
+        G4["repair_cost<br/>grain: [facility_id, operation_type,<br/>commodity_category, period_id]<br/>Most complex: +3 dimensions (REPAIR at hub)"]
+    end
+
+    subgraph GrainGroups["GrainGroups — avoiding cross-join explosion"]
+        direction TB
+        GG_problem["Problem: merging independent dimensions<br/>(operation_type × commodity_category)<br/>causes cross-join explosion"]
+        GG_solution["Solution: group attributes by<br/>chain-compatible grains<br/>(one is subset of another)"]
+        GroupA["Group A<br/>───────────<br/>grain: facility_id × commodity_category × period_id<br/>attrs: storage_capacity, dock_throughput"]
+        GroupB["Group B<br/>───────────<br/>grain: facility_id × operation_type × period_id<br/>attrs: handling_cost_base, handling_cost"]
+        GroupC["Group C<br/>───────────<br/>grain: facility_id<br/>attrs: facility_type"]
+    end
+
+    subgraph SpineAssembly["Spine Assembly — AttributeBuilder"]
+        direction TB
+        Base["Base entity DataFrame<br/>(e.g. all facilities)"]
+        Register["Register AttributeSpecs<br/>→ auto_group_attributes()"]
+        MergePlan["plan_merges():<br/>1. Non-expanding merges first<br/>2. Then minimal expansion"]
+        BuildSpine["build_spines():<br/>Left-join attribute tables<br/>onto base per group"]
+        Result["Result: dict of spine DataFrames<br/>one per GrainGroup"]
+        Base --> Register --> MergePlan --> BuildSpine --> Result
+    end
+
+    AttrSpec --> GrainGroups
+    EntityGrains --> AttrSpec
+
+    classDef spec fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef grains fill:#e8f5e9,stroke:#2e7d32
+    classDef examples fill:#f5f5f5,stroke:#616161
+    classDef groups fill:#fff3e0,stroke:#e65100
+    classDef spine fill:#f3e5f5,stroke:#7b1fa2
+
+    class AttrSpec spec
+    class EntityGrains grains
+    class GrainExamples examples
+    class GrainGroups groups
+    class SpineAssembly spine

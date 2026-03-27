@@ -1,0 +1,247 @@
+---
+title: "10. Entity-Relationship Diagram — Full Table Schema"
+---
+
+erDiagram
+    FACILITY {
+        string facility_id PK
+        string facility_type
+        string name
+        float lat
+        float lon
+    }
+
+    COMMODITY_CATEGORY {
+        string commodity_category_id PK
+        string name
+        string unit
+        string description
+    }
+
+    COMMODITY {
+        string commodity_id PK
+        string commodity_category FK
+        string description
+    }
+
+    RESOURCE_CATEGORY {
+        string resource_category_id PK
+        string name
+        float base_capacity
+        string capacity_unit
+    }
+
+    RESOURCE {
+        string resource_id PK
+        string resource_category FK
+        string home_facility_id FK
+        float capacity_override
+    }
+
+    PLANNING_HORIZON {
+        string planning_horizon_id PK
+        string name
+        date start_date
+        date end_date
+    }
+
+    PLANNING_HORIZON_SEGMENT {
+        string planning_horizon_id FK
+        int segment_index PK
+        date start_date
+        date end_date
+        string period_type
+    }
+
+    PERIOD {
+        string period_id PK
+        string planning_horizon_id FK
+        int segment_index
+        int period_index
+        string period_type
+        date start_date
+        date end_date
+    }
+
+    EDGE {
+        string source_id FK
+        string target_id FK
+        string modal_type PK
+        float distance
+        float lead_time_hours
+        float reliability
+    }
+
+    EDGE_COMMODITY {
+        string source_id FK
+        string target_id FK
+        string modal_type FK
+        string commodity_category FK
+        bool enabled
+        float capacity_consumption
+    }
+
+    EDGE_CAPACITY {
+        string source_id FK
+        string target_id FK
+        string modal_type FK
+        date date
+        float capacity
+    }
+
+    EDGE_VEHICLE {
+        string source_id FK
+        string target_id FK
+        string modal_type FK
+        string resource_category FK
+        float vehicle_capacity
+        int max_vehicles_per_period
+    }
+
+    FACILITY_ROLE {
+        string facility_id FK
+        string role
+    }
+
+    FACILITY_OPERATION {
+        string facility_id FK
+        string operation_type
+        bool enabled
+    }
+
+    DEMAND {
+        string facility_id FK
+        string commodity_category FK
+        date date
+        float quantity
+        float min_order_quantity
+    }
+
+    SUPPLY {
+        string facility_id FK
+        string commodity_category FK
+        date date
+        float quantity
+    }
+
+    INVENTORY_INITIAL {
+        string facility_id FK
+        string commodity_category FK
+        float quantity
+    }
+
+    TRANSFORMATION {
+        string transformation_id PK
+        string facility_id FK
+        string operation_type
+        float loss_rate
+        float batch_size
+    }
+
+    TRANSFORMATION_INPUT {
+        string transformation_id FK
+        string commodity_category FK
+        float ratio
+    }
+
+    TRANSFORMATION_OUTPUT {
+        string transformation_id FK
+        string commodity_category FK
+        float ratio
+    }
+
+    OPERATION_COST {
+        string facility_id FK
+        string operation_type
+        string commodity_category FK
+        date date
+        float cost_per_unit
+    }
+
+    TRANSPORT_COST {
+        string source_id FK
+        string target_id FK
+        string modal_type FK
+        string resource_category FK
+        date date
+        float cost_per_unit
+    }
+
+    RESOURCE_FLEET {
+        string facility_id FK
+        string resource_category FK
+        int count
+    }
+
+    RESOURCE_COMMODITY_COMPAT {
+        string resource_category FK
+        string commodity_category FK
+        bool enabled
+    }
+
+    RESOURCE_MODAL_COMPAT {
+        string resource_category FK
+        string modal_type
+        bool enabled
+    }
+
+    SCENARIO {
+        string scenario_id PK
+        string planning_horizon_id FK
+        string name
+        string facility_hierarchy_type
+        int facility_aggregation_level
+    }
+
+    SOLUTION_FLOW {
+        string scenario_id FK
+        string source_id FK
+        string target_id FK
+        string modal_type FK
+        string commodity_category FK
+        string period_id FK
+        float quantity
+    }
+
+    %% Relationships
+    FACILITY ||--o{ FACILITY_ROLE : "has roles"
+    FACILITY ||--o{ FACILITY_OPERATION : "supports"
+    FACILITY ||--o{ EDGE : "source"
+    FACILITY ||--o{ EDGE : "target"
+    FACILITY ||--o{ DEMAND : "consumes"
+    FACILITY ||--o{ SUPPLY : "produces"
+    FACILITY ||--o{ INVENTORY_INITIAL : "stores"
+    FACILITY ||--o{ TRANSFORMATION : "performs"
+    FACILITY ||--o{ RESOURCE_FLEET : "hosts"
+    FACILITY ||--o{ OPERATION_COST : "has costs"
+
+    COMMODITY_CATEGORY ||--o{ COMMODITY : "instance of"
+    COMMODITY_CATEGORY ||--o{ DEMAND : "demanded"
+    COMMODITY_CATEGORY ||--o{ SUPPLY : "supplied"
+    COMMODITY_CATEGORY ||--o{ EDGE_COMMODITY : "allowed on"
+    COMMODITY_CATEGORY ||--o{ TRANSFORMATION_INPUT : "consumed by"
+    COMMODITY_CATEGORY ||--o{ TRANSFORMATION_OUTPUT : "produced by"
+
+    RESOURCE_CATEGORY ||--o{ RESOURCE : "instance of"
+    RESOURCE_CATEGORY ||--o{ RESOURCE_FLEET : "deployed as"
+    RESOURCE_CATEGORY ||--o{ EDGE_VEHICLE : "operates on"
+    RESOURCE_CATEGORY ||--o{ TRANSPORT_COST : "costs"
+    RESOURCE_CATEGORY ||--o{ RESOURCE_COMMODITY_COMPAT : "can carry"
+    RESOURCE_CATEGORY ||--o{ RESOURCE_MODAL_COMPAT : "works on"
+
+    RESOURCE }o--|| FACILITY : "home facility"
+
+    EDGE ||--o{ EDGE_COMMODITY : "carries"
+    EDGE ||--o{ EDGE_CAPACITY : "limited by"
+    EDGE ||--o{ EDGE_VEHICLE : "served by"
+    EDGE ||--o{ TRANSPORT_COST : "priced at"
+
+    PLANNING_HORIZON ||--o{ PLANNING_HORIZON_SEGMENT : "divided into"
+    PLANNING_HORIZON ||--o{ PERIOD : "generates"
+    PLANNING_HORIZON_SEGMENT ||--o{ PERIOD : "contains"
+    PLANNING_HORIZON ||--o{ SCENARIO : "used by"
+
+    TRANSFORMATION ||--o{ TRANSFORMATION_INPUT : "inputs"
+    TRANSFORMATION ||--o{ TRANSFORMATION_OUTPUT : "outputs"
+
+    SCENARIO ||--o{ SOLUTION_FLOW : "produces"

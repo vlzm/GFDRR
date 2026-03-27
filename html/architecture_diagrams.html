@@ -1,0 +1,1319 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="./">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="Путь данных: от велосипеда до оптимизатора" href="DATA_JOURNEY.html"><link rel="prev" title="gbp.rebalancer" href="modules/rebalancer.html">
+
+    <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
+        <title>Graph-Based Logistics Platform — Architecture Diagrams - GBP</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=b96efb0b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  --color-brand-primary: #0d6eaa;
+  --color-brand-content: #0d6eaa;
+  --color-foreground-primary: #2e3440;
+  --color-foreground-secondary: #4c566a;
+  --color-foreground-muted: #7b8894;
+  --color-foreground-border: #d8dee9;
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f8f9fb;
+  --color-background-hover: #eef1f6;
+  --color-background-hover--transparent: #eef1f600;
+  --color-background-border: #e5e9f0;
+  --color-sidebar-background: #1a202c;
+  --color-sidebar-background-border: #2d3748;
+  --color-sidebar-brand-text: #ffffff;
+  --color-sidebar-caption-text: #a0aec0;
+  --color-sidebar-link-text: #cbd5e0;
+  --color-sidebar-link-text--top-level: #e2e8f0;
+  --color-sidebar-item-background--current: #2d3748;
+  --color-sidebar-item-background--hover: #2d374880;
+  --color-sidebar-item-expander-color: #718096;
+  --color-sidebar-item-expander-color--hover: #a0aec0;
+  --color-sidebar-search-background: #2d3748;
+  --color-sidebar-search-border: #4a5568;
+  --color-code-background: #f0f4f8;
+  --color-code-foreground: #2e3440;
+  --color-inline-code-background: #eef1f6;
+  --color-admonition-background: #ebf8ff;
+  --color-admonition-title-background: #bee3f8;
+  --color-admonition-title: #2c5282;
+  --color-link: #0d6eaa;
+  --color-link--hover: #094d7a;
+  --color-link-underline: #0d6eaa40;
+  --color-link-underline--hover: #094d7a;
+  --color-api-background: #f7fafc;
+  --color-api-overall-border: #e2e8f0;
+  --color-api-name: #1a365d;
+  --font-stack: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-stack--monospace: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --font-stack--headings: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #63b3ed;
+  --color-brand-content: #63b3ed;
+  --color-foreground-primary: #eceff4;
+  --color-foreground-secondary: #d8dee9;
+  --color-foreground-muted: #7b8894;
+  --color-foreground-border: #3b4252;
+  --color-background-primary: #1a1e2e;
+  --color-background-secondary: #232736;
+  --color-background-hover: #2e3440;
+  --color-background-hover--transparent: #2e344000;
+  --color-background-border: #3b4252;
+  --color-sidebar-background: #171923;
+  --color-sidebar-background-border: #2d3748;
+  --color-sidebar-brand-text: #e2e8f0;
+  --color-sidebar-caption-text: #a0aec0;
+  --color-sidebar-link-text: #a0aec0;
+  --color-sidebar-link-text--top-level: #cbd5e0;
+  --color-sidebar-item-background--current: #2d3748;
+  --color-sidebar-item-background--hover: #2d374880;
+  --color-code-background: #232736;
+  --color-code-foreground: #d8dee9;
+  --color-inline-code-background: #2e3440;
+  --color-admonition-background: #2d374880;
+  --color-link: #63b3ed;
+  --color-link--hover: #90cdf4;
+  --color-api-background: #232736;
+  --color-api-overall-border: #3b4252;
+  --color-api-name: #90cdf4;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #63b3ed;
+  --color-brand-content: #63b3ed;
+  --color-foreground-primary: #eceff4;
+  --color-foreground-secondary: #d8dee9;
+  --color-foreground-muted: #7b8894;
+  --color-foreground-border: #3b4252;
+  --color-background-primary: #1a1e2e;
+  --color-background-secondary: #232736;
+  --color-background-hover: #2e3440;
+  --color-background-hover--transparent: #2e344000;
+  --color-background-border: #3b4252;
+  --color-sidebar-background: #171923;
+  --color-sidebar-background-border: #2d3748;
+  --color-sidebar-brand-text: #e2e8f0;
+  --color-sidebar-caption-text: #a0aec0;
+  --color-sidebar-link-text: #a0aec0;
+  --color-sidebar-link-text--top-level: #cbd5e0;
+  --color-sidebar-item-background--current: #2d3748;
+  --color-sidebar-item-background--hover: #2d374880;
+  --color-code-background: #232736;
+  --color-code-foreground: #d8dee9;
+  --color-inline-code-background: #2e3440;
+  --color-admonition-background: #2d374880;
+  --color-link: #63b3ed;
+  --color-link--hover: #90cdf4;
+  --color-api-background: #232736;
+  --color-api-overall-border: #3b4252;
+  --color-api-name: #90cdf4;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="index.html"><div class="brand">GBP</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
+  
+  <span class="sidebar-brand-text">GBP</span>
+  
+</a><form class="sidebar-search-container" method="get" action="search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="modules/core.html">gbp.core</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules/build.html">gbp.build</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules/loaders.html">gbp.loaders</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules/loading.html">gbp.loading</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules/io.html">gbp.io</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules/rebalancer.html">gbp.rebalancer</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Architecture</span></p>
+<ul class="current">
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Graph-Based Logistics Platform — Architecture Diagrams</a></li>
+<li class="toctree-l1"><a class="reference internal" href="DATA_JOURNEY.html">Путь данных: от велосипеда до оптимизатора</a></li>
+<li class="toctree-l1"><a class="reference internal" href="design/graph_data_model.html">Graph-Based Logistics Platform — Data Model</a></li>
+<li class="toctree-l1"><a class="reference internal" href="design/attribute_system.html">Design: Dynamic Attribute System</a></li>
+<li class="toctree-l1"><a class="reference internal" href="design/environment_design.html">Design Doc: Environment (Simulation Engine)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="design/refactoring.html">Architecture Clarity Refactoring — Completed</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="https://github.com/vlzm/GFDRR/blob/main/docs/architecture_diagrams.md?plain=true" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div><div class="edit-this-page">
+  <a class="muted-link" href="https://github.com/vlzm/GFDRR/edit/main/docs/architecture_diagrams.md" rel="edit" title="Edit this page">
+    <svg><use href="#svg-pencil"></use></svg>
+    <span class="visually-hidden">Edit this page</span>
+  </a>
+</div><div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="graph-based-logistics-platform-architecture-diagrams">
+<h1>Graph-Based Logistics Platform — Architecture Diagrams<a class="headerlink" href="#graph-based-logistics-platform-architecture-diagrams" title="Link to this heading">¶</a></h1>
+<p>This document provides a progressive visual guide to the graph-based data model implemented in <code class="docutils literal notranslate"><span class="pre">gbp/core</span></code>, <code class="docutils literal notranslate"><span class="pre">gbp/build</span></code>, <code class="docutils literal notranslate"><span class="pre">gbp/loaders</span></code>, and <code class="docutils literal notranslate"><span class="pre">gbp/io</span></code>. Diagrams are ordered from simple to complex — each one builds on the concepts introduced in the previous ones.</p>
+<p>All diagrams are in Mermaid format and can be viewed in any Markdown renderer that supports Mermaid (GitHub, VS Code with extensions, etc.). Source files are in <code class="docutils literal notranslate"><span class="pre">docs/diagrams/</span></code>.</p>
+<hr class="docutils" />
+<section id="core-entities-the-three-pillars">
+<h2>1. Core Entities — The Three Pillars<a class="headerlink" href="#core-entities-the-three-pillars" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> The three fundamental entity types that form the model, and how they relate via edges.</p>
+<p>The platform models commodity movement through a network of facilities using transport resources. Everything builds on these three pillars:</p>
+<ul class="simple">
+<li><p><strong>Facility</strong> — WHERE commodity resides (nodes of the graph)</p></li>
+<li><p><strong>Commodity</strong> — WHAT moves through the network (flow substance)</p></li>
+<li><p><strong>Resource</strong> — HOW commodity is moved (transport vehicles/channels)</p></li>
+<li><p><strong>Edge</strong> — CONNECTION between facilities (arcs of the graph)</p></li>
+</ul>
+<p>Each entity has two levels: L2 (domain-agnostic category) and optional L3 (concrete instance for tracking).</p>
+<pre  class="mermaid">
+        flowchart TB
+    subgraph Facility[&quot;Facility — WHERE&quot;]
+        F[&quot;facility_id, facility_type&lt;br/&gt;name, lat, lon&lt;br/&gt;Roles + Operations&quot;]
+    end
+
+    subgraph Commodity[&quot;Commodity — WHAT&quot;]
+        CC[&quot;CommodityCategory (L2)&lt;br/&gt;name, unit&quot;]
+        C[&quot;Commodity (L3, optional)&lt;br/&gt;concrete instance&quot;]
+        CC --&gt;|&quot;instance&quot;| C
+    end
+
+    subgraph Resource[&quot;Resource — HOW&quot;]
+        RC[&quot;ResourceCategory (L2)&lt;br/&gt;base_capacity&quot;]
+        R[&quot;Resource (L3, optional)&lt;br/&gt;home_facility_id&quot;]
+        RC --&gt;|&quot;instance&quot;| R
+    end
+
+    subgraph Edge[&quot;Edge — CONNECTION&quot;]
+        E[&quot;PK: source_id × target_id × modal_type&quot;]
+    end
+
+    Facility ---|&quot;source&quot;| Edge
+    Facility ---|&quot;target&quot;| Edge
+    Edge ---|&quot;carries&quot;| Commodity
+    Edge ---|&quot;uses&quot;| Resource
+    R ---|&quot;home&quot;| Facility
+    </pre><blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/0c68f646387c2a306243ce2f0c0c93e1/01_core_entities.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/01_core_entities.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="facility-type-operations-roles">
+<h2>2. Facility — Type, Operations, Roles<a class="headerlink" href="#facility-type-operations-roles" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> How a single Facility entity replaces the need for separate “warehouse” and “receiver” through three orthogonal dimensions.</p>
+<p>A facility is described by three independent aspects:</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Dimension</p></th>
+<th class="head"><p>Purpose</p></th>
+<th class="head"><p>Example</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>FacilityType</strong></p></td>
+<td><p>What it physically is</p></td>
+<td><p>STATION, DEPOT, MAINTENANCE_HUB</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Operations</strong></p></td>
+<td><p>What it can do (with cost &amp; capacity)</p></td>
+<td><p>RECEIVING, STORAGE, DISPATCH, REPAIR</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>FacilityRole</strong></p></td>
+<td><p>How it behaves in the flow network</p></td>
+<td><p>SOURCE, SINK, STORAGE, TRANSSHIPMENT</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Roles are derived from type → adjusted by operations → optionally overridden manually.</p>
+<pre  class="mermaid">
+        flowchart LR
+    FType[&quot;FacilityType&lt;br/&gt;(what it IS)&quot;]
+    FOps[&quot;Operations&lt;br/&gt;(what it CAN DO)&quot;]
+    FRoles[&quot;FacilityRole&lt;br/&gt;(how it BEHAVES)&quot;]
+
+    FType --&gt;|&quot;default roles&quot;| FRoles
+    FOps --&gt;|&quot;adjust&quot;| FRoles
+    </pre><blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/d14ffd5453377152f0bfc5793067e6c9/02_facility_roles.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/02_facility_roles.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="network-graph-bike-sharing-example">
+<h2>3. Network Graph — Bike-Sharing Example<a class="headerlink" href="#network-graph-bike-sharing-example" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> How facilities and edges form a concrete network with commodity flows.</p>
+<p>This shows a bike-sharing network: central/ regional depots supply <strong>WORKING_BIKE</strong> for rebalancing; <strong>Maintenance Hub</strong> repairs <strong>BROKEN_BIKE → WORKING_BIKE</strong>; relay depots and stations exchange bikes on <strong>ROAD</strong> (and optionally <strong>RAIL</strong> for inter-city legs).</p>
+<pre  class="mermaid">
+        flowchart LR
+    D0[&quot;Central Depot&lt;br/&gt;SOURCE&quot;] ==&gt;|&quot;WORKING_BIKE 🚛&quot;| R1[&quot;Relay 1&quot;]
+    D1[&quot;Regional Depot&lt;br/&gt;SOURCE&quot;] ==&gt;|&quot;WORKING_BIKE 🚛&quot;| R2[&quot;Relay 2&quot;]
+    R1 -.-&gt;|&quot;BROKEN_BIKE 🚛&quot;| MH[&quot;Maintenance Hub&quot;]
+    MH ==&gt;|&quot;WORKING_BIKE 🚛&quot;| R1
+    R1 ==&gt;|&quot;WORKING_BIKE 🚛&quot;| S1[&quot;Station 1&lt;br/&gt;SINK&quot;]
+    R2 ==&gt;|&quot;WORKING_BIKE 🚛&quot;| S2[&quot;Station 2&lt;br/&gt;SINK&quot;]
+    </pre><blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/35690d62fa0809bb28906aff8693ab1c/03_network_example.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/03_network_example.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="multi-commodity-flow-transformation">
+<h2>4. Multi-Commodity Flow &amp; Transformation<a class="headerlink" href="#multi-commodity-flow-transformation" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> How multiple commodity types flow through the network simultaneously, and how transformations convert one commodity into another.</p>
+<p>Key concepts:</p>
+<ul class="simple">
+<li><p><strong>Flow variable:</strong> <code class="docutils literal notranslate"><span class="pre">flow[edge,</span> <span class="pre">commodity_category,</span> <span class="pre">period]</span></code></p></li>
+<li><p><strong>Conservation:</strong> per-commodity balance at each node based on its role</p></li>
+<li><p><strong>Shared edge capacity:</strong> all commodities share the edge capacity via <code class="docutils literal notranslate"><span class="pre">capacity_consumption</span></code> coefficients</p></li>
+<li><p><strong>Transformation:</strong> N→M conversion at facilities (1→1 <strong>REPAIR</strong> at Maintenance Hub, 1→N refinery-style splitting, N→1 blending in other domains)</p></li>
+</ul>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/4f3e5cba9b590b8f3d8f10f48f670383/04_multi_commodity_flow.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/04_multi_commodity_flow.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="temporal-model-multi-resolution-planning">
+<h2>5. Temporal Model — Multi-Resolution Planning<a class="headerlink" href="#temporal-model-multi-resolution-planning" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> How time is structured with planning horizons, segments of different granularity, and periods.</p>
+<p>The temporal axis is fundamental — without it, there’s no inventory carry-over between periods.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>PlanningHorizon (6 months)
+├── Segment 0: DAY    (Jan 1–14)   → 14 periods
+├── Segment 1: WEEK   (Jan 15–Mar) → 8 periods
+└── Segment 2: MONTH  (Mar–Jun)    → ~4 periods
+                                     ─────────
+                                     26 periods total
+                                     continuous index (0..25)
+</pre></div>
+</div>
+<p>Raw data uses <code class="docutils literal notranslate"><span class="pre">date</span></code> columns. During build, dates are mapped to <code class="docutils literal notranslate"><span class="pre">period_id</span></code> via the <strong>Time Resolution Pipeline</strong> with appropriate aggregation (mean for costs, sum for demand/supply).</p>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/5d1b4e1d849031e4d5c1d4f63076b640/05_temporal_model.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/05_temporal_model.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="edge-model-multi-modal-edges-with-attributes">
+<h2>6. Edge Model — Multi-Modal Edges with Attributes<a class="headerlink" href="#edge-model-multi-modal-edges-with-attributes" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> The rich structure of edges — identity, commodities, capacities, vehicles, and lead time resolution.</p>
+<p>Edge PK: <code class="docutils literal notranslate"><span class="pre">source_id</span> <span class="pre">×</span> <span class="pre">target_id</span> <span class="pre">×</span> <span class="pre">modal_type</span></code> (multiple edges between same facilities via different transport modes).</p>
+<p>Key tables around an edge:</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Table</p></th>
+<th class="head"><p>Purpose</p></th>
+<th class="head"><p>Grain</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">edge</span></code></p></td>
+<td><p>Static attributes (distance, lead_time_hours)</p></td>
+<td><p>edge</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">edge_commodity</span></code></p></td>
+<td><p>Which commodities are allowed + capacity_consumption</p></td>
+<td><p>edge × commodity</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">edge_capacity</span></code></p></td>
+<td><p>Shared throughput limit (time-varying)</p></td>
+<td><p>edge × date</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">edge_commodity_capacity</span></code></p></td>
+<td><p>Per-commodity min/max shipment (time-varying)</p></td>
+<td><p>edge × commodity × date</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">edge_vehicle</span></code></p></td>
+<td><p>Discrete vehicle trips</p></td>
+<td><p>edge × resource_category</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">edge_lead_time_resolved</span></code></p></td>
+<td><p>Generated: lead_time_periods per departure period</p></td>
+<td><p>edge × period</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Lead time in multi-resolution: the same 48h lead time = 2 DAY periods but 0 WEEK periods.</p>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/3db3b8bbe78e8a28bc435c6d3c48f8a7/06_edge_model.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/06_edge_model.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="attribute-system-specs-grains-groups-spines">
+<h2>7. Attribute System — Specs, Grains, Groups, Spines<a class="headerlink" href="#attribute-system-specs-grains-groups-spines" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> How the attribute system handles parameters at different granularities for all three entity types.</p>
+<p>The attribute system is the same for Facility, Edge, and Resource — only the <code class="docutils literal notranslate"><span class="pre">entity_grain</span></code> differs.</p>
+<p><strong>AttributeSpec</strong> declares: name, kind (COST/REVENUE/RATE/CAPACITY/ADDITIONAL), grain, value_column, aggregation rule.</p>
+<p><strong>GrainGroups</strong> solve the cross-join problem: attributes with chain-compatible grains (one is subset of another) go into one group; incompatible dimensions (e.g. <code class="docutils literal notranslate"><span class="pre">operation_type</span></code> vs <code class="docutils literal notranslate"><span class="pre">commodity_category</span></code>) stay in separate groups → separate spine DataFrames.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>AttributeSpecs
+    ↓ auto_group_attributes()
+GrainGroups
+    ↓ plan_merges() — non-expanding first, then minimal expansion
+MergePlans
+    ↓ build_spines() — left-join attribute tables onto base
+Spine DataFrames (one per group)
+</pre></div>
+</div>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/274188b0f77924a868e74910c296751b/07_attribute_system.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/07_attribute_system.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="build-pipeline-rawmodeldata-resolvedmodeldata">
+<h2>8. Build Pipeline — RawModelData → ResolvedModelData<a class="headerlink" href="#build-pipeline-rawmodeldata-resolvedmodeldata" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> The complete <code class="docutils literal notranslate"><span class="pre">build_model()</span></code> pipeline that transforms raw input into a ready-to-consume resolved model.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>RawModelData (with dates)
+    ↓ 1. Validation (units, referential integrity, connectivity)
+    ↓ 2. Time Resolution (date → period_id, aggregation)
+    ↓ 3. Edge Building (rules + manual pairs)
+    ↓ 4. Lead Time Resolution (hours → periods per departure)
+    ↓ 5. Transformation Resolution (N→M commodity conversion)
+    ↓ 6. Fleet Capacity Computation (count × base_capacity)
+    ↓ 7. Assembly into ResolvedModelData
+    ↓ 8. Spine Assembly (facility_spines, edge_spines, resource_spines)
+ResolvedModelData (with period_id, spines)
+</pre></div>
+</div>
+<p>Validation checks: unit consistency, referential integrity (SINK has demand, SOURCE has supply, etc.), resource completeness, temporal coverage, graph connectivity (BFS from SOURCEs to SINKs), transformation consistency.</p>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/d8584a79b5015c15ec2382bece8f4d3c/08_build_pipeline.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/08_build_pipeline.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="data-consumers-optimizer-simulator-analytics">
+<h2>9. Data Consumers — Optimizer, Simulator, Analytics<a class="headerlink" href="#data-consumers-optimizer-simulator-analytics" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> How the same <code class="docutils literal notranslate"><span class="pre">ResolvedModelData</span></code> is consumed differently by three types of consumers.</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p></p></th>
+<th class="head"><p>Optimizer</p></th>
+<th class="head"><p>Simulator</p></th>
+<th class="head"><p>Analytics</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>Approach</strong></p></td>
+<td><p>All periods at once</p></td>
+<td><p>Step-by-step</p></td>
+<td><p>Post-hoc</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Resources</strong></p></td>
+<td><p>Capacity constraint</p></td>
+<td><p>Stateful (position + status)</p></td>
+<td><p>N/A</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Solver</strong></p></td>
+<td><p>LP/MILP</p></td>
+<td><p>Step-solver (VRP, greedy)</p></td>
+<td><p>N/A</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Output</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">solution_*</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">simulation_*_log</span></code></p></td>
+<td><p>Plan vs Fact reports</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The data model does NOT change between consumers. <code class="docutils literal notranslate"><span class="pre">SimulationState</span></code> is runtime state of the simulator, not part of the data model.</p>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/17e1db83d76dad43826fce1f8dd5af51/09_data_consumers.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/09_data_consumers.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="full-er-diagram">
+<h2>10. Full ER Diagram<a class="headerlink" href="#full-er-diagram" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> Complete table-level view of all entities and their foreign key relationships.</p>
+<p>Core entity groups:</p>
+<ul class="simple">
+<li><p><strong>Entity tables:</strong> facility, commodity_category, resource_category (+ L3: commodity, resource)</p></li>
+<li><p><strong>Temporal tables:</strong> planning_horizon → segments → periods</p></li>
+<li><p><strong>Behavior tables:</strong> facility_role, facility_operation, edge_rule</p></li>
+<li><p><strong>Edge tables:</strong> edge, edge_commodity, edge_capacity, edge_vehicle</p></li>
+<li><p><strong>Flow data:</strong> demand, supply, inventory_initial, inventory_in_transit</p></li>
+<li><p><strong>Parameters:</strong> operation_cost, transport_cost, resource_cost</p></li>
+<li><p><strong>Transformation:</strong> transformation → inputs → outputs</p></li>
+<li><p><strong>Resource relations:</strong> fleet, commodity_compatibility, modal_compatibility</p></li>
+<li><p><strong>Pricing:</strong> sell_price_tier, procurement_cost_tier</p></li>
+<li><p><strong>Hierarchy:</strong> type → level → node → membership (for both facility and commodity)</p></li>
+<li><p><strong>Scenario:</strong> scenario, scenario_edge_rules, scenario_manual_edges, parameter_overrides</p></li>
+<li><p><strong>Output:</strong> solution_flow/inventory/unmet_demand, simulation logs</p></li>
+</ul>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/7886905499b43da1d2052c08e28d654a/10_er_diagram.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/10_er_diagram.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="hierarchy-aggregation">
+<h2>11. Hierarchy &amp; Aggregation<a class="headerlink" href="#hierarchy-aggregation" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> How facility and commodity hierarchies enable scaling through aggregation and decomposition.</p>
+<p>Both hierarchies follow the same pattern: <code class="docutils literal notranslate"><span class="pre">HierarchyType</span> <span class="pre">→</span> <span class="pre">HierarchyLevel</span> <span class="pre">→</span> <span class="pre">HierarchyNode</span> <span class="pre">(tree)</span> <span class="pre">→</span> <span class="pre">Membership</span> <span class="pre">(leaf</span> <span class="pre">entity</span> <span class="pre">→</span> <span class="pre">node)</span></code>.</p>
+<p>Use cases:</p>
+<ul class="simple">
+<li><p><strong>Pre-solve aggregation</strong> — collapse facilities in a region into a super-node for strategic planning</p></li>
+<li><p><strong>Post-solve disaggregation</strong> — distribute regional flows back to individual facilities</p></li>
+<li><p><strong>Decomposition</strong> — master problem at top level, sub-problems per region (Benders, Dantzig-Wolfe)</p></li>
+<li><p><strong>Reporting</strong> — GROUP BY at any hierarchy level</p></li>
+</ul>
+<p>Aggregation level is configured per scenario (<code class="docutils literal notranslate"><span class="pre">scenario.facility_aggregation_level</span></code>).</p>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/430529025adaf3b81ff04b59a73eb7aa/11_hierarchy_aggregation.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/11_hierarchy_aggregation.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="i-o-loaders-data-flow-in-and-out">
+<h2>12. I/O &amp; Loaders — Data Flow In and Out<a class="headerlink" href="#i-o-loaders-data-flow-in-and-out" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> How data enters the system (loaders) and how models are serialized/deserialized (I/O).</p>
+<p><strong>Loaders (<code class="docutils literal notranslate"><span class="pre">gbp.loaders</span></code>):</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">DataSourceProtocol</span></code> — interface for any data source (CSV, DB, API, mock)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DataLoaderMock</span></code> — generates synthetic Citi Bike-style data</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DataLoaderGraph</span></code> — source data → <code class="docutils literal notranslate"><span class="pre">RawModelData</span></code> + <code class="docutils literal notranslate"><span class="pre">build_model</span></code> → <code class="docutils literal notranslate"><span class="pre">ResolvedModelData</span></code>; Pandera validates sources</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GraphLoaderProtocol</span></code> — <code class="docutils literal notranslate"><span class="pre">raw</span></code>, <code class="docutils literal notranslate"><span class="pre">resolved</span></code>, <code class="docutils literal notranslate"><span class="pre">source</span></code>, <code class="docutils literal notranslate"><span class="pre">available_dates</span></code>, <code class="docutils literal notranslate"><span class="pre">rebalancer_snapshot</span></code> for PDP</p></li>
+</ul>
+<p><strong>I/O (<code class="docutils literal notranslate"><span class="pre">gbp.io</span></code>):</strong></p>
+<ul class="simple">
+<li><p>Parquet: directory of <code class="docutils literal notranslate"><span class="pre">.parquet</span></code> files + <code class="docutils literal notranslate"><span class="pre">_metadata.json</span></code> manifest</p></li>
+<li><p>Dict/JSON: <code class="docutils literal notranslate"><span class="pre">json.dump()</span></code>-compatible dicts with date serialization</p></li>
+</ul>
+<p>Both formats support <code class="docutils literal notranslate"><span class="pre">RawModelData</span></code> and <code class="docutils literal notranslate"><span class="pre">ResolvedModelData</span></code> with round-trip fidelity.</p>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/f4b70ac5e1af92d1643d2eb725969b33/12_io_loaders.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/12_io_loaders.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="reading-order">
+<h2>Reading Order<a class="headerlink" href="#reading-order" title="Link to this heading">¶</a></h2>
+<p>For a progressive understanding of the model, follow this path:</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>#</p></th>
+<th class="head"><p>Diagram</p></th>
+<th class="head"><p>Concept Level</p></th>
+<th class="head"><p>Prerequisites</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Core Entities</p></td>
+<td><p>Beginner</p></td>
+<td><p>None</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Facility Roles</p></td>
+<td><p>Beginner</p></td>
+<td><p>#1</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>Network Example</p></td>
+<td><p>Beginner</p></td>
+<td><p>#1, #2</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>Multi-Commodity Flow</p></td>
+<td><p>Intermediate</p></td>
+<td><p>#1, #3</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>Temporal Model</p></td>
+<td><p>Intermediate</p></td>
+<td><p>#1</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>Edge Model</p></td>
+<td><p>Intermediate</p></td>
+<td><p>#1, #3, #5</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>Attribute System</p></td>
+<td><p>Advanced</p></td>
+<td><p>#1, #5, #6</p></td>
+</tr>
+<tr class="row-odd"><td><p>8</p></td>
+<td><p>Build Pipeline</p></td>
+<td><p>Advanced</p></td>
+<td><p>#5, #6, #7</p></td>
+</tr>
+<tr class="row-even"><td><p>9</p></td>
+<td><p>Data Consumers</p></td>
+<td><p>Advanced</p></td>
+<td><p>#4, #8</p></td>
+</tr>
+<tr class="row-odd"><td><p>10</p></td>
+<td><p>ER Diagram</p></td>
+<td><p>Reference</p></td>
+<td><p>All above</p></td>
+</tr>
+<tr class="row-even"><td><p>11</p></td>
+<td><p>Hierarchy</p></td>
+<td><p>Advanced</p></td>
+<td><p>#1, #3</p></td>
+</tr>
+<tr class="row-odd"><td><p>12</p></td>
+<td><p>I/O &amp; Loaders</p></td>
+<td><p>Advanced</p></td>
+<td><p>#8</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<hr class="docutils" />
+<section id="package-mapping">
+<h2>Package Mapping<a class="headerlink" href="#package-mapping" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Diagram</p></th>
+<th class="head"><p>Primary Package(s)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1–6</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gbp.core.schemas</span></code>, <code class="docutils literal notranslate"><span class="pre">gbp.core.enums</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>7</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gbp.core.attributes</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>8</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gbp.build</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>9</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gbp.core.schemas.output</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>10</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gbp.core.model</span></code>, <code class="docutils literal notranslate"><span class="pre">gbp.core.schemas</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>11</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gbp.core.schemas.hierarchy</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>12</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gbp.io</span></code>, <code class="docutils literal notranslate"><span class="pre">gbp.loaders</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="DATA_JOURNEY.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Путь данных: от велосипеда до оптимизатора</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="modules/rebalancer.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">gbp.rebalancer</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2025, vlzm
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            <div class="icons">
+              <a class="muted-link " href="https://github.com/vlzm/GFDRR" aria-label="GitHub"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a>
+              
+            </div>
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Graph-Based Logistics Platform — Architecture Diagrams</a><ul>
+<li><a class="reference internal" href="#core-entities-the-three-pillars">1. Core Entities — The Three Pillars</a></li>
+<li><a class="reference internal" href="#facility-type-operations-roles">2. Facility — Type, Operations, Roles</a></li>
+<li><a class="reference internal" href="#network-graph-bike-sharing-example">3. Network Graph — Bike-Sharing Example</a></li>
+<li><a class="reference internal" href="#multi-commodity-flow-transformation">4. Multi-Commodity Flow &amp; Transformation</a></li>
+<li><a class="reference internal" href="#temporal-model-multi-resolution-planning">5. Temporal Model — Multi-Resolution Planning</a></li>
+<li><a class="reference internal" href="#edge-model-multi-modal-edges-with-attributes">6. Edge Model — Multi-Modal Edges with Attributes</a></li>
+<li><a class="reference internal" href="#attribute-system-specs-grains-groups-spines">7. Attribute System — Specs, Grains, Groups, Spines</a></li>
+<li><a class="reference internal" href="#build-pipeline-rawmodeldata-resolvedmodeldata">8. Build Pipeline — RawModelData → ResolvedModelData</a></li>
+<li><a class="reference internal" href="#data-consumers-optimizer-simulator-analytics">9. Data Consumers — Optimizer, Simulator, Analytics</a></li>
+<li><a class="reference internal" href="#full-er-diagram">10. Full ER Diagram</a></li>
+<li><a class="reference internal" href="#hierarchy-aggregation">11. Hierarchy &amp; Aggregation</a></li>
+<li><a class="reference internal" href="#i-o-loaders-data-flow-in-and-out">12. I/O &amp; Loaders — Data Flow In and Out</a></li>
+<li><a class="reference internal" href="#reading-order">Reading Order</a></li>
+<li><a class="reference internal" href="#package-mapping">Package Mapping</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="_static/documentation_options.js?v=38b66d78"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+    <script type="module">import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+
+
+
+
+
+const initStyles = () => {
+    const defaultStyle = document.createElement('style');
+    defaultStyle.textContent = `pre.mermaid {
+    /* Same as .mermaid-container > pre */
+    display: block;
+    width: 100%;
+}
+
+pre.mermaid > svg {
+    /* Same as .mermaid-container > pre > svg */
+    height: 500px;
+    width: 100%;
+    max-width: 100% !important;
+}`;
+    document.head.appendChild(defaultStyle);
+
+    const fullscreenStyle = document.createElement('style');
+    fullscreenStyle.textContent = `.mermaid-container {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+}
+
+.mermaid-container > pre {
+    display: block;
+    width: 100%;
+}
+
+.mermaid-container > pre > svg {
+    height: 500px;
+    width: 100%;
+    max-width: 100% !important;
+}
+
+.mermaid-fullscreen-btn {
+    width: 28px;
+    height: 28px;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    color: #333;
+}
+
+.mermaid-fullscreen-btn:hover {
+    opacity: 100% !important;
+    background: rgba(255, 255, 255, 1);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+    transform: scale(1.1);
+}
+
+.mermaid-fullscreen-btn.dark-theme {
+    background: rgba(50, 50, 50, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: #e0e0e0;
+}
+
+.mermaid-fullscreen-btn.dark-theme:hover {
+    background: rgba(60, 60, 60, 1);
+    box-shadow: 0 3px 10px rgba(255, 255, 255, 0.2);
+}
+
+.mermaid-fullscreen-modal {
+    display: none;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 95vw;
+    height: 100vh;
+    background: rgba(255, 255, 255, 0.98);
+    z-index: 9999;
+    padding: 20px;
+    overflow: auto;
+}
+
+.mermaid-fullscreen-modal.dark-theme {
+    background: rgba(0, 0, 0, 0.98);
+}
+
+.mermaid-fullscreen-modal.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mermaid-container-fullscreen {
+    position: relative;
+    width: 95vw;
+    height: 90vh;
+    max-width: 95vw;
+    max-height: 90vh;
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mermaid-container-fullscreen.dark-theme {
+    background: #1a1a1a;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+}
+
+.mermaid-container-fullscreen pre.mermaid {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mermaid-container-fullscreen .mermaid svg {
+    height: 100% !important;
+    width: 100% !important;
+    cursor: grab;
+}
+
+.mermaid-fullscreen-close {
+    position: fixed !important;
+    top: 20px !important;
+    right: 20px !important;
+    width: 40px;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s;
+    font-size: 24px;
+    line-height: 1;
+    color: #333;
+}
+
+.mermaid-fullscreen-close:hover {
+    background: white;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    transform: scale(1.1);
+}
+
+.mermaid-fullscreen-close.dark-theme {
+    background: rgba(50, 50, 50, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #e0e0e0;
+}
+
+.mermaid-fullscreen-close.dark-theme:hover {
+    background: rgba(60, 60, 60, 1);
+    box-shadow: 0 6px 16px rgba(255, 255, 255, 0.2);
+}
+
+.mermaid-fullscreen-modal .mermaid-fullscreen-btn {
+    display: none !important;
+}`;
+    document.head.appendChild(fullscreenStyle);
+}
+
+// Detect if page has dark background
+const isDarkTheme = () => {
+    // We use a set of heuristics:
+    // 1. Check for common dark mode classes or attributes
+    // 2. Check computed background color brightness
+    if (document.documentElement.classList.contains('dark') ||
+        document.documentElement.getAttribute('data-theme') === 'dark' ||
+        document.body.classList.contains('dark') ||
+        document.body.getAttribute('data-theme') === 'dark') {
+        // console.log("Dark theme detected via class/attribute");
+        return true;
+    }
+    if (document.documentElement.classList.contains('light') ||
+        document.documentElement.getAttribute('data-theme') === 'light' ||
+        document.body.classList.contains('light') ||
+        document.body.getAttribute('data-theme') === 'light') {
+        // console.log("Light theme detected via class/attribute");
+        return false;
+    }
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        // console.log("Dark theme detected via prefers-color-scheme");
+        return true;
+    }
+    const bgColor = window.getComputedStyle(document.body).backgroundColor;
+    const match = bgColor.match(/rgb\((\d+),\s*(\d+),\s*(\d+)/);
+    if (match) {
+        const r = parseInt(match[1]);
+        const g = parseInt(match[2]);
+        const b = parseInt(match[3]);
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+        // console.log("Background color brightness:", brightness);
+        return brightness < 128;
+    }
+    // console.log("No dark or light theme detected, defaulting to light theme");
+    return false;
+};
+
+let darkTheme = isDarkTheme();
+let modal = null;
+let modalContent = null;
+let previousScrollOffset = [window.scrollX, window.scrollY];
+
+const runMermaid = async (rerun) => {
+    console.log("Running mermaid diagrams, rerun =", rerun);
+    // clear all existing mermaid charts
+    let all_mermaids = document.querySelectorAll(".mermaid");
+
+    if (rerun) {
+        all_mermaids.forEach((el) => {
+            if(!el.hasAttribute("data-original-code")) {
+                // store original code
+                // console.log(`Storing original code for first run: `, el.innerHTML);
+                el.setAttribute('data-original-code', el.innerHTML);
+            }
+            if(el.getAttribute("data-processed") === "true") {
+                // remove and restore original
+                el.removeAttribute("data-processed");
+                // console.log(`Restoring original code for re-run: `, el.getAttribute('data-original-code'));
+                el.innerHTML = el.getAttribute('data-original-code');
+            } else {
+                // store original code
+                // console.log(`Storing original code for re-run: `, el.innerHTML);
+                el.setAttribute('data-original-code', el.innerHTML);
+            }
+        });
+        await mermaid.run();
+    }
+
+    all_mermaids = document.querySelectorAll(".mermaid");
+    const mermaids_processed = document.querySelectorAll(".mermaid[data-processed='true']");
+
+    if ("False" === "True") {
+        const mermaids_to_add_zoom = -1 === -1 ? all_mermaids.length : -1;
+        if(mermaids_to_add_zoom > 0) {
+            var svgs = d3.selectAll("");
+            if(all_mermaids.length !== mermaids_processed.length) {
+                setTimeout(() => runMermaid(false), 200);
+                return;
+            } else if(svgs.size() !== mermaids_to_add_zoom) {
+                setTimeout(() => runMermaid(false), 200);
+                return;
+            } else {
+                svgs.each(function() {
+                    var svg = d3.select(this);
+                    svg.html("<g class='wrapper'>" + svg.html() + "</g>");
+                    var inner = svg.select("g");
+                    var zoom = d3.zoom().on("zoom", function(event) {
+                        inner.attr("transform", event.transform);
+                    });
+                    svg.call(zoom);
+                });
+            }
+        }
+    } else if(all_mermaids.length !== mermaids_processed.length) {
+        // Wait for mermaid to process all diagrams
+        setTimeout(() => runMermaid(false), 200);
+        return;
+    }
+
+    // Stop here if not adding fullscreen capability
+    if ("True" !== "True") return;
+
+    if (modal !== null ) {
+        // Destroy existing modal
+        modal.remove();
+        modal = null;
+        modalContent = null;
+    }
+
+    modal = document.createElement('div');
+    modal.className = 'mermaid-fullscreen-modal' + (darkTheme ? ' dark-theme' : '');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', 'Fullscreen diagram viewer');
+    modal.innerHTML = `
+        <button class="mermaid-fullscreen-close${darkTheme ? ' dark-theme' : ''}" aria-label="Close fullscreen">✕</button>
+        <div class="mermaid-container-fullscreen${darkTheme ? ' dark-theme' : ''}"></div>
+    `;
+    document.body.appendChild(modal);
+
+    modalContent = modal.querySelector('.mermaid-container-fullscreen');
+    const closeBtn = modal.querySelector('.mermaid-fullscreen-close');
+
+    const closeModal = () => {
+        modal.classList.remove('active');
+        modalContent.innerHTML = '';
+        document.body.style.overflow = ''
+        window.scrollTo({left: previousScrollOffset[0], top: previousScrollOffset[1], behavior: 'instant'});
+    };
+
+    closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) {
+            closeModal();
+        }
+    });
+
+    document.querySelectorAll('.mermaid').forEach((mermaidDiv) => {
+        if (mermaidDiv.parentNode.classList.contains('mermaid-container') ||
+            mermaidDiv.closest('.mermaid-fullscreen-modal')) {
+            // Already processed, adjust button class if needed
+            const existingBtn = mermaidDiv.parentNode.querySelector('.mermaid-fullscreen-btn');
+            if (existingBtn) {
+                existingBtn.className = 'mermaid-fullscreen-btn' + (darkTheme ? ' dark-theme' : '');
+            }
+            return;
+        }
+
+        const container = document.createElement('div');
+        container.className = 'mermaid-container';
+        mermaidDiv.parentNode.insertBefore(container, mermaidDiv);
+        container.appendChild(mermaidDiv);
+
+        const fullscreenBtn = document.createElement('button');
+        fullscreenBtn.className = 'mermaid-fullscreen-btn' + (darkTheme ? ' dark-theme' : '');
+        fullscreenBtn.setAttribute('aria-label', 'View diagram in fullscreen');
+        fullscreenBtn.textContent = '⛶';
+        fullscreenBtn.style.opacity = '50%';
+
+        // Calculate dynamic position based on diagram's margin and padding
+        const diagramStyle = window.getComputedStyle(mermaidDiv);
+        const marginTop = parseFloat(diagramStyle.marginTop) || 0;
+        const marginRight = parseFloat(diagramStyle.marginRight) || 0;
+        const paddingTop = parseFloat(diagramStyle.paddingTop) || 0;
+        const paddingRight = parseFloat(diagramStyle.paddingRight) || 0;
+        fullscreenBtn.style.top = `${marginTop + paddingTop + 4}px`;
+        fullscreenBtn.style.right = `${marginRight + paddingRight + 4}px`;
+
+        fullscreenBtn.addEventListener('click', () => {
+            previousScrollOffset = [window.scroll, window.scrollY];
+            const clone = mermaidDiv.cloneNode(true);
+            modalContent.innerHTML = '';
+            modalContent.appendChild(clone);
+
+            const svg = clone.querySelector('svg');
+            if (svg) {
+                svg.removeAttribute('width');
+                svg.removeAttribute('height');
+                svg.style.width = '100%';
+                svg.style.height = 'auto';
+                svg.style.maxWidth = '100%';
+                svg.style.sdisplay = 'block';
+
+                if ("False" === "True") {
+                    setTimeout(() => {
+                        const g = svg.querySelector('g');
+                        if (g) {
+                            var svgD3 = d3.select(svg);
+                            svgD3.html("<g class='wrapper'>" + svgD3.html() + "</g>");
+                            var inner = svgD3.select("g");
+                            var zoom = d3.zoom().on("zoom", function(event) {
+                                inner.attr("transform", event.transform);
+                            });
+                            svgD3.call(zoom);
+                        }
+                    }, 100);
+                }
+            }
+
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        });
+        container.appendChild(fullscreenBtn);
+    });
+};
+
+const load = async () => {
+    initStyles();
+
+    await runMermaid(true);
+
+    const reRunIfThemeChanges = async () => {
+        const newDarkTheme = isDarkTheme();
+        if (newDarkTheme !== darkTheme) {
+            darkTheme = newDarkTheme;
+            console.log("Theme change detected, re-running mermaid with", darkTheme ? "dark" : "default", "theme");
+            await mermaid.initialize(
+                {...JSON.parse(
+                    `{"startOnLoad": false}`
+                ),
+                ...{ darkMode: darkTheme, theme: darkTheme ? 'dark' : 'default' },
+                }
+            );
+            await runMermaid(true);
+        }
+    };
+
+    // Update theme classes when theme changes
+    const themeObserver = new MutationObserver(reRunIfThemeChanges);
+    themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class', 'style', 'data-theme']
+    });
+    themeObserver.observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class', 'style', 'data-theme']
+    });
+};
+
+
+
+
+
+console.log("Initializing mermaid with", darkTheme ? "dark" : "default", "theme");
+mermaid.initialize(
+    {...JSON.parse(
+        `{"startOnLoad": false}`
+    ),
+    ...{ darkMode: darkTheme, theme: darkTheme ? 'dark' : 'default' },
+    }
+);
+
+window.addEventListener("load", load);
+window.runMermaid = runMermaid;</script>
+    </body>
+</html>

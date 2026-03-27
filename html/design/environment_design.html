@@ -1,0 +1,1654 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Architecture Clarity Refactoring — Completed" href="refactoring.html"><link rel="prev" title="Design: Dynamic Attribute System" href="attribute_system.html">
+
+    <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
+        <title>Design Doc: Environment (Simulation Engine) - GBP</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=b96efb0b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  --color-brand-primary: #0d6eaa;
+  --color-brand-content: #0d6eaa;
+  --color-foreground-primary: #2e3440;
+  --color-foreground-secondary: #4c566a;
+  --color-foreground-muted: #7b8894;
+  --color-foreground-border: #d8dee9;
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f8f9fb;
+  --color-background-hover: #eef1f6;
+  --color-background-hover--transparent: #eef1f600;
+  --color-background-border: #e5e9f0;
+  --color-sidebar-background: #1a202c;
+  --color-sidebar-background-border: #2d3748;
+  --color-sidebar-brand-text: #ffffff;
+  --color-sidebar-caption-text: #a0aec0;
+  --color-sidebar-link-text: #cbd5e0;
+  --color-sidebar-link-text--top-level: #e2e8f0;
+  --color-sidebar-item-background--current: #2d3748;
+  --color-sidebar-item-background--hover: #2d374880;
+  --color-sidebar-item-expander-color: #718096;
+  --color-sidebar-item-expander-color--hover: #a0aec0;
+  --color-sidebar-search-background: #2d3748;
+  --color-sidebar-search-border: #4a5568;
+  --color-code-background: #f0f4f8;
+  --color-code-foreground: #2e3440;
+  --color-inline-code-background: #eef1f6;
+  --color-admonition-background: #ebf8ff;
+  --color-admonition-title-background: #bee3f8;
+  --color-admonition-title: #2c5282;
+  --color-link: #0d6eaa;
+  --color-link--hover: #094d7a;
+  --color-link-underline: #0d6eaa40;
+  --color-link-underline--hover: #094d7a;
+  --color-api-background: #f7fafc;
+  --color-api-overall-border: #e2e8f0;
+  --color-api-name: #1a365d;
+  --font-stack: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-stack--monospace: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --font-stack--headings: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #63b3ed;
+  --color-brand-content: #63b3ed;
+  --color-foreground-primary: #eceff4;
+  --color-foreground-secondary: #d8dee9;
+  --color-foreground-muted: #7b8894;
+  --color-foreground-border: #3b4252;
+  --color-background-primary: #1a1e2e;
+  --color-background-secondary: #232736;
+  --color-background-hover: #2e3440;
+  --color-background-hover--transparent: #2e344000;
+  --color-background-border: #3b4252;
+  --color-sidebar-background: #171923;
+  --color-sidebar-background-border: #2d3748;
+  --color-sidebar-brand-text: #e2e8f0;
+  --color-sidebar-caption-text: #a0aec0;
+  --color-sidebar-link-text: #a0aec0;
+  --color-sidebar-link-text--top-level: #cbd5e0;
+  --color-sidebar-item-background--current: #2d3748;
+  --color-sidebar-item-background--hover: #2d374880;
+  --color-code-background: #232736;
+  --color-code-foreground: #d8dee9;
+  --color-inline-code-background: #2e3440;
+  --color-admonition-background: #2d374880;
+  --color-link: #63b3ed;
+  --color-link--hover: #90cdf4;
+  --color-api-background: #232736;
+  --color-api-overall-border: #3b4252;
+  --color-api-name: #90cdf4;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #63b3ed;
+  --color-brand-content: #63b3ed;
+  --color-foreground-primary: #eceff4;
+  --color-foreground-secondary: #d8dee9;
+  --color-foreground-muted: #7b8894;
+  --color-foreground-border: #3b4252;
+  --color-background-primary: #1a1e2e;
+  --color-background-secondary: #232736;
+  --color-background-hover: #2e3440;
+  --color-background-hover--transparent: #2e344000;
+  --color-background-border: #3b4252;
+  --color-sidebar-background: #171923;
+  --color-sidebar-background-border: #2d3748;
+  --color-sidebar-brand-text: #e2e8f0;
+  --color-sidebar-caption-text: #a0aec0;
+  --color-sidebar-link-text: #a0aec0;
+  --color-sidebar-link-text--top-level: #cbd5e0;
+  --color-sidebar-item-background--current: #2d3748;
+  --color-sidebar-item-background--hover: #2d374880;
+  --color-code-background: #232736;
+  --color-code-foreground: #d8dee9;
+  --color-inline-code-background: #2e3440;
+  --color-admonition-background: #2d374880;
+  --color-link: #63b3ed;
+  --color-link--hover: #90cdf4;
+  --color-api-background: #232736;
+  --color-api-overall-border: #3b4252;
+  --color-api-name: #90cdf4;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">GBP</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">GBP</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <ul>
+<li class="toctree-l1"><a class="reference internal" href="../modules/core.html">gbp.core</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../modules/build.html">gbp.build</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../modules/loaders.html">gbp.loaders</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../modules/loading.html">gbp.loading</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../modules/io.html">gbp.io</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../modules/rebalancer.html">gbp.rebalancer</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Architecture</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../architecture_diagrams.html">Graph-Based Logistics Platform — Architecture Diagrams</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../DATA_JOURNEY.html">Путь данных: от велосипеда до оптимизатора</a></li>
+<li class="toctree-l1"><a class="reference internal" href="graph_data_model.html">Graph-Based Logistics Platform — Data Model</a></li>
+<li class="toctree-l1"><a class="reference internal" href="attribute_system.html">Design: Dynamic Attribute System</a></li>
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Design Doc: Environment (Simulation Engine)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="refactoring.html">Architecture Clarity Refactoring — Completed</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="https://github.com/vlzm/GFDRR/blob/main/docs/design/environment_design.md?plain=true" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div><div class="edit-this-page">
+  <a class="muted-link" href="https://github.com/vlzm/GFDRR/edit/main/docs/design/environment_design.md" rel="edit" title="Edit this page">
+    <svg><use href="#svg-pencil"></use></svg>
+    <span class="visually-hidden">Edit this page</span>
+  </a>
+</div><div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="design-doc-environment-simulation-engine">
+<h1>Design Doc: Environment (Simulation Engine)<a class="headerlink" href="#design-doc-environment-simulation-engine" title="Link to this heading">¶</a></h1>
+<blockquote>
+<div><p>Status: READY FOR IMPLEMENTATION<br />
+Фаза roadmap: 2 (после Foundation)<br />
+Зависит от: <code class="docutils literal notranslate"><span class="pre">graph_data_model.md</span></code>, <code class="docutils literal notranslate"><span class="pre">ResolvedModelData</span></code>, <code class="docutils literal notranslate"><span class="pre">AttributeRegistry</span></code><br />
+Implementation: 7 steps (Step 8 = фаза 3 roadmap)</p>
+</div></blockquote>
+<hr class="docutils" />
+<section id="environment">
+<h2>1. Что такое Environment<a class="headerlink" href="#environment" title="Link to this heading">¶</a></h2>
+<p>Environment — ядро платформы. Пространство, в котором commodity перемещаются через сеть объектов по периодам времени. На каждом шаге происходят события (поездки, поставки), запускаются задачи (ребалансировка, ремонт), обновляется состояние мира.</p>
+<p>Environment — это <strong>Consumer B</strong> из <code class="docutils literal notranslate"><span class="pre">graph_data_model.md</span> <span class="pre">§15</span></code>: шагает по периодам последовательно, в отличие от Optimizer (Consumer A), который видит все периоды сразу.</p>
+<section id="id1">
+<h3>Вход и выход<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>ResolvedModelData (immutable, из build pipeline)
+        ↓
+    Environment.run()
+        ↓
+SimulationLog (flow_log, inventory_log, resource_log per step)
+</pre></div>
+</div>
+<p>Environment <strong>не модифицирует</strong> ResolvedModelData. Он читает из неё параметры (costs, capacities, lead times) и использует их для принятия решений. Всё изменяемое состояние живёт в <code class="docutils literal notranslate"><span class="pre">SimulationState</span></code>.</p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="id2">
+<h2>2. Архитектурные решения<a class="headerlink" href="#id2" title="Link to this heading">¶</a></h2>
+<section id="periods">
+<h3>2.1. Гранулярность: periods, а не собственная временная ось<a class="headerlink" href="#periods" title="Link to this heading">¶</a></h3>
+<p>Environment шагает по periods из <code class="docutils literal notranslate"><span class="pre">ResolvedModelData</span></code> — какими бы они ни были (час, день, неделя). Гранулярность определяется конфигурацией <code class="docutils literal notranslate"><span class="pre">planning_horizon_segments</span></code>, а не Environment’ом.</p>
+<p>Если нужна часовая видимость — используй часовые periods. Environment агностичен к гранулярности.</p>
+</section>
+<section id="sub-steps">
+<h3>2.2. Sub-steps: логические фазы, не временные<a class="headerlink" href="#sub-steps" title="Link to this heading">¶</a></h3>
+<p>Внутри каждого period выполняются <strong>фазы</strong> (phases) — логические операции в определённом порядке. Фазы — это не “утро/день/ночь” по часам, а порядок обработки событий.</p>
+<p>Пример для велошеринга (period = день):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Period &quot;2025-01-15&quot;
+  ├── Phase: DEMAND        ← пользователи берут/возвращают велосипеды
+  ├── Phase: ARRIVALS      ← грузовики, отправленные ранее, прибывают
+  └── Phase: DISPATCH      ← step-solver решает ребалансировку
+</pre></div>
+</div>
+<p>Пример для газовой логистики (period = день):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Period &quot;2025-01-15&quot;
+  ├── Phase: SUPPLY        ← терминал получает газ
+  ├── Phase: TRANSFORM     ← filling plant наполняет баллоны
+  ├── Phase: DEMAND        ← клиенты потребляют
+  └── Phase: DISPATCH      ← отправка с депо
+</pre></div>
+</div>
+<p>Фаза может иметь <strong>schedule</strong>: “выполнять каждый period”, “раз в N periods”, “только когда hour == 23”. Это позволяет, например, запускать ребалансировщик только ночью, даже если Environment шагает по часам.</p>
+</section>
+<section id="solver">
+<h3>2.3. Solver внутри фазы — чёрный ящик<a class="headerlink" href="#solver" title="Link to this heading">¶</a></h3>
+<p>Фаза DISPATCH вызывает solver (VRP, greedy, rebalancing). Solver получает текущий <code class="docutils literal notranslate"><span class="pre">SimulationState</span></code> и constraint’ы, возвращает набор решений (dispatches). Solver может внутри себя оперировать любой гранулярностью (минуты для VRP с time windows), но Environment видит только вход и выход.</p>
+<p>Environment не знает, как solver принимает решение. Аналогия: build pipeline не знает, как haversine считает расстояние.</p>
+</section>
+<section id="immutable-state">
+<h3>2.4. Immutable state<a class="headerlink" href="#immutable-state" title="Link to this heading">¶</a></h3>
+<p>Каждая фаза получает <code class="docutils literal notranslate"><span class="pre">SimulationState</span></code>, возвращает <strong>новый</strong> <code class="docutils literal notranslate"><span class="pre">SimulationState</span></code>. Старый не модифицируется. Это даёт:</p>
+<ul class="simple">
+<li><p><strong>Откат</strong>: можно вернуться к любому шагу.</p></li>
+<li><p><strong>Дебаг</strong>: state на любом шаге можно сохранить и воспроизвести.</p></li>
+<li><p><strong>Чистота</strong>: нет побочных эффектов, фазы — чистые функции <code class="docutils literal notranslate"><span class="pre">(state,</span> <span class="pre">resolved,</span> <span class="pre">period)</span> <span class="pre">→</span> <span class="pre">state'</span></code>.</p></li>
+</ul>
+<p>Копирование state (~50 KB для сети из 500 станций) пренебрежимо даже при 8760 steps/год.</p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="simulationstate">
+<h2>3. SimulationState<a class="headerlink" href="#simulationstate" title="Link to this heading">¶</a></h2>
+<p>Runtime-объект, который существует только во время работы Environment. <strong>Не часть data model</strong> (не в RawModelData / ResolvedModelData). Создаётся из ResolvedModelData в начале симуляции, обновляется каждой фазой.</p>
+<section id="id3">
+<h3>3.1. Структура<a class="headerlink" href="#id3" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SimulationState</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Immutable snapshot of the world at a point in time.&quot;&quot;&quot;</span>
+
+    <span class="c1"># ── Temporal position ─────────────────────────────────</span>
+    <span class="n">period_index</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">period_id</span><span class="p">:</span> <span class="nb">str</span>
+
+    <span class="c1"># ── Commodity state ───────────────────────────────────</span>
+    <span class="n">inventory</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>       <span class="c1"># facility_id × commodity_category → quantity</span>
+    <span class="n">in_transit</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>      <span class="c1"># shipments currently en route</span>
+
+    <span class="c1"># ── Resource state (instance-level) ───────────────────</span>
+    <span class="n">resources</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>       <span class="c1"># resource_id → position, status, available_at</span>
+
+    <span class="c1"># ── Update helpers ────────────────────────────────────</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">with_inventory</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_inventory</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">with_in_transit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_in_transit</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">with_resources</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_resources</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">advance_period</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">period_index</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">period_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span> <span class="o">...</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">frozen=True</span></code> сигнализирует intent — не модифицируй напрямую, используй <code class="docutils literal notranslate"><span class="pre">with_*</span></code> методы. Pandas DataFrames внутри технически mutable, но convention: фаза всегда делает <code class="docutils literal notranslate"><span class="pre">.copy()</span></code> перед модификацией и возвращает новый state через <code class="docutils literal notranslate"><span class="pre">with_*</span></code>.</p>
+</section>
+<section id="inventory">
+<h3>3.2. Inventory<a class="headerlink" href="#inventory" title="Link to this heading">¶</a></h3>
+<p>Сколько commodity находится на каждом facility прямо сейчас.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">facility_id</span> <span class="o">|</span> <span class="n">commodity_category</span> <span class="o">|</span> <span class="n">quantity</span>
+<span class="n">s1</span>          <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">12.0</span>
+<span class="n">s1</span>          <span class="o">|</span> <span class="n">broken_bike</span>        <span class="o">|</span> <span class="mf">3.0</span>
+<span class="n">s2</span>          <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">7.0</span>
+<span class="n">d1</span>          <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">50.0</span>
+</pre></div>
+</div>
+<p><strong>Grain:</strong> <code class="docutils literal notranslate"><span class="pre">facility_id</span> <span class="pre">×</span> <span class="pre">commodity_category</span></code>.<br />
+<strong>Init:</strong> из <code class="docutils literal notranslate"><span class="pre">resolved.inventory_initial</span></code>.<br />
+<strong>Обновляется:</strong> фазами DEMAND (−), ARRIVALS (+), DISPATCH (−), TRANSFORM (±).</p>
+</section>
+<section id="in-transit">
+<h3>3.3. In-transit<a class="headerlink" href="#in-transit" title="Link to this heading">¶</a></h3>
+<p>Shipments, которые сейчас в пути между facilities. Каждый shipment имеет departure и arrival period.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">shipment_id</span> <span class="o">|</span> <span class="n">source_id</span> <span class="o">|</span> <span class="n">target_id</span> <span class="o">|</span> <span class="n">commodity_category</span> <span class="o">|</span> <span class="n">quantity</span> <span class="o">|</span> <span class="n">resource_id</span> <span class="o">|</span> <span class="n">departure_period</span> <span class="o">|</span> <span class="n">arrival_period</span>
+<span class="n">shp_001</span>     <span class="o">|</span> <span class="n">d1</span>        <span class="o">|</span> <span class="n">s1</span>        <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">5.0</span>      <span class="o">|</span> <span class="n">truck_01</span>    <span class="o">|</span> <span class="mi">3</span>                <span class="o">|</span> <span class="mi">5</span>
+<span class="n">shp_002</span>     <span class="o">|</span> <span class="n">s2</span>        <span class="o">|</span> <span class="n">d1</span>        <span class="o">|</span> <span class="n">broken_bike</span>        <span class="o">|</span> <span class="mf">2.0</span>      <span class="o">|</span> <span class="n">truck_02</span>    <span class="o">|</span> <span class="mi">4</span>                <span class="o">|</span> <span class="mi">5</span>
+</pre></div>
+</div>
+<p><strong>Grain:</strong> <code class="docutils literal notranslate"><span class="pre">shipment_id</span></code> (PK, генерируется Environment при dispatch).<br />
+<strong>Init:</strong> из <code class="docutils literal notranslate"><span class="pre">resolved.inventory_in_transit</span></code> (если есть), иначе пустой DataFrame.<br />
+<strong>Обновляется:</strong></p>
+<ul class="simple">
+<li><p>Фаза ARRIVALS: фильтрует <code class="docutils literal notranslate"><span class="pre">arrival_period</span> <span class="pre">==</span> <span class="pre">current_period_index</span></code>, переносит quantity в inventory целевого facility, удаляет из in_transit.</p></li>
+<li><p>Фаза DISPATCH: solver создаёт новые shipments, добавляет в in_transit.</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">resource_id</span></code> — какой конкретный ресурс везёт shipment (instance-level tracking).</p>
+</section>
+<section id="resources-instance-level">
+<h3>3.4. Resources (instance-level)<a class="headerlink" href="#resources-instance-level" title="Link to this heading">¶</a></h3>
+<p>Позиция и статус каждого конкретного ресурса.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">resource_id</span> <span class="o">|</span> <span class="n">resource_category</span> <span class="o">|</span> <span class="n">home_facility_id</span> <span class="o">|</span> <span class="n">current_facility_id</span> <span class="o">|</span> <span class="n">status</span>      <span class="o">|</span> <span class="n">available_at_period</span>
+<span class="n">truck_01</span>    <span class="o">|</span> <span class="n">REBALANCING_TRUCK</span> <span class="o">|</span> <span class="n">depot_1</span>          <span class="o">|</span> <span class="n">station_5</span>           <span class="o">|</span> <span class="n">IN_TRANSIT</span>  <span class="o">|</span> <span class="mi">7</span>
+<span class="n">truck_02</span>    <span class="o">|</span> <span class="n">REBALANCING_TRUCK</span> <span class="o">|</span> <span class="n">depot_1</span>          <span class="o">|</span> <span class="n">depot_1</span>             <span class="o">|</span> <span class="n">AVAILABLE</span>   <span class="o">|</span> <span class="n">null</span>
+<span class="n">truck_03</span>    <span class="o">|</span> <span class="n">REBALANCING_TRUCK</span> <span class="o">|</span> <span class="n">depot_2</span>          <span class="o">|</span> <span class="n">depot_2</span>             <span class="o">|</span> <span class="n">MAINTENANCE</span> <span class="o">|</span> <span class="mi">10</span>
+</pre></div>
+</div>
+<p><strong>Grain:</strong> <code class="docutils literal notranslate"><span class="pre">resource_id</span></code> (PK).</p>
+<p><strong>Статусы:</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">ResourceStatus</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">Enum</span><span class="p">):</span>
+    <span class="n">AVAILABLE</span> <span class="o">=</span> <span class="s2">&quot;available&quot;</span>        <span class="c1"># на facility, готов к задаче</span>
+    <span class="n">IN_TRANSIT</span> <span class="o">=</span> <span class="s2">&quot;in_transit&quot;</span>      <span class="c1"># в пути между facilities</span>
+    <span class="n">BUSY</span> <span class="o">=</span> <span class="s2">&quot;busy&quot;</span>                  <span class="c1"># на facility, выполняет задачу (loading/unloading)</span>
+    <span class="n">MAINTENANCE</span> <span class="o">=</span> <span class="s2">&quot;maintenance&quot;</span>    <span class="c1"># на ремонте</span>
+</pre></div>
+</div>
+<p><strong><code class="docutils literal notranslate"><span class="pre">available_at_period</span></code>:</strong> period_index, начиная с которого ресурс снова AVAILABLE. Для AVAILABLE — null. Для IN_TRANSIT — period прибытия. Для MAINTENANCE — period окончания ремонта.</p>
+<p><strong>Init:</strong> из <code class="docutils literal notranslate"><span class="pre">resolved.resources</span></code> (L3 таблица) + <code class="docutils literal notranslate"><span class="pre">resolved.resource_fleet</span></code>. Если L3 ресурсы не заданы — генерируются из resource_fleet (N ресурсов категории X, все AVAILABLE на home_facility).</p>
+<p><strong>Обновляется:</strong></p>
+<ul class="simple">
+<li><p>Фаза DISPATCH: ресурс переходит AVAILABLE → IN_TRANSIT, обновляется <code class="docutils literal notranslate"><span class="pre">current_facility_id</span></code> и <code class="docutils literal notranslate"><span class="pre">available_at_period</span></code>.</p></li>
+<li><p>Фаза ARRIVALS: ресурс переходит IN_TRANSIT → AVAILABLE (если <code class="docutils literal notranslate"><span class="pre">available_at_period</span> <span class="pre">==</span> <span class="pre">current_period_index</span></code>), обновляется <code class="docutils literal notranslate"><span class="pre">current_facility_id</span></code>.</p></li>
+</ul>
+</section>
+<section id="id4">
+<h3>3.5. Инициализация<a class="headerlink" href="#id4" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">init_state</span><span class="p">(</span><span class="n">resolved</span><span class="p">:</span> <span class="n">ResolvedModelData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create initial SimulationState from resolved model data.&quot;&quot;&quot;</span>
+
+    <span class="c1"># Inventory: from resolved.inventory_initial</span>
+    <span class="n">inventory</span> <span class="o">=</span> <span class="n">resolved</span><span class="o">.</span><span class="n">inventory_initial</span><span class="p">[</span>
+        <span class="p">[</span><span class="s2">&quot;facility_id&quot;</span><span class="p">,</span> <span class="s2">&quot;commodity_category&quot;</span><span class="p">,</span> <span class="s2">&quot;quantity&quot;</span><span class="p">]</span>
+    <span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="c1"># In-transit: from resolved.inventory_in_transit or empty</span>
+    <span class="k">if</span> <span class="n">resolved</span><span class="o">.</span><span class="n">inventory_in_transit</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">in_transit</span> <span class="o">=</span> <span class="n">resolved</span><span class="o">.</span><span class="n">inventory_in_transit</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">in_transit</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span>
+            <span class="s2">&quot;shipment_id&quot;</span><span class="p">,</span> <span class="s2">&quot;source_id&quot;</span><span class="p">,</span> <span class="s2">&quot;target_id&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;commodity_category&quot;</span><span class="p">,</span> <span class="s2">&quot;quantity&quot;</span><span class="p">,</span> <span class="s2">&quot;resource_id&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;departure_period&quot;</span><span class="p">,</span> <span class="s2">&quot;arrival_period&quot;</span><span class="p">,</span>
+        <span class="p">])</span>
+
+    <span class="c1"># Resources: from resolved.resources (L3) or generated from resource_fleet</span>
+    <span class="n">resources</span> <span class="o">=</span> <span class="n">_init_resources_from_resolved</span><span class="p">(</span><span class="n">resolved</span><span class="p">)</span>
+
+    <span class="n">first_period</span> <span class="o">=</span> <span class="n">resolved</span><span class="o">.</span><span class="n">periods</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">SimulationState</span><span class="p">(</span>
+        <span class="n">period_index</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">first_period</span><span class="p">[</span><span class="s2">&quot;period_index&quot;</span><span class="p">]),</span>
+        <span class="n">period_id</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">first_period</span><span class="p">[</span><span class="s2">&quot;period_id&quot;</span><span class="p">]),</span>
+        <span class="n">inventory</span><span class="o">=</span><span class="n">inventory</span><span class="p">,</span>
+        <span class="n">in_transit</span><span class="o">=</span><span class="n">in_transit</span><span class="p">,</span>
+        <span class="n">resources</span><span class="o">=</span><span class="n">resources</span><span class="p">,</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="id5">
+<h3>3.6. Что НЕ входит в SimulationState<a class="headerlink" href="#id5" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Параметры</strong> (costs, capacities, lead times) — читаются из <code class="docutils literal notranslate"><span class="pre">ResolvedModelData</span></code>, не копируются в state.</p></li>
+<li><p><strong>История</strong> (inventory на каждый прошедший period) — пишется в <code class="docutils literal notranslate"><span class="pre">SimulationLog</span></code>, не хранится в state. State — только текущий snapshot.</p></li>
+<li><p><strong>Accumulated metrics</strong> (total unmet demand, total cost) — живут в <code class="docutils literal notranslate"><span class="pre">SimulationLog</span></code>.</p></li>
+</ul>
+</section>
+</section>
+<hr class="docutils" />
+<section id="engine-loop-phases">
+<h2>4. Engine Loop + Phases<a class="headerlink" href="#engine-loop-phases" title="Link to this heading">¶</a></h2>
+<section id="phase-protocol">
+<h3>4.1. Phase Protocol<a class="headerlink" href="#phase-protocol" title="Link to this heading">¶</a></h3>
+<p>Фаза — единица работы внутри period’а. Каждая фаза — класс, реализующий Protocol:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">Phase</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One logical operation within a period.&quot;&quot;&quot;</span>
+
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">should_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">period</span><span class="p">:</span> <span class="n">PeriodRow</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Whether this phase should execute in the given period.&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">state</span><span class="p">:</span> <span class="n">SimulationState</span><span class="p">,</span>
+        <span class="n">resolved</span><span class="p">:</span> <span class="n">ResolvedModelData</span><span class="p">,</span>
+        <span class="n">period</span><span class="p">:</span> <span class="n">PeriodRow</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">PhaseResult</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Execute the phase logic. Returns PhaseResult (new state + events).&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">PhaseResult</span></code> bundles the new state with events for logging (see §7.7):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">PhaseResult</span><span class="p">:</span>
+    <span class="n">state</span><span class="p">:</span> <span class="n">SimulationState</span>
+    <span class="n">flow_events</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>          <span class="c1"># → flow_log</span>
+    <span class="n">unmet_demand</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>         <span class="c1"># → unmet_demand_log</span>
+    <span class="n">rejected_dispatches</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>  <span class="c1"># → rejected_dispatches_log</span>
+</pre></div>
+</div>
+<p>Контракт:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">execute()</span></code> — чистая функция: принимает state, возвращает <strong>новый</strong> state. Не модифицирует входной state.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">should_run()</span></code> — определяет, запускаться ли в данном period’е. Используется Engine’ом для schedule.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">name</span></code> — для логирования и дебага.</p></li>
+</ul>
+</section>
+<section id="schedule">
+<h3>4.2. Schedule<a class="headerlink" href="#schedule" title="Link to this heading">¶</a></h3>
+<p>Schedule определяет, в каких periods фаза запускается. Реализуется через callable predicate — максимально гибко, без ограничений на будущие use cases.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Schedule</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;When a phase should run.&quot;&quot;&quot;</span>
+
+    <span class="n">predicate</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">PeriodRow</span><span class="p">],</span> <span class="nb">bool</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">should_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">period</span><span class="p">:</span> <span class="n">PeriodRow</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">predicate</span><span class="p">(</span><span class="n">period</span><span class="p">)</span>
+
+    <span class="c1"># ── Convenience constructors ──────────────────────────</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">every</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Schedule</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Run every period.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Schedule</span><span class="p">(</span><span class="n">predicate</span><span class="o">=</span><span class="k">lambda</span> <span class="n">p</span><span class="p">:</span> <span class="kc">True</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">every_n</span><span class="p">(</span><span class="n">n</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">offset</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Schedule</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Run every N-th period, starting from offset.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Schedule</span><span class="p">(</span><span class="n">predicate</span><span class="o">=</span><span class="k">lambda</span> <span class="n">p</span><span class="p">:</span> <span class="n">p</span><span class="o">.</span><span class="n">period_index</span> <span class="o">%</span> <span class="n">n</span> <span class="o">==</span> <span class="n">offset</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">custom</span><span class="p">(</span><span class="n">predicate</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">PeriodRow</span><span class="p">],</span> <span class="nb">bool</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Schedule</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Run when predicate returns True.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">Schedule</span><span class="p">(</span><span class="n">predicate</span><span class="o">=</span><span class="n">predicate</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Примеры:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">Schedule</span><span class="o">.</span><span class="n">every</span><span class="p">()</span>                          <span class="c1"># каждый period</span>
+<span class="n">Schedule</span><span class="o">.</span><span class="n">every_n</span><span class="p">(</span><span class="mi">24</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="mi">23</span><span class="p">)</span>           <span class="c1"># каждый 24-й period, начиная с 23-го (ночью)</span>
+<span class="n">Schedule</span><span class="o">.</span><span class="n">custom</span><span class="p">(</span><span class="k">lambda</span> <span class="n">p</span><span class="p">:</span> <span class="n">p</span><span class="o">.</span><span class="n">period_type</span> <span class="o">==</span> <span class="s2">&quot;day&quot;</span><span class="p">)</span>  <span class="c1"># только дневные periods</span>
+</pre></div>
+</div>
+<p>Фазы используют Schedule в <code class="docutils literal notranslate"><span class="pre">should_run()</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">DemandPhase</span><span class="p">:</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;DEMAND&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">schedule</span><span class="p">:</span> <span class="n">Schedule</span> <span class="o">=</span> <span class="n">Schedule</span><span class="o">.</span><span class="n">every</span><span class="p">()):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_schedule</span> <span class="o">=</span> <span class="n">schedule</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">should_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">period</span><span class="p">:</span> <span class="n">PeriodRow</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_schedule</span><span class="o">.</span><span class="n">should_run</span><span class="p">(</span><span class="n">period</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span> <span class="o">...</span>
+</pre></div>
+</div>
+</section>
+<section id="environment-class">
+<h3>4.3. Environment Class<a class="headerlink" href="#environment-class" title="Link to this heading">¶</a></h3>
+<p>Environment — класс, а не функция. Это даёт три уровня гранулярности вызова: <code class="docutils literal notranslate"><span class="pre">run()</span></code> (всё сразу), <code class="docutils literal notranslate"><span class="pre">step()</span></code> (один period), <code class="docutils literal notranslate"><span class="pre">step_phase()</span></code> (одна фаза). Полезно для дебага, тестов и UI.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">Environment</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Step-by-step simulation engine.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">resolved</span><span class="p">:</span> <span class="n">ResolvedModelData</span><span class="p">,</span>
+        <span class="n">config</span><span class="p">:</span> <span class="n">EnvironmentConfig</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_resolved</span> <span class="o">=</span> <span class="n">resolved</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_config</span> <span class="o">=</span> <span class="n">config</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">=</span> <span class="n">init_state</span><span class="p">(</span><span class="n">resolved</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_log</span> <span class="o">=</span> <span class="n">SimulationLog</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_periods</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">resolved</span><span class="o">.</span><span class="n">periods</span><span class="o">.</span><span class="n">itertuples</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_period_cursor</span> <span class="o">=</span> <span class="mi">0</span>      <span class="c1"># index into _periods</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_phase_cursor</span> <span class="o">=</span> <span class="mi">0</span>       <span class="c1"># index into config.phases (within current period)</span>
+
+    <span class="c1"># ── Properties ────────────────────────────────────────</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">state</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Current simulation state (read-only access).&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_state</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">log</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationLog</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Accumulated simulation log.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_log</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">is_done</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Whether all periods have been processed.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_period_cursor</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_periods</span><span class="p">)</span>
+
+    <span class="c1"># ── Execution ─────────────────────────────────────────</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationLog</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Run full simulation through all periods. Returns log.&quot;&quot;&quot;</span>
+        <span class="k">while</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_done</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_log</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Execute all phases for the current period, advance to next.</span>
+<span class="sd">        Returns state after the step.&quot;&quot;&quot;</span>
+        <span class="n">period</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_periods</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_period_cursor</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">phase</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">phases</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">phase</span><span class="o">.</span><span class="n">should_run</span><span class="p">(</span><span class="n">period</span><span class="p">):</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="n">phase</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_state</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">state</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_log</span><span class="o">.</span><span class="n">record_events</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">phase</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_log</span><span class="o">.</span><span class="n">record_period</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_state</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_state</span><span class="o">.</span><span class="n">advance_period</span><span class="p">(</span>
+            <span class="n">next_period_index</span><span class="o">=...</span><span class="p">,</span>
+            <span class="n">next_period_id</span><span class="o">=...</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_period_cursor</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_phase_cursor</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_state</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">step_phase</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">phase_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Execute a single named phase in the current period.</span>
+<span class="sd">        For debugging and testing.&quot;&quot;&quot;</span>
+        <span class="n">period</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_periods</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_period_cursor</span><span class="p">]</span>
+        <span class="n">phase</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">phases</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">phase_name</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">phase</span><span class="o">.</span><span class="n">should_run</span><span class="p">(</span><span class="n">period</span><span class="p">):</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">phase</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_state</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">state</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_log</span><span class="o">.</span><span class="n">record_events</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">phase</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_state</span>
+</pre></div>
+</div>
+<p>Три уровня использования:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># 1. Полный запуск</span>
+<span class="n">env</span> <span class="o">=</span> <span class="n">Environment</span><span class="p">(</span><span class="n">resolved</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+<span class="n">log</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+
+<span class="c1"># 2. Пошагово по периодам (дебаг, UI)</span>
+<span class="n">env</span> <span class="o">=</span> <span class="n">Environment</span><span class="p">(</span><span class="n">resolved</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
+    <span class="n">env</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">inventory</span><span class="p">)</span>
+
+<span class="c1"># 3. По фазам (тесты)</span>
+<span class="n">env</span> <span class="o">=</span> <span class="n">Environment</span><span class="p">(</span><span class="n">resolved</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
+<span class="n">env</span><span class="o">.</span><span class="n">step_phase</span><span class="p">(</span><span class="s2">&quot;DEMAND&quot;</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">env</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">inventory</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="s2">&quot;s1&quot;</span><span class="p">,</span> <span class="s2">&quot;working_bike&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">10</span>
+<span class="n">env</span><span class="o">.</span><span class="n">step_phase</span><span class="p">(</span><span class="s2">&quot;ARRIVALS&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="environmentconfig">
+<h3>4.4. EnvironmentConfig<a class="headerlink" href="#environmentconfig" title="Link to this heading">¶</a></h3>
+<p>Конфигурация запуска — какие фазы, в каком порядке, с какими параметрами.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">EnvironmentConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Configuration for a simulation run.&quot;&quot;&quot;</span>
+
+    <span class="n">phases</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Phase</span><span class="p">]</span>          <span class="c1"># порядок в списке = порядок выполнения</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>      <span class="c1"># для воспроизводимости стохастических solver&#39;ов</span>
+</pre></div>
+</div>
+<p>Порядок фаз = порядок выполнения. Явный, простой, без магии.</p>
+<p>Примеры конфигурации:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Велошеринг (period = день)</span>
+<span class="n">bike_config</span> <span class="o">=</span> <span class="n">EnvironmentConfig</span><span class="p">(</span>
+    <span class="n">phases</span><span class="o">=</span><span class="p">[</span>
+        <span class="n">DemandPhase</span><span class="p">(</span><span class="n">schedule</span><span class="o">=</span><span class="n">Schedule</span><span class="o">.</span><span class="n">every</span><span class="p">()),</span>
+        <span class="n">ArrivalsPhase</span><span class="p">(</span><span class="n">schedule</span><span class="o">=</span><span class="n">Schedule</span><span class="o">.</span><span class="n">every</span><span class="p">()),</span>
+        <span class="n">DispatchPhase</span><span class="p">(</span>
+            <span class="n">solver</span><span class="o">=</span><span class="n">GreedyRebalancer</span><span class="p">(),</span>
+            <span class="n">schedule</span><span class="o">=</span><span class="n">Schedule</span><span class="o">.</span><span class="n">every_n</span><span class="p">(</span><span class="mi">24</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="mi">23</span><span class="p">),</span>
+        <span class="p">),</span>
+    <span class="p">],</span>
+<span class="p">)</span>
+
+<span class="c1"># Газовая логистика (period = день)</span>
+<span class="n">gas_config</span> <span class="o">=</span> <span class="n">EnvironmentConfig</span><span class="p">(</span>
+    <span class="n">phases</span><span class="o">=</span><span class="p">[</span>
+        <span class="n">SupplyPhase</span><span class="p">(</span><span class="n">schedule</span><span class="o">=</span><span class="n">Schedule</span><span class="o">.</span><span class="n">every</span><span class="p">()),</span>
+        <span class="n">TransformPhase</span><span class="p">(</span><span class="n">schedule</span><span class="o">=</span><span class="n">Schedule</span><span class="o">.</span><span class="n">every</span><span class="p">()),</span>
+        <span class="n">DemandPhase</span><span class="p">(</span><span class="n">schedule</span><span class="o">=</span><span class="n">Schedule</span><span class="o">.</span><span class="n">every</span><span class="p">()),</span>
+        <span class="n">PlanPhase</span><span class="p">(</span>
+            <span class="n">solver</span><span class="o">=</span><span class="n">DailyPlanner</span><span class="p">(),</span>
+            <span class="n">schedule</span><span class="o">=</span><span class="n">Schedule</span><span class="o">.</span><span class="n">every_n</span><span class="p">(</span><span class="mi">24</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="mi">8</span><span class="p">),</span>
+        <span class="p">),</span>
+        <span class="n">DispatchPhase</span><span class="p">(</span>
+            <span class="n">solver</span><span class="o">=</span><span class="n">VRPSolver</span><span class="p">(</span><span class="n">time_windows</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+            <span class="n">schedule</span><span class="o">=</span><span class="n">Schedule</span><span class="o">.</span><span class="n">every_n</span><span class="p">(</span><span class="mi">24</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="mi">8</span><span class="p">),</span>
+        <span class="p">),</span>
+    <span class="p">],</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="built-in-vs-custom-phases">
+<h3>4.5. Built-in vs Custom Phases<a class="headerlink" href="#built-in-vs-custom-phases" title="Link to this heading">¶</a></h3>
+<p>Все фазы реализуют один и тот же <code class="docutils literal notranslate"><span class="pre">Phase</span></code> Protocol. “Встроенная” означает только “поставляется с библиотекой”.</p>
+<p><strong>Встроенные</strong> (универсальная логика, не зависит от домена):</p>
+<ul class="simple">
+<li><p><strong>DemandPhase</strong> — читает demand из <code class="docutils literal notranslate"><span class="pre">resolved</span></code> для текущего period, уменьшает inventory, логирует unmet demand.</p></li>
+<li><p><strong>ArrivalsPhase</strong> — фильтрует <code class="docutils literal notranslate"><span class="pre">in_transit</span></code> по <code class="docutils literal notranslate"><span class="pre">arrival_period</span> <span class="pre">==</span> <span class="pre">current</span></code>, переносит quantity в inventory целевого facility, обновляет resource status (IN_TRANSIT → AVAILABLE).</p></li>
+</ul>
+<p><strong>Кастомные</strong> (зависят от домена и solver’а):</p>
+<ul class="simple">
+<li><p><strong>DispatchPhase</strong> — вызывает solver, создаёт shipments из dispatches, обновляет inventory и in_transit.</p></li>
+<li><p><strong>SupplyPhase</strong> — генерирует supply (для SOURCE facilities).</p></li>
+<li><p><strong>TransformPhase</strong> — применяет commodity transformations (N→M, conversion_ratio, loss_rate).</p></li>
+</ul>
+</section>
+</section>
+<hr class="docutils" />
+<section id="task-solver-architecture">
+<h2>5. Task + Solver Architecture<a class="headerlink" href="#task-solver-architecture" title="Link to this heading">¶</a></h2>
+<section id="id6">
+<h3>5.1. Три слоя принятия решений<a class="headerlink" href="#id6" title="Link to this heading">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Phase (when + validate + apply)
+  └── Task (prepare + solve + postprocess)  — для сложных доменных фаз
+        └── Solver (чистая математика)
+        └── DataLoader (подготовка данных)
+</pre></div>
+</div>
+<p><strong>Phase</strong> — тонкая обёртка. Знает <em>когда</em> запускать (schedule), <em>валидирует</em> dispatches, <em>применяет</em> их к state. Не знает про домен.</p>
+<p><strong>Task</strong> — доменный manager. Объединяет prepare → solve → postprocess. Знает, как подготовить данные для solver’а и как перевести его решение обратно в dispatches. У каждого task’а свой dataloader, свой solver, своя постобработка.</p>
+<p><strong>Solver</strong> — чистая математика. Работает со своими структурами данных (матрицы, графы, OR-Tools модели). Не знает про SimulationState и ResolvedModelData.</p>
+<p>Простые фазы (DemandPhase, ArrivalsPhase) не нуждаются в Task — у них вся логика внутри Phase напрямую. Task нужен только для сложных доменных фаз.</p>
+</section>
+<section id="task-protocol">
+<h3>5.2. Task Protocol<a class="headerlink" href="#task-protocol" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">Task</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Domain-specific task: prepare → solve → postprocess.</span>
+<span class="sd">    </span>
+<span class="sd">    Returns dispatches as DataFrame. Task may compute arrival_period</span>
+<span class="sd">    from lead times in resolved data. resource_id may be null —</span>
+<span class="sd">    Phase will auto-assign available resources.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">state</span><span class="p">:</span> <span class="n">SimulationState</span><span class="p">,</span>
+        <span class="n">resolved</span><span class="p">:</span> <span class="n">ResolvedModelData</span><span class="p">,</span>
+        <span class="n">period</span><span class="p">:</span> <span class="n">PeriodRow</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Execute task. Returns dispatches DataFrame with columns:</span>
+<span class="sd">        source_id, target_id, commodity_category, quantity,</span>
+<span class="sd">        resource_id (nullable), modal_type (nullable),</span>
+<span class="sd">        arrival_period (computed from lead times).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+<p>Task получает полный state и resolved — внутри себя решает, что из этого использовать. Возвращает dispatches DataFrame, готовый для валидации и применения Phase’ой.</p>
+</section>
+<section id="task">
+<h3>5.3. Внутренняя структура Task’а<a class="headerlink" href="#task" title="Link to this heading">¶</a></h3>
+<p>Task — это manager, у которого внутри три компонента:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">RebalancerTask</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Bike-sharing rebalancing: move bikes from overstocked to understocked.&quot;&quot;&quot;</span>
+
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;rebalancer&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">solver</span><span class="p">:</span> <span class="n">RebalancerSolver</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="n">RebalancerConfig</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_solver</span> <span class="o">=</span> <span class="n">solver</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_loader</span> <span class="o">=</span> <span class="n">RebalancerDataLoader</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_config</span> <span class="o">=</span> <span class="n">config</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+        <span class="c1"># 1. PREPARE: state + resolved → solver-specific structures</span>
+        <span class="n">solver_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_loader</span><span class="o">.</span><span class="n">prepare</span><span class="p">(</span>
+            <span class="n">state</span><span class="p">,</span> <span class="n">resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># 2. SOLVE: solver works with its own data structures</span>
+        <span class="n">solver_output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_solver</span><span class="o">.</span><span class="n">solve</span><span class="p">(</span><span class="n">solver_input</span><span class="p">)</span>
+
+        <span class="c1"># 3. POSTPROCESS: solver output → dispatches DataFrame</span>
+        <span class="n">dispatches</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_loader</span><span class="o">.</span><span class="n">to_dispatches</span><span class="p">(</span>
+            <span class="n">solver_output</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">dispatches</span>
+</pre></div>
+</div>
+<p><strong>DataLoader</strong> (<code class="docutils literal notranslate"><span class="pre">_loader</span></code>) — подготавливает данные из state+resolved в формат, который понимает solver. Например, для VRP: distance matrix, demand vector, vehicle capacities. Также переводит solver output обратно в dispatches DataFrame, включая вычисление <code class="docutils literal notranslate"><span class="pre">arrival_period</span></code> из lead times.</p>
+<p><strong>Solver</strong> (<code class="docutils literal notranslate"><span class="pre">_solver</span></code>) — чистая математика. Не знает про SimulationState и ResolvedModelData. Работает со своими структурами:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">RebalancerSolver</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pure solver — works with solver-specific data structures.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">solve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">RebalancerInput</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RebalancerOutput</span><span class="p">:</span>
+        <span class="c1"># OR-Tools VRP, greedy heuristic, etc.</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+<p><strong>Config</strong> (<code class="docutils literal notranslate"><span class="pre">_config</span></code>) — параметры task’а (target inventory levels, max vehicles, etc.).</p>
+<p>Это разделение позволяет тестировать каждый компонент изолированно:</p>
+<ul class="simple">
+<li><p>Solver — unit test с ручными матрицами, без pandas</p></li>
+<li><p>DataLoader — проверить трансформацию state → solver input → dispatches</p></li>
+<li><p>Task — integration test через run()</p></li>
+</ul>
+</section>
+<section id="dispatches-dataframe">
+<h3>5.4. Dispatches DataFrame<a class="headerlink" href="#dispatches-dataframe" title="Link to this heading">¶</a></h3>
+<p>Единый формат результата всех Task’ов. Phase принимает этот DataFrame, валидирует, и применяет к state.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Колонки dispatches DataFrame:
+
+source_id            str       — откуда отправляем (facility_id)
+target_id            str       — куда отправляем (facility_id)
+commodity_category   str       — что отправляем
+quantity             float     — сколько
+resource_id          str|null  — каким ресурсом (null = Phase auto-assign)
+modal_type           str|null  — каким способом (null = default из edge definition)
+arrival_period       int       — period_index прибытия (вычисляется Task&#39;ом из lead times)
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">arrival_period</span></code> вычисляется Task’ом (через DataLoader), потому что Task знает про lead times из resolved и может учитывать их в решении solver’а (например, не отправлять в s1, если lead_time = 3 и дефицит нужно покрыть завтра).</p>
+<p><code class="docutils literal notranslate"><span class="pre">resource_id</span></code> — опциональный. Если Task/Solver знает, какой ресурс использовать — указывает. Если нет — Phase автоматически назначит первый доступный ресурс подходящей категории.</p>
+</section>
+<section id="phase">
+<h3>5.5. Phase валидация и применение<a class="headerlink" href="#phase" title="Link to this heading">¶</a></h3>
+<p>Phase получает dispatches от Task’а и выполняет два шага:</p>
+<p><strong>Валидация</strong> (Phase отвечает, Task может быть оптимистичным):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">_validate_dispatches</span><span class="p">(</span>
+    <span class="bp">self</span><span class="p">,</span> <span class="n">dispatches</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">SimulationState</span><span class="p">,</span> <span class="n">resolved</span><span class="p">:</span> <span class="n">ResolvedModelData</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Returns (valid_dispatches, rejected_dispatches).&quot;&quot;&quot;</span>
+    
+    <span class="c1"># 1. Хватает ли inventory на source?</span>
+    <span class="c1"># 2. Существует ли edge source → target в resolved.edges?</span>
+    <span class="c1"># 3. Если resource_id указан — доступен ли (status == AVAILABLE)?</span>
+    <span class="c1"># 4. Не превышает ли quantity capacity ресурса?</span>
+    <span class="c1"># 5. arrival_period &gt;= current_period?</span>
+    
+    <span class="c1"># Невалидные dispatches не применяются, логируются как warnings</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+<p><strong>Применение</strong> (универсальная логика, одна для всех Task’ов):</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">_apply_dispatches</span><span class="p">(</span>
+    <span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">SimulationState</span><span class="p">,</span> <span class="n">dispatches</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">period</span><span class="p">:</span> <span class="n">PeriodRow</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Apply valid dispatches to state. Returns new state.&quot;&quot;&quot;</span>
+    
+    <span class="c1"># 1. Auto-assign resource_id where null</span>
+    <span class="c1"># 2. Generate shipment_id for each dispatch</span>
+    <span class="c1"># 3. inventory[source] -= quantity</span>
+    <span class="c1"># 4. Append to in_transit (with departure_period, arrival_period)</span>
+    <span class="c1"># 5. resources[resource_id].status = IN_TRANSIT</span>
+    <span class="c1"># 6. resources[resource_id].available_at_period = arrival_period</span>
+    <span class="c1"># 7. Return new state via with_* methods</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+</section>
+<section id="dispatchphase">
+<h3>5.6. DispatchPhase — связующий слой<a class="headerlink" href="#dispatchphase" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">DispatchPhase</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Phase that delegates to a Task and applies dispatches to state.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task</span><span class="p">:</span> <span class="n">Task</span><span class="p">,</span> <span class="n">schedule</span><span class="p">:</span> <span class="n">Schedule</span> <span class="o">=</span> <span class="n">Schedule</span><span class="o">.</span><span class="n">every</span><span class="p">()):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;DISPATCH_</span><span class="si">{</span><span class="n">task</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_task</span> <span class="o">=</span> <span class="n">task</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_schedule</span> <span class="o">=</span> <span class="n">schedule</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">should_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">period</span><span class="p">:</span> <span class="n">PeriodRow</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_schedule</span><span class="o">.</span><span class="n">should_run</span><span class="p">(</span><span class="n">period</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SimulationState</span><span class="p">:</span>
+        <span class="c1"># 1. Task produces dispatches</span>
+        <span class="n">dispatches</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_task</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">dispatches</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">state</span>
+
+        <span class="c1"># 2. Phase validates</span>
+        <span class="n">valid</span><span class="p">,</span> <span class="n">rejected</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_validate_dispatches</span><span class="p">(</span><span class="n">dispatches</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">resolved</span><span class="p">)</span>
+
+        <span class="c1"># 3. Phase applies valid dispatches to state</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_dispatches</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">valid</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="id7">
+<h3>5.7. Примеры Task’ов<a class="headerlink" href="#id7" title="Link to this heading">¶</a></h3>
+<p><strong>NoopTask</strong> — ничего не делает. Для тестирования engine:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">NoopTask</span><span class="p">:</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;noop&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">DISPATCH_COLUMNS</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>RebalancerTask</strong> — ребалансировка велосипедов:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">RebalancerTask</span><span class="p">:</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;rebalancer&quot;</span>
+    <span class="c1"># внутри: RebalancerDataLoader + RebalancerSolver (VRP / greedy)</span>
+    <span class="c1"># prepare: state.inventory → demand vector, distance matrix</span>
+    <span class="c1"># solve: VRP/greedy → routes</span>
+    <span class="c1"># postprocess: routes → dispatches with arrival_period</span>
+</pre></div>
+</div>
+<p><strong>GasDispatchTask</strong> — отправка газа с депо клиентам:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">GasDispatchTask</span><span class="p">:</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;gas_dispatch&quot;</span>
+    <span class="c1"># внутри: GasDataLoader + DispatchSolver</span>
+    <span class="c1"># prepare: state.inventory + resolved.demand → allocation problem</span>
+    <span class="c1"># solve: LP / heuristic</span>
+    <span class="c1"># postprocess: allocation → dispatches</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="resource-tracking-details">
+<h2>6. Resource Tracking Details<a class="headerlink" href="#resource-tracking-details" title="Link to this heading">¶</a></h2>
+<section id="id8">
+<h3>6.1. Жизненный цикл ресурса<a class="headerlink" href="#id8" title="Link to this heading">¶</a></h3>
+<p>Пример: один грузовик за один цикл ребалансировки.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Period 5: truck_01 на depot_1, status=AVAILABLE
+    │
+    ├── DispatchPhase: Task решает отправить 5 working_bike на station_3
+    │   dispatches: {source=depot_1, target=station_3, resource_id=truck_01, ...}
+    │   Phase applies:
+    │     inventory[depot_1, working_bike] -= 5
+    │     truck_01.status = IN_TRANSIT
+    │     truck_01.current_facility_id = station_3  (destination)
+    │     truck_01.available_at_period = 7  (current + lead_time=2)
+    │     in_transit += shipment
+    │
+Period 6: truck_01 status=IN_TRANSIT, ничего не происходит
+    │
+Period 7: ArrivalsPhase:
+    │   in_transit фильтр: arrival_period == 7 → shipment с truck_01
+    │   Phase applies:
+    │     inventory[station_3, working_bike] += 5
+    │     remove shipment from in_transit
+    │     truck_01.status = AVAILABLE
+    │     truck_01.current_facility_id = station_3
+    │     truck_01.available_at_period = null
+</pre></div>
+</div>
+</section>
+<section id="id9">
+<h3>6.2. Возврат ресурса после доставки<a class="headerlink" href="#id9" title="Link to this heading">¶</a></h3>
+<p><strong>Ресурс остаётся где доехал.</strong> После доставки truck_01 становится AVAILABLE на station_3 (не на home depot_1). Если нужно вернуть — solver/Task должен явно создать dispatch station_3 → depot_1.</p>
+<p>Это максимально гибко: solver может строить цепочки (depot → s1, потом s1 → s2, потом s2 → depot), или оставить ресурс на месте для использования в следующем period’е. Позиционирование ресурсов — ответственность solver’а/Task’а.</p>
+</section>
+<section id="auto-assign">
+<h3>6.3. Auto-assign ресурсов<a class="headerlink" href="#auto-assign" title="Link to this heading">¶</a></h3>
+<p>Когда dispatches приходят с <code class="docutils literal notranslate"><span class="pre">resource_id</span> <span class="pre">=</span> <span class="pre">null</span></code>, Phase назначает ресурс автоматически:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>1. Найти все ресурсы с status == AVAILABLE
+2. Отфильтровать: current_facility_id == dispatch.source_id
+   (ресурс должен быть на точке отправления)
+3. Отфильтровать по resource_commodity_compatibility
+   (ресурс должен уметь везти этот commodity)
+4. Отфильтровать по resource_modal_compatibility
+   (ресурс должен поддерживать modal_type ребра)
+5. Из оставшихся — взять первый
+6. Если нет доступных — reject dispatch, логировать как warning
+</pre></div>
+</div>
+<p><strong>Reject + log, не очередь.</strong> Если ресурса нет — dispatch отклоняется и логируется. Solver/Task видит доступные ресурсы в state и должен учитывать это при планировании. Очередь dispatches — потенциальная feature на будущее, но в MVP не нужна: создаёт проблему устаревания (dispatch создан в period 5, ресурс появился в period 8, ситуация изменилась).</p>
+</section>
+<section id="dispatch-grain-capacity">
+<h3>6.4. Dispatch grain и capacity<a class="headerlink" href="#dispatch-grain-capacity" title="Link to this heading">¶</a></h3>
+<p><strong>1 dispatch = 1 commodity + 1 resource.</strong> Одна строка dispatches DataFrame = одна пара (source, target, commodity, resource).</p>
+<p>Если грузовик везёт два commodity (working_bike туда, broken_bike обратно) — это <strong>два dispatch’а</strong> с одним resource_id:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>dispatch_1: depot → station_3, working_bike, qty=5, resource=truck_01, arrival=7
+dispatch_2: station_3 → depot, broken_bike,  qty=3, resource=truck_01, arrival=7
+</pre></div>
+</div>
+<p><strong>Capacity валидация</strong> — Phase проверяет суммарно per resource:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">capacity_used</span> <span class="o">=</span> <span class="n">dispatches</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;resource_id&quot;</span><span class="p">)[</span><span class="s2">&quot;quantity&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+<span class="n">capacity_limit</span> <span class="o">=</span> <span class="n">resources</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;resource_id&quot;</span><span class="p">)[</span><span class="s2">&quot;base_capacity&quot;</span><span class="p">]</span>
+<span class="n">over_capacity</span> <span class="o">=</span> <span class="n">capacity_used</span> <span class="o">&gt;</span> <span class="n">capacity_limit</span>
+<span class="c1"># over_capacity dispatches → rejected, logged as warning</span>
+</pre></div>
+</div>
+<p>Если нужно отправить больше, чем один ресурс может увезти — <strong>Task split’ит</strong> на несколько dispatch’ов с разными resource_id. Task знает capacity ресурсов и делает это в postprocess.</p>
+</section>
+<section id="multi-stop">
+<h3>6.5. Multi-stop маршруты<a class="headerlink" href="#multi-stop" title="Link to this heading">¶</a></h3>
+<p><strong>MVP: Task планирует только текущий period.</strong> Простые маршруты: depot → station (и обратно). Multi-stop (depot → s1 → s2 → s3 → depot) требует future dispatches и координации между period’ами — это следующий уровень сложности.</p>
+<p>Для VRP с multi-stop в будущем: Task создаёт dispatches для всех ног маршрута, Phase ставит future dispatches в in_transit с правильными departure/arrival period’ами. Но это потребует расширения Phase (не проверять “ресурс на source” для future dispatches) и расширения in_transit (departure_period &gt; current_period).</p>
+</section>
+<section id="id10">
+<h3>6.6. Инициализация ресурсов<a class="headerlink" href="#id10" title="Link to this heading">¶</a></h3>
+<p>При <code class="docutils literal notranslate"><span class="pre">init_state(resolved)</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">_init_resources</span><span class="p">(</span><span class="n">resolved</span><span class="p">:</span> <span class="n">ResolvedModelData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create initial resources DataFrame.&quot;&quot;&quot;</span>
+    
+    <span class="k">if</span> <span class="n">resolved</span><span class="o">.</span><span class="n">resources</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># L3 ресурсы заданы явно — использовать их</span>
+        <span class="n">resources</span> <span class="o">=</span> <span class="n">resolved</span><span class="o">.</span><span class="n">resources</span><span class="p">[[</span>
+            <span class="s2">&quot;resource_id&quot;</span><span class="p">,</span> <span class="s2">&quot;resource_category&quot;</span><span class="p">,</span> <span class="s2">&quot;home_facility_id&quot;</span><span class="p">,</span>
+        <span class="p">]]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">resources</span><span class="p">[</span><span class="s2">&quot;current_facility_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">resources</span><span class="p">[</span><span class="s2">&quot;home_facility_id&quot;</span><span class="p">]</span>
+        <span class="n">resources</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ResourceStatus</span><span class="o">.</span><span class="n">AVAILABLE</span>
+        <span class="n">resources</span><span class="p">[</span><span class="s2">&quot;available_at_period&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Генерировать из resource_fleet</span>
+        <span class="c1"># resource_fleet: facility_id × resource_category × count</span>
+        <span class="c1"># → создать count экземпляров для каждой строки</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">resolved</span><span class="o">.</span><span class="n">resource_fleet</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;count&quot;</span><span class="p">])):</span>
+                <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+                    <span class="s2">&quot;resource_id&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;resource_category&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;facility_id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;resource_category&quot;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;resource_category&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;home_facility_id&quot;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;facility_id&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;current_facility_id&quot;</span><span class="p">:</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;facility_id&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">ResourceStatus</span><span class="o">.</span><span class="n">AVAILABLE</span><span class="p">,</span>
+                    <span class="s2">&quot;available_at_period&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="p">})</span>
+        <span class="n">resources</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    
+    <span class="k">return</span> <span class="n">resources</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="simulationlog">
+<h2>7. SimulationLog<a class="headerlink" href="#simulationlog" title="Link to this heading">¶</a></h2>
+<section id="id11">
+<h3>7.1. Обзор<a class="headerlink" href="#id11" title="Link to this heading">¶</a></h3>
+<p>SimulationLog — полная история симуляции. Состоит из 5 typed DataFrames, каждый с чётким grain. Используется для аналитики (plan vs fact), визуализации (UI), дебага.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">SimulationLog</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Accumulated simulation output.&quot;&quot;&quot;</span>
+
+    <span class="c1"># ── Core logs ─────────────────────────────────────────</span>
+    <span class="n">inventory_log</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span>
+    <span class="n">flow_log</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span>
+    <span class="n">resource_log</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span>
+
+    <span class="c1"># ── Event logs ────────────────────────────────────────</span>
+    <span class="n">unmet_demand_log</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span>
+    <span class="n">rejected_dispatches_log</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">record_period</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">SimulationState</span><span class="p">,</span> <span class="n">period</span><span class="p">:</span> <span class="n">PeriodRow</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Record end-of-period snapshot (inventory, resources).&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">record_events</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">events</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">phase_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">period</span><span class="p">:</span> <span class="n">PeriodRow</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Record phase events (flows, unmet demand, rejected dispatches).&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">to_dataframes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Finalize: concat all per-period logs into full DataFrames.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;simulation_inventory_log&quot;</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inventory_log</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+            <span class="s2">&quot;simulation_flow_log&quot;</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">flow_log</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+            <span class="s2">&quot;simulation_resource_log&quot;</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">resource_log</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+            <span class="s2">&quot;simulation_unmet_demand_log&quot;</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">unmet_demand_log</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+            <span class="s2">&quot;simulation_rejected_dispatches_log&quot;</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">rejected_dispatches_log</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+        <span class="p">}</span>
+</pre></div>
+</div>
+<p>Internal storage: lists of DataFrames (one per period), concatenated at the end via <code class="docutils literal notranslate"><span class="pre">to_dataframes()</span></code>. Это эффективнее, чем <code class="docutils literal notranslate"><span class="pre">pd.concat</span></code> на каждом step’е.</p>
+</section>
+<section id="inventory-log">
+<h3>7.2. Inventory Log<a class="headerlink" href="#inventory-log" title="Link to this heading">¶</a></h3>
+<p>Snapshot inventory на конец каждого period’а (после всех фаз).</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">period_index</span> <span class="o">|</span> <span class="n">period_id</span> <span class="o">|</span> <span class="n">facility_id</span> <span class="o">|</span> <span class="n">commodity_category</span> <span class="o">|</span> <span class="n">quantity</span>
+<span class="mi">0</span>            <span class="o">|</span> <span class="n">p0</span>        <span class="o">|</span> <span class="n">s1</span>          <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">12.0</span>
+<span class="mi">0</span>            <span class="o">|</span> <span class="n">p0</span>        <span class="o">|</span> <span class="n">s1</span>          <span class="o">|</span> <span class="n">broken_bike</span>        <span class="o">|</span> <span class="mf">3.0</span>
+<span class="mi">0</span>            <span class="o">|</span> <span class="n">p0</span>        <span class="o">|</span> <span class="n">s2</span>          <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">7.0</span>
+<span class="mi">1</span>            <span class="o">|</span> <span class="n">p1</span>        <span class="o">|</span> <span class="n">s1</span>          <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">10.0</span>
+<span class="o">...</span>
+</pre></div>
+</div>
+<p><strong>Grain:</strong> <code class="docutils literal notranslate"><span class="pre">period_index</span> <span class="pre">×</span> <span class="pre">facility_id</span> <span class="pre">×</span> <span class="pre">commodity_category</span></code>.<br />
+<strong>Записывает:</strong> Engine после всех фаз period’а (<code class="docutils literal notranslate"><span class="pre">record_period</span></code>).<br />
+<strong>Использование:</strong> график “inventory на station X по дням”, сравнение с plan.</p>
+</section>
+<section id="flow-log">
+<h3>7.3. Flow Log<a class="headerlink" href="#flow-log" title="Link to this heading">¶</a></h3>
+<p>Все перемещения commodity за симуляцию. Один DataFrame с <code class="docutils literal notranslate"><span class="pre">phase_name</span></code> для различения типов потоков.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">period_index</span> <span class="o">|</span> <span class="n">source_id</span> <span class="o">|</span> <span class="n">target_id</span> <span class="o">|</span> <span class="n">commodity_category</span> <span class="o">|</span> <span class="n">modal_type</span> <span class="o">|</span> <span class="n">quantity</span> <span class="o">|</span> <span class="n">phase_name</span> <span class="o">|</span> <span class="n">resource_id</span>
+<span class="mi">1</span>            <span class="o">|</span> <span class="n">d1</span>        <span class="o">|</span> <span class="n">s1</span>        <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="n">road</span>       <span class="o">|</span> <span class="mf">5.0</span>      <span class="o">|</span> <span class="n">DISPATCH</span>   <span class="o">|</span> <span class="n">truck_01</span>
+<span class="mi">1</span>            <span class="o">|</span> <span class="n">s2</span>        <span class="o">|</span> <span class="n">d1</span>        <span class="o">|</span> <span class="n">broken_bike</span>        <span class="o">|</span> <span class="n">road</span>       <span class="o">|</span> <span class="mf">3.0</span>      <span class="o">|</span> <span class="n">DISPATCH</span>   <span class="o">|</span> <span class="n">truck_02</span>
+<span class="mi">1</span>            <span class="o">|</span> <span class="n">EXT</span>       <span class="o">|</span> <span class="n">s1</span>        <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="n">null</span>       <span class="o">|</span> <span class="mf">8.0</span>      <span class="o">|</span> <span class="n">DEMAND</span>     <span class="o">|</span> <span class="n">null</span>
+<span class="mi">1</span>            <span class="o">|</span> <span class="n">s1</span>        <span class="o">|</span> <span class="n">EXT</span>       <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="n">null</span>       <span class="o">|</span> <span class="mf">10.0</span>     <span class="o">|</span> <span class="n">DEMAND</span>     <span class="o">|</span> <span class="n">null</span>
+</pre></div>
+</div>
+<p><strong>Grain:</strong> <code class="docutils literal notranslate"><span class="pre">period_index</span> <span class="pre">×</span> <span class="pre">source_id</span> <span class="pre">×</span> <span class="pre">target_id</span> <span class="pre">×</span> <span class="pre">commodity_category</span> <span class="pre">×</span> <span class="pre">phase_name</span></code>.<br />
+<strong>Записывает:</strong> каждая Phase через PhaseResult.events.<br />
+<strong><code class="docutils literal notranslate"><span class="pre">source_id</span> <span class="pre">=</span> <span class="pre">&quot;EXT&quot;</span></code> / <code class="docutils literal notranslate"><span class="pre">target_id</span> <span class="pre">=</span> <span class="pre">&quot;EXT&quot;</span></code>:</strong> для demand (commodity входит/выходит из системы).<br />
+<strong>Использование:</strong> total flow per edge, phase contribution analysis, comparison with optimizer solution.</p>
+</section>
+<section id="resource-log">
+<h3>7.4. Resource Log<a class="headerlink" href="#resource-log" title="Link to this heading">¶</a></h3>
+<p>Snapshot ресурсов на конец каждого period’а.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">period_index</span> <span class="o">|</span> <span class="n">resource_id</span> <span class="o">|</span> <span class="n">resource_category</span>   <span class="o">|</span> <span class="n">current_facility_id</span> <span class="o">|</span> <span class="n">status</span>     <span class="o">|</span> <span class="n">available_at_period</span>
+<span class="mi">0</span>            <span class="o">|</span> <span class="n">truck_01</span>    <span class="o">|</span> <span class="n">REBALANCING_TRUCK</span>   <span class="o">|</span> <span class="n">depot_1</span>             <span class="o">|</span> <span class="n">AVAILABLE</span>  <span class="o">|</span> <span class="n">null</span>
+<span class="mi">1</span>            <span class="o">|</span> <span class="n">truck_01</span>    <span class="o">|</span> <span class="n">REBALANCING_TRUCK</span>   <span class="o">|</span> <span class="n">station_3</span>           <span class="o">|</span> <span class="n">IN_TRANSIT</span> <span class="o">|</span> <span class="mi">3</span>
+<span class="mi">3</span>            <span class="o">|</span> <span class="n">truck_01</span>    <span class="o">|</span> <span class="n">REBALANCING_TRUCK</span>   <span class="o">|</span> <span class="n">station_3</span>           <span class="o">|</span> <span class="n">AVAILABLE</span>  <span class="o">|</span> <span class="n">null</span>
+</pre></div>
+</div>
+<p><strong>Grain:</strong> <code class="docutils literal notranslate"><span class="pre">period_index</span> <span class="pre">×</span> <span class="pre">resource_id</span></code>.<br />
+<strong>Записывает:</strong> Engine после всех фаз period’а (<code class="docutils literal notranslate"><span class="pre">record_period</span></code>).<br />
+<strong>Использование:</strong> “где был truck_01 в каждый момент”, utilization rate (% времени IN_TRANSIT vs AVAILABLE).</p>
+</section>
+<section id="unmet-demand-log">
+<h3>7.5. Unmet Demand Log<a class="headerlink" href="#unmet-demand-log" title="Link to this heading">¶</a></h3>
+<p>Demand, который не удалось удовлетворить из-за нехватки inventory.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">period_index</span> <span class="o">|</span> <span class="n">facility_id</span> <span class="o">|</span> <span class="n">commodity_category</span> <span class="o">|</span> <span class="n">requested</span> <span class="o">|</span> <span class="n">fulfilled</span> <span class="o">|</span> <span class="n">deficit</span>
+<span class="mi">1</span>            <span class="o">|</span> <span class="n">s3</span>          <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">5.0</span>       <span class="o">|</span> <span class="mf">3.0</span>       <span class="o">|</span> <span class="mf">2.0</span>
+<span class="mi">2</span>            <span class="o">|</span> <span class="n">s1</span>          <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">8.0</span>       <span class="o">|</span> <span class="mf">8.0</span>       <span class="o">|</span> <span class="mf">0.0</span>
+</pre></div>
+</div>
+<p><strong>Grain:</strong> <code class="docutils literal notranslate"><span class="pre">period_index</span> <span class="pre">×</span> <span class="pre">facility_id</span> <span class="pre">×</span> <span class="pre">commodity_category</span></code>.<br />
+<strong>Записывает:</strong> DemandPhase через PhaseResult.events.<br />
+<strong>Использование:</strong> service level (% удовлетворённого demand’а), проблемные станции.</p>
+<p>Строки с <code class="docutils literal notranslate"><span class="pre">deficit</span> <span class="pre">==</span> <span class="pre">0</span></code> опциональны (можно не записывать, или записывать для полноты — зависит от потребности аналитики).</p>
+</section>
+<section id="rejected-dispatches-log">
+<h3>7.6. Rejected Dispatches Log<a class="headerlink" href="#rejected-dispatches-log" title="Link to this heading">¶</a></h3>
+<p>Dispatches, отклонённые Phase при валидации.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">period_index</span> <span class="o">|</span> <span class="n">source_id</span> <span class="o">|</span> <span class="n">target_id</span> <span class="o">|</span> <span class="n">commodity_category</span> <span class="o">|</span> <span class="n">quantity</span> <span class="o">|</span> <span class="n">resource_id</span> <span class="o">|</span> <span class="n">reason</span>
+<span class="mi">1</span>            <span class="o">|</span> <span class="n">d1</span>        <span class="o">|</span> <span class="n">s5</span>        <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">10.0</span>     <span class="o">|</span> <span class="n">null</span>        <span class="o">|</span> <span class="n">no_available_resource</span>
+<span class="mi">1</span>            <span class="o">|</span> <span class="n">d1</span>        <span class="o">|</span> <span class="n">s3</span>        <span class="o">|</span> <span class="n">working_bike</span>       <span class="o">|</span> <span class="mf">25.0</span>     <span class="o">|</span> <span class="n">truck_01</span>    <span class="o">|</span> <span class="n">over_capacity</span>
+<span class="mi">2</span>            <span class="o">|</span> <span class="n">s2</span>        <span class="o">|</span> <span class="n">d1</span>        <span class="o">|</span> <span class="n">broken_bike</span>        <span class="o">|</span> <span class="mf">3.0</span>      <span class="o">|</span> <span class="n">truck_02</span>    <span class="o">|</span> <span class="n">insufficient_inventory</span>
+</pre></div>
+</div>
+<p><strong>Grain:</strong> <code class="docutils literal notranslate"><span class="pre">period_index</span> <span class="pre">×</span> <span class="pre">source_id</span> <span class="pre">×</span> <span class="pre">target_id</span> <span class="pre">×</span> <span class="pre">commodity_category</span></code> (+ resource_id if applicable).<br />
+<strong>Записывает:</strong> DispatchPhase через PhaseResult.events.<br />
+<strong><code class="docutils literal notranslate"><span class="pre">reason</span></code> enum:</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">RejectReason</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">Enum</span><span class="p">):</span>
+    <span class="n">NO_AVAILABLE_RESOURCE</span> <span class="o">=</span> <span class="s2">&quot;no_available_resource&quot;</span>
+    <span class="n">INSUFFICIENT_INVENTORY</span> <span class="o">=</span> <span class="s2">&quot;insufficient_inventory&quot;</span>
+    <span class="n">OVER_CAPACITY</span> <span class="o">=</span> <span class="s2">&quot;over_capacity&quot;</span>
+    <span class="n">INVALID_EDGE</span> <span class="o">=</span> <span class="s2">&quot;invalid_edge&quot;</span>
+    <span class="n">INVALID_ARRIVAL</span> <span class="o">=</span> <span class="s2">&quot;invalid_arrival&quot;</span>
+</pre></div>
+</div>
+<p><strong>Использование:</strong> “почему solver’у не удалось выполнить план”, дебаг solver’а.</p>
+</section>
+<section id="phaseresult-phase-log">
+<h3>7.7. PhaseResult — связь Phase → Log<a class="headerlink" href="#phaseresult-phase-log" title="Link to this heading">¶</a></h3>
+<p>Фазы возвращают <code class="docutils literal notranslate"><span class="pre">PhaseResult</span></code> вместо голого <code class="docutils literal notranslate"><span class="pre">SimulationState</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">PhaseResult</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Output of a Phase execution.&quot;&quot;&quot;</span>
+
+    <span class="n">state</span><span class="p">:</span> <span class="n">SimulationState</span>
+    <span class="n">flow_events</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>          <span class="c1"># перемещения (→ flow_log)</span>
+    <span class="n">unmet_demand</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>         <span class="c1"># неудовлетворённый demand (→ unmet_demand_log)</span>
+    <span class="n">rejected_dispatches</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>  <span class="c1"># отклонённые dispatches (→ rejected_dispatches_log)</span>
+</pre></div>
+</div>
+<p>Каждый DataFrame может быть пустым (если фаза не генерирует события этого типа). DemandPhase заполняет <code class="docutils literal notranslate"><span class="pre">flow_events</span></code> + <code class="docutils literal notranslate"><span class="pre">unmet_demand</span></code>. DispatchPhase заполняет <code class="docutils literal notranslate"><span class="pre">flow_events</span></code> + <code class="docutils literal notranslate"><span class="pre">rejected_dispatches</span></code>. ArrivalsPhase заполняет только <code class="docutils literal notranslate"><span class="pre">flow_events</span></code>.</p>
+<p>Engine собирает PhaseResult от каждой фазы и пишет в SimulationLog:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># В Engine.step():</span>
+<span class="k">for</span> <span class="n">phase</span> <span class="ow">in</span> <span class="n">phases</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">phase</span><span class="o">.</span><span class="n">should_run</span><span class="p">(</span><span class="n">period</span><span class="p">):</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">phase</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">resolved</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">state</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">record_events</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">phase</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span>
+
+<span class="n">log</span><span class="o">.</span><span class="n">record_period</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">period</span><span class="p">)</span>  <span class="c1"># snapshot после всех фаз</span>
+</pre></div>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="file-structure">
+<h2>8. File Structure<a class="headerlink" href="#file-structure" title="Link to this heading">¶</a></h2>
+<p>Планируемая структура (из <code class="docutils literal notranslate"><span class="pre">docs/repo_struct.md</span></code>):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>gbp/consumers/simulator/
+├── state.py             # SimulationState, ResourceStatus, init_state
+├── engine.py            # Environment class, simulation loop
+├── config.py            # EnvironmentConfig
+├── phases.py            # Phase protocol, PhaseResult, Schedule
+├── task.py              # Task protocol, DISPATCH_COLUMNS
+├── built_in_phases.py   # DemandPhase, ArrivalsPhase (universal)
+├── dispatch_phase.py    # DispatchPhase (delegates to Task, validates, applies)
+├── log.py               # SimulationLog, RejectReason
+└── tasks/               # domain-specific tasks
+    ├── noop.py           # NoopTask for testing
+    └── ...               # rebalancer, gas_dispatch, etc.
+</pre></div>
+</div>
+</section>
+<hr class="docutils" />
+<section id="implementation-plan">
+<h2>9. Implementation Plan<a class="headerlink" href="#implementation-plan" title="Link to this heading">¶</a></h2>
+<p>Каждый step — отдельный PR. <code class="docutils literal notranslate"><span class="pre">pytest</span></code> после каждого. Порядок определяется зависимостями: сначала типы и контракты, потом логика, потом интеграция.</p>
+<section id="step-1-simulationstate-init-state">
+<h3>Step 1: SimulationState + init_state<a class="headerlink" href="#step-1-simulationstate-init-state" title="Link to this heading">¶</a></h3>
+<p><strong>Файлы:</strong> <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/state.py</span></code></p>
+<p><strong>Что:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ResourceStatus</span></code> enum (AVAILABLE, IN_TRANSIT, BUSY, MAINTENANCE)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SimulationState</span></code> frozen dataclass (period_index, period_id, inventory, in_transit, resources)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">with_*</span></code> методы (with_inventory, with_in_transit, with_resources, advance_period)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">init_state(resolved:</span> <span class="pre">ResolvedModelData)</span> <span class="pre">-&gt;</span> <span class="pre">SimulationState</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_init_resources(resolved)</span></code> — L3 resources или генерация из resource_fleet</p></li>
+</ul>
+<p><strong>Verification:</strong></p>
+<ul class="simple">
+<li><p>Unit test: создать state из toy ResolvedModelData (из <code class="docutils literal notranslate"><span class="pre">make_raw_model</span></code> + <code class="docutils literal notranslate"><span class="pre">build_model</span></code>)</p></li>
+<li><p>Проверить shapes inventory / resources / in_transit</p></li>
+<li><p>Проверить immutability: <code class="docutils literal notranslate"><span class="pre">with_inventory()</span></code> возвращает новый объект, старый не изменён</p></li>
+<li><p>Проверить <code class="docutils literal notranslate"><span class="pre">_init_resources</span></code>: генерация из resource_fleet даёт правильное количество ресурсов</p></li>
+</ul>
+<p><strong>Зависимости:</strong> ResolvedModelData, make_raw_model (уже есть)</p>
+</section>
+<hr class="docutils" />
+<section id="step-2-phase-protocol-phaseresult-schedule">
+<h3>Step 2: Phase Protocol + PhaseResult + Schedule<a class="headerlink" href="#step-2-phase-protocol-phaseresult-schedule" title="Link to this heading">¶</a></h3>
+<p><strong>Файлы:</strong> <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/phases.py</span></code></p>
+<p><strong>Что:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">PhaseResult</span></code> dataclass (state, flow_events, unmet_demand, rejected_dispatches)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Phase</span></code> Protocol (name, should_run, execute → PhaseResult)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Schedule</span></code> dataclass с callable predicate</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Schedule.every()</span></code>, <code class="docutils literal notranslate"><span class="pre">Schedule.every_n()</span></code>, <code class="docutils literal notranslate"><span class="pre">Schedule.custom()</span></code> constructors</p></li>
+</ul>
+<p><strong>Verification:</strong></p>
+<ul class="simple">
+<li><p>Unit test: <code class="docutils literal notranslate"><span class="pre">Schedule.every()</span></code> returns True для любого period</p></li>
+<li><p>Unit test: <code class="docutils literal notranslate"><span class="pre">Schedule.every_n(24,</span> <span class="pre">offset=23)</span></code> returns True только для period_index % 24 == 23</p></li>
+<li><p>Unit test: <code class="docutils literal notranslate"><span class="pre">Schedule.custom(lambda</span> <span class="pre">p:</span> <span class="pre">...)</span></code> работает с произвольным predicate</p></li>
+<li><p>Type check: класс, реализующий Phase Protocol, проходит mypy</p></li>
+</ul>
+<p><strong>Зависимости:</strong> SimulationState (Step 1)</p>
+</section>
+<hr class="docutils" />
+<section id="step-3-simulationlog">
+<h3>Step 3: SimulationLog<a class="headerlink" href="#step-3-simulationlog" title="Link to this heading">¶</a></h3>
+<p><strong>Файлы:</strong> <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/log.py</span></code></p>
+<p><strong>Что:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">RejectReason</span></code> enum</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SimulationLog</span></code> class с 5 внутренними списками DataFrames</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">record_period(state,</span> <span class="pre">period)</span></code> — snapshot inventory + resources</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">record_events(result:</span> <span class="pre">PhaseResult,</span> <span class="pre">phase_name,</span> <span class="pre">period)</span></code> — flow events, unmet demand, rejected dispatches</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">to_dataframes()</span> <span class="pre">-&gt;</span> <span class="pre">dict[str,</span> <span class="pre">pd.DataFrame]</span></code> — финализация через concat</p></li>
+</ul>
+<p><strong>Verification:</strong></p>
+<ul class="simple">
+<li><p>Unit test: создать лог, записать 3 period’а, <code class="docutils literal notranslate"><span class="pre">to_dataframes()</span></code> возвращает 5 DataFrames с правильными shapes</p></li>
+<li><p>Unit test: пустой лог → <code class="docutils literal notranslate"><span class="pre">to_dataframes()</span></code> возвращает пустые DataFrames (не ошибку)</p></li>
+<li><p>Unit test: <code class="docutils literal notranslate"><span class="pre">record_events</span></code> с пустыми events DataFrame → ничего не падает</p></li>
+</ul>
+<p><strong>Зависимости:</strong> PhaseResult (Step 2), SimulationState (Step 1)</p>
+</section>
+<hr class="docutils" />
+<section id="step-4-built-in-phases-demandphase-arrivalsphase">
+<h3>Step 4: Built-in phases (DemandPhase, ArrivalsPhase)<a class="headerlink" href="#step-4-built-in-phases-demandphase-arrivalsphase" title="Link to this heading">¶</a></h3>
+<p><strong>Файлы:</strong> <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/built_in_phases.py</span></code></p>
+<p><strong>Что:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">DemandPhase</span></code> — читает demand из resolved для текущего period, уменьшает inventory, логирует unmet demand в PhaseResult</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ArrivalsPhase</span></code> — фильтрует in_transit по arrival_period == current, переносит в inventory, обновляет resource status IN_TRANSIT → AVAILABLE</p></li>
+</ul>
+<p><strong>Verification:</strong></p>
+<ul class="simple">
+<li><p>Unit test DemandPhase: state с inventory=10, demand=7 → new inventory=3, flow_events записан, unmet_demand пустой</p></li>
+<li><p>Unit test DemandPhase: state с inventory=3, demand=7 → new inventory=0, unmet_demand.deficit=4</p></li>
+<li><p>Unit test ArrivalsPhase: state с in_transit (arrival=5), current period=5 → shipment перенесён в inventory, ресурс AVAILABLE</p></li>
+<li><p>Unit test ArrivalsPhase: state с in_transit (arrival=7), current period=5 → ничего не произошло</p></li>
+</ul>
+<p><strong>Зависимости:</strong> Phase Protocol (Step 2), SimulationState (Step 1)</p>
+</section>
+<hr class="docutils" />
+<section id="step-5-task-protocol-dispatchphase">
+<h3>Step 5: Task Protocol + DispatchPhase<a class="headerlink" href="#step-5-task-protocol-dispatchphase" title="Link to this heading">¶</a></h3>
+<p><strong>Файлы:</strong> <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/task.py</span></code>, <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/dispatch_phase.py</span></code></p>
+<p><strong>Что:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">DISPATCH_COLUMNS</span></code> — список колонок dispatches DataFrame</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Task</span></code> Protocol (name, run → DataFrame)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DispatchPhase</span></code> — вызывает task.run(), валидирует dispatches, auto-assigns resources, applies to state</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_validate_dispatches()</span></code> — inventory check, edge check, resource check, capacity check</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_apply_dispatches()</span></code> — inventory −=, in_transit +=, resources status update</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_auto_assign_resources()</span></code> — назначить первый доступный ресурс по compatibility</p></li>
+</ul>
+<p><strong>Verification:</strong></p>
+<ul class="simple">
+<li><p>Unit test: DispatchPhase с mock Task, valid dispatch → inventory обновлён, in_transit добавлен, resource IN_TRANSIT</p></li>
+<li><p>Unit test: dispatch с insufficient inventory → rejected, logged в PhaseResult.rejected_dispatches</p></li>
+<li><p>Unit test: dispatch с resource_id=null → auto-assign, resource становится IN_TRANSIT</p></li>
+<li><p>Unit test: dispatch с resource_id=null, no available resource → rejected</p></li>
+<li><p>Unit test: два dispatch’а на один resource, суммарный quantity &gt; capacity → over_capacity rejection</p></li>
+<li><p>Unit test: capacity validation через groupby resource_id</p></li>
+</ul>
+<p><strong>Зависимости:</strong> Phase Protocol (Step 2), SimulationState (Step 1)</p>
+</section>
+<hr class="docutils" />
+<section id="step-6-environment-class-environmentconfig">
+<h3>Step 6: Environment class + EnvironmentConfig<a class="headerlink" href="#step-6-environment-class-environmentconfig" title="Link to this heading">¶</a></h3>
+<p><strong>Файлы:</strong> <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/engine.py</span></code>, <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/config.py</span></code></p>
+<p><strong>Что:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">EnvironmentConfig</span></code> dataclass (phases, seed)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Environment</span></code> class (resolved, config → state, log)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">run()</span> <span class="pre">→</span> <span class="pre">SimulationLog</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">step()</span> <span class="pre">→</span> <span class="pre">SimulationState</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">step_phase(phase_name)</span> <span class="pre">→</span> <span class="pre">SimulationState</span></code></p></li>
+<li><p>Properties: state, log, is_done</p></li>
+</ul>
+<p><strong>Verification:</strong></p>
+<ul class="simple">
+<li><p>Unit test: Environment с DemandPhase + ArrivalsPhase (no dispatch), 3 periods → log содержит 3 записи inventory</p></li>
+<li><p>Unit test: <code class="docutils literal notranslate"><span class="pre">step()</span></code> advances period_cursor, <code class="docutils literal notranslate"><span class="pre">is_done</span></code> корректно</p></li>
+<li><p>Unit test: <code class="docutils literal notranslate"><span class="pre">step_phase(&quot;DEMAND&quot;)</span></code> выполняет только одну фазу</p></li>
+<li><p>Unit test: Schedule.every_n — фаза пропускается в нужных period’ах</p></li>
+</ul>
+<p><strong>Зависимости:</strong> все предыдущие Steps</p>
+</section>
+<hr class="docutils" />
+<section id="step-7-nooptask-integration-test">
+<h3>Step 7: NoopTask + Integration test<a class="headerlink" href="#step-7-nooptask-integration-test" title="Link to this heading">¶</a></h3>
+<p><strong>Файлы:</strong> <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/tasks/noop.py</span></code>, <code class="docutils literal notranslate"><span class="pre">tests/integration/test_environment.py</span></code></p>
+<p><strong>Что:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">NoopTask</span></code> — возвращает пустой dispatches DataFrame</p></li>
+<li><p>Integration test: полный цикл <code class="docutils literal notranslate"><span class="pre">make_raw_model</span> <span class="pre">→</span> <span class="pre">build_model</span> <span class="pre">→</span> <span class="pre">Environment(resolved,</span> <span class="pre">config).run()</span> <span class="pre">→</span> <span class="pre">log.to_dataframes()</span></code></p></li>
+</ul>
+<p><strong>Verification:</strong></p>
+<ul class="simple">
+<li><p>NoopTask integration: Environment с DemandPhase + ArrivalsPhase + DispatchPhase(NoopTask), bike-sharing toy data, 7 periods → inventory_log shape корректный, flow_log содержит demand events, no rejected dispatches</p></li>
+<li><p>Проверить что все 5 DataFrames в log непустые (кроме rejected_dispatches)</p></li>
+<li><p>Проверить что inventory на последнем period’е = inventory_initial − total demand + total arrivals</p></li>
+</ul>
+<p><strong>Зависимости:</strong> все предыдущие Steps, make_raw_model + build_model (уже есть)</p>
+</section>
+<hr class="docutils" />
+<section id="step-8-phase-3-roadmap-greedyrebalancertask">
+<h3>Step 8: (Phase 3 roadmap) GreedyRebalancerTask<a class="headerlink" href="#step-8-phase-3-roadmap-greedyrebalancertask" title="Link to this heading">¶</a></h3>
+<blockquote>
+<div><p>Этот step — уже фаза 3 roadmap’а (Rebalancer). Включён для полноты картины, но реализуется после стабилизации Environment.</p>
+</div></blockquote>
+<p><strong>Файлы:</strong> <code class="docutils literal notranslate"><span class="pre">gbp/consumers/simulator/tasks/rebalancer/</span></code> (task, dataloader, solver)</p>
+<p><strong>Что:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">RebalancerDataLoader</span></code> — prepare (state → demand vector + distance matrix) + to_dispatches (solution → dispatches DataFrame)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">GreedyRebalancerSolver</span></code> — простая эвристика (overstocked → understocked matching)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">RebalancerTask</span></code> — manager (loader + solver + config)</p></li>
+</ul>
+<p><strong>Verification:</strong></p>
+<ul class="simple">
+<li><p>Unit test solver: ручные матрицы → правильные маршруты</p></li>
+<li><p>Unit test dataloader: state → solver input → dispatches round-trip</p></li>
+<li><p>Integration test: Environment с GreedyRebalancerTask, toy bike-sharing → inventory выравнивается</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="id12">
+<h3>Сводка<a class="headerlink" href="#id12" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Step</p></th>
+<th class="head"><p>Что</p></th>
+<th class="head"><p>Файлы</p></th>
+<th class="head"><p>Зависит от</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>SimulationState</p></td>
+<td><p>state.py</p></td>
+<td><p>ResolvedModelData</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Phase Protocol + Schedule</p></td>
+<td><p>phases.py</p></td>
+<td><p>Step 1</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>SimulationLog</p></td>
+<td><p>log.py</p></td>
+<td><p>Steps 1-2</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>DemandPhase, ArrivalsPhase</p></td>
+<td><p>built_in_phases.py</p></td>
+<td><p>Steps 1-2</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>Task Protocol + DispatchPhase</p></td>
+<td><p>task.py, dispatch_phase.py</p></td>
+<td><p>Steps 1-2</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>Environment + Config</p></td>
+<td><p>engine.py, config.py</p></td>
+<td><p>Steps 1-5</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>NoopTask + Integration</p></td>
+<td><p>tasks/noop.py, tests/</p></td>
+<td><p>Steps 1-6</p></td>
+</tr>
+<tr class="row-odd"><td><p>8</p></td>
+<td><p>GreedyRebalancerTask</p></td>
+<td><p>tasks/rebalancer/</p></td>
+<td><p>Steps 1-7 (фаза 3)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Steps 3, 4, 5 можно делать параллельно (все зависят только от 1-2). Step 6 объединяет всё. Step 7 — smoke test полного пайплайна.</p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="open-questions">
+<h2>Open Questions<a class="headerlink" href="#open-questions" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>Формат <code class="docutils literal notranslate"><span class="pre">PeriodRow</span></code> — namedtuple из itertuples() или свой dataclass</p></li>
+<li><p>Записывать ли строки с <code class="docutils literal notranslate"><span class="pre">deficit</span> <span class="pre">==</span> <span class="pre">0</span></code> в unmet_demand_log (полнота vs размер)</p></li>
+<li><p>Нужен ли <code class="docutils literal notranslate"><span class="pre">TransformPhase</span></code> в MVP или только DEMAND / ARRIVALS / DISPATCH</p></li>
+<li><p>Как Task “помнит” контекст между period’ами (для future multi-stop маршрутов)</p></li>
+</ul>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="refactoring.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Architecture Clarity Refactoring — Completed</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="attribute_system.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">Design: Dynamic Attribute System</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2025, vlzm
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            <div class="icons">
+              <a class="muted-link " href="https://github.com/vlzm/GFDRR" aria-label="GitHub"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a>
+              
+            </div>
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Design Doc: Environment (Simulation Engine)</a><ul>
+<li><a class="reference internal" href="#environment">1. Что такое Environment</a><ul>
+<li><a class="reference internal" href="#id1">Вход и выход</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id2">2. Архитектурные решения</a><ul>
+<li><a class="reference internal" href="#periods">2.1. Гранулярность: periods, а не собственная временная ось</a></li>
+<li><a class="reference internal" href="#sub-steps">2.2. Sub-steps: логические фазы, не временные</a></li>
+<li><a class="reference internal" href="#solver">2.3. Solver внутри фазы — чёрный ящик</a></li>
+<li><a class="reference internal" href="#immutable-state">2.4. Immutable state</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#simulationstate">3. SimulationState</a><ul>
+<li><a class="reference internal" href="#id3">3.1. Структура</a></li>
+<li><a class="reference internal" href="#inventory">3.2. Inventory</a></li>
+<li><a class="reference internal" href="#in-transit">3.3. In-transit</a></li>
+<li><a class="reference internal" href="#resources-instance-level">3.4. Resources (instance-level)</a></li>
+<li><a class="reference internal" href="#id4">3.5. Инициализация</a></li>
+<li><a class="reference internal" href="#id5">3.6. Что НЕ входит в SimulationState</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#engine-loop-phases">4. Engine Loop + Phases</a><ul>
+<li><a class="reference internal" href="#phase-protocol">4.1. Phase Protocol</a></li>
+<li><a class="reference internal" href="#schedule">4.2. Schedule</a></li>
+<li><a class="reference internal" href="#environment-class">4.3. Environment Class</a></li>
+<li><a class="reference internal" href="#environmentconfig">4.4. EnvironmentConfig</a></li>
+<li><a class="reference internal" href="#built-in-vs-custom-phases">4.5. Built-in vs Custom Phases</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#task-solver-architecture">5. Task + Solver Architecture</a><ul>
+<li><a class="reference internal" href="#id6">5.1. Три слоя принятия решений</a></li>
+<li><a class="reference internal" href="#task-protocol">5.2. Task Protocol</a></li>
+<li><a class="reference internal" href="#task">5.3. Внутренняя структура Task’а</a></li>
+<li><a class="reference internal" href="#dispatches-dataframe">5.4. Dispatches DataFrame</a></li>
+<li><a class="reference internal" href="#phase">5.5. Phase валидация и применение</a></li>
+<li><a class="reference internal" href="#dispatchphase">5.6. DispatchPhase — связующий слой</a></li>
+<li><a class="reference internal" href="#id7">5.7. Примеры Task’ов</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#resource-tracking-details">6. Resource Tracking Details</a><ul>
+<li><a class="reference internal" href="#id8">6.1. Жизненный цикл ресурса</a></li>
+<li><a class="reference internal" href="#id9">6.2. Возврат ресурса после доставки</a></li>
+<li><a class="reference internal" href="#auto-assign">6.3. Auto-assign ресурсов</a></li>
+<li><a class="reference internal" href="#dispatch-grain-capacity">6.4. Dispatch grain и capacity</a></li>
+<li><a class="reference internal" href="#multi-stop">6.5. Multi-stop маршруты</a></li>
+<li><a class="reference internal" href="#id10">6.6. Инициализация ресурсов</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#simulationlog">7. SimulationLog</a><ul>
+<li><a class="reference internal" href="#id11">7.1. Обзор</a></li>
+<li><a class="reference internal" href="#inventory-log">7.2. Inventory Log</a></li>
+<li><a class="reference internal" href="#flow-log">7.3. Flow Log</a></li>
+<li><a class="reference internal" href="#resource-log">7.4. Resource Log</a></li>
+<li><a class="reference internal" href="#unmet-demand-log">7.5. Unmet Demand Log</a></li>
+<li><a class="reference internal" href="#rejected-dispatches-log">7.6. Rejected Dispatches Log</a></li>
+<li><a class="reference internal" href="#phaseresult-phase-log">7.7. PhaseResult — связь Phase → Log</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#file-structure">8. File Structure</a></li>
+<li><a class="reference internal" href="#implementation-plan">9. Implementation Plan</a><ul>
+<li><a class="reference internal" href="#step-1-simulationstate-init-state">Step 1: SimulationState + init_state</a></li>
+<li><a class="reference internal" href="#step-2-phase-protocol-phaseresult-schedule">Step 2: Phase Protocol + PhaseResult + Schedule</a></li>
+<li><a class="reference internal" href="#step-3-simulationlog">Step 3: SimulationLog</a></li>
+<li><a class="reference internal" href="#step-4-built-in-phases-demandphase-arrivalsphase">Step 4: Built-in phases (DemandPhase, ArrivalsPhase)</a></li>
+<li><a class="reference internal" href="#step-5-task-protocol-dispatchphase">Step 5: Task Protocol + DispatchPhase</a></li>
+<li><a class="reference internal" href="#step-6-environment-class-environmentconfig">Step 6: Environment class + EnvironmentConfig</a></li>
+<li><a class="reference internal" href="#step-7-nooptask-integration-test">Step 7: NoopTask + Integration test</a></li>
+<li><a class="reference internal" href="#step-8-phase-3-roadmap-greedyrebalancertask">Step 8: (Phase 3 roadmap) GreedyRebalancerTask</a></li>
+<li><a class="reference internal" href="#id12">Сводка</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#open-questions">Open Questions</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=38b66d78"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    </body>
+</html>

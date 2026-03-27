@@ -1,0 +1,64 @@
+---
+title: "5. Temporal Model — Multi-Resolution Planning"
+---
+
+flowchart TB
+    subgraph Horizon["PlanningHorizon"]
+        PH["planning_horizon<br/>───────────<br/>planning_horizon_id (PK)<br/>name: 'H1-2025-tactical'<br/>start_date: 2025-01-01<br/>end_date: 2025-07-01"]
+    end
+
+    subgraph Segments["PlanningHorizonSegments — different granularity"]
+        S0["Segment 0<br/>───────────<br/>period_type: DAY<br/>Jan 1 – Jan 14<br/>(14 periods)"]
+        S1["Segment 1<br/>───────────<br/>period_type: WEEK<br/>Jan 15 – Mar 11<br/>(8 periods)"]
+        S2["Segment 2<br/>───────────<br/>period_type: MONTH<br/>Mar 12 – Jun 30<br/>(~4 periods)"]
+    end
+
+    subgraph Periods["Periods — continuous global index"]
+        direction LR
+        P0["P0<br/>DAY<br/>Jan 1"]
+        P1["P1<br/>DAY<br/>Jan 2"]
+        Pdots1["..."]
+        P13["P13<br/>DAY<br/>Jan 14"]
+        P14["P14<br/>WEEK<br/>Jan 15-21"]
+        P15["P15<br/>WEEK<br/>Jan 22-28"]
+        Pdots2["..."]
+        P21["P21<br/>WEEK<br/>Mar 5-11"]
+        P22["P22<br/>MONTH<br/>Mar"]
+        Pdots3["..."]
+        P25["P25<br/>MONTH<br/>Jun"]
+    end
+
+    subgraph TimeResolution["Time Resolution Pipeline"]
+        Raw["Raw data with date column<br/>───────────<br/>e.g. operation_cost: facility_id,<br/>operation_type, date, cost_per_unit"]
+        Resolved["Resolved data with period_id<br/>───────────<br/>e.g. operation_cost: facility_id,<br/>operation_type, period_id, cost_per_unit"]
+        Raw -->|"resolve_to_periods()<br/>date → period_id<br/>agg: mean/sum/min"| Resolved
+    end
+
+    subgraph CarryOver["Inventory Carry-Over"]
+        Formula["inventory[t] = inventory[t-1] + inflow[t] - outflow[t]<br/>───────────<br/>period_index is continuous (0..25)<br/>across all segments for carry-over"]
+    end
+
+    PH --> S0
+    PH --> S1
+    PH --> S2
+
+    S0 --> P0
+    S0 --> P1
+    S0 --> P13
+    S1 --> P14
+    S1 --> P15
+    S1 --> P21
+    S2 --> P22
+    S2 --> P25
+
+    classDef horizon fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef segment fill:#fff3e0,stroke:#e65100
+    classDef period fill:#e8f5e9,stroke:#2e7d32
+    classDef resolution fill:#f3e5f5,stroke:#7b1fa2
+    classDef carry fill:#fce4ec,stroke:#c2185b
+
+    class Horizon horizon
+    class Segments segment
+    class Periods period
+    class TimeResolution resolution
+    class CarryOver carry

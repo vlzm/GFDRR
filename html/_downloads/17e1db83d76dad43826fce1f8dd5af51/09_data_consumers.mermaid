@@ -1,0 +1,55 @@
+---
+title: "9. Data Consumers — Optimizer, Simulator, Analytics"
+---
+
+flowchart TB
+    subgraph SharedModel["Shared Data Model"]
+        L1L2["L1 Graph + L2 Data Model"]
+        BuildPipe["Build Pipeline"]
+        RMD["ResolvedModelData<br/>───────────<br/>Single source of truth:<br/>facilities, edges, commodities,<br/>resources, periods, spines"]
+        L1L2 --> BuildPipe --> RMD
+    end
+
+    RMD --> ConsumerA
+    RMD --> ConsumerB
+    RMD --> ConsumerC
+
+    subgraph ConsumerA["Consumer A: Optimizer (Network Flow)"]
+        OPT_how["Sees ALL periods simultaneously<br/>LP/MILP mathematical program"]
+        OPT_resource["Resources = capacity constraint<br/>(no position tracking)"]
+        OPT_uses["Uses: demand, supply, costs,<br/>edge capacities, fleet capacity,<br/>transformation ratios"]
+        OPT_out["Output:<br/>• solution_flow<br/>• solution_inventory<br/>• solution_unmet_demand<br/>• solution_metadata"]
+    end
+
+    subgraph ConsumerB["Consumer B: Simulator"]
+        SIM_how["Steps through periods SEQUENTIALLY<br/>Step-solver per period (VRP, greedy, rebalancing)"]
+        SIM_state["Resources have STATE<br/>───────────<br/>SimulationState (runtime, not data model):<br/>• resource_state: position + status per resource<br/>• inventory: current commodity levels<br/>• in_transit: shipments en route"]
+        SIM_step["Each step:<br/>1. Arrivals → update inventory<br/>2. Demand → consume inventory<br/>3. Decide → step-solver<br/>4. Dispatch → update state"]
+        SIM_out["Output:<br/>• simulation_flow_log<br/>• simulation_inventory_log<br/>• simulation_resource_log<br/>• simulation_metadata"]
+    end
+
+    subgraph ConsumerC["Consumer C: Analytics"]
+        ANA_how["Reads output from A or B<br/>Compares with historical data"]
+        ANA_compare["Plan vs Fact comparison<br/>on shared grain:<br/>edge × commodity × period_id"]
+        ANA_hist["Historical layer:<br/>• historical_flow<br/>• historical_inventory<br/>• historical_demand_fulfilled"]
+    end
+
+    subgraph ResourceLevels["Resource Tracking Levels"]
+        RL1["Aggregate<br/>resource_fleet (count × category)<br/>→ capacity constraint<br/>No position tracking"]
+        RL2["Round-trip aware<br/>+ edge_vehicle<br/>max_vehicles_per_period<br/>considers round-trip time"]
+        RL3["Instance-level<br/>+ resource (L3)<br/>+ SimulationState<br/>tracks each resource position"]
+        RL1 ---|"Optimizer"| RL2
+        RL2 ---|"Simulator"| RL3
+    end
+
+    classDef shared fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef optimizer fill:#c8e6c9,stroke:#2e7d32
+    classDef simulator fill:#fff3e0,stroke:#e65100
+    classDef analytics fill:#f3e5f5,stroke:#7b1fa2
+    classDef levels fill:#fce4ec,stroke:#c2185b
+
+    class SharedModel shared
+    class ConsumerA optimizer
+    class ConsumerB simulator
+    class ConsumerC analytics
+    class ResourceLevels levels
