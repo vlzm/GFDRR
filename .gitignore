@@ -118,6 +118,8 @@ secrets/
 
 # Sphinx docs
 docs/_build/
+docs/_api/
+docs/_autosummary/
 
 # OS files
 .DS_Store

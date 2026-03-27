@@ -20,7 +20,7 @@ The following stays aligned with the current Python packages:
 - **§13.8 Hierarchical aggregation** — not implemented as a step in `gbp/build` (no `aggregation` module); scenario hierarchy fields describe intent for consumers or future tooling.
 - **Output tables (§11.12)** — schemas exist in `gbp/core/schemas/output.py`; they are not populated by `build_model()` (consumer-generated).
 
-**Naming:** Logical attribute names in `AttributeSpec` may be singular (e.g. `operation_cost`) while **table fields** on the dataclasses are plural: `operation_costs`, `transport_costs`, `resource_costs` (see `gbp/core/model.py`).
+**Parametric attributes:** Parametric tables (`operation_costs`, `transport_costs`, `resource_costs`, `operation_capacities`, etc.) are NOT fixed fields on `RawModelData`. They live in `raw.attributes: AttributeRegistry` and are registered via `registry.register()`. Attribute names are singular (`operation_cost`, `transport_cost`). See `docs/design/attribute_system.md` for the full design.
 
 **Validation caveat:** `validate_raw_model()` uses **`raw.edges` and `raw.edge_commodities`** for resource completeness, graph connectivity, and transformation consistency. If edges and `edge_commodities` are **only** produced inside `build_model()` from `edge_rules` / `scenario_manual_edges`, those checks may not run unless you pre-materialize those tables on `raw` before validation.
 

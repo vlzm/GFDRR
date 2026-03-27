@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /e/Documents/vlzm/GFDRR -maxdepth 2 -type f \\\\\\(-name Makefile -o -name *.sh -o -name *.yml -o -name *.yaml \\\\\\))"
+    ]
+  }
+}

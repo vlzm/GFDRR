@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint & type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+      - name: Ruff lint
+        run: ruff check gbp/ tests/
+      - name: Ruff format
+        run: ruff format --check gbp/ tests/
+      - name: Mypy
+        run: mypy gbp/
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+      - name: Run tests
+        run: pytest
+
+  build-docs:
+    name: Build docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install doc dependencies
+        run: pip install -e ".[docs]"
+      - name: Build Sphinx docs
+        run: bash docs/build_docs.sh
