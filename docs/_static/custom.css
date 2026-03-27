@@ -1,0 +1,188 @@
+/* === Google Fonts: Inter + JetBrains Mono === */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* === Headings === */
+.content h1 {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    border-bottom: 2px solid var(--color-brand-primary);
+    padding-bottom: 0.4em;
+    margin-bottom: 1em;
+}
+
+.content h2 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-top: 2em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--color-foreground-border);
+}
+
+.content h3,
+.content h4 {
+    font-weight: 600;
+}
+
+/* === API documentation styling === */
+dl.py.class > dt,
+dl.py.function > dt,
+dl.py.method > dt,
+dl.py.attribute > dt {
+    background: var(--color-api-background);
+    border-left: 3px solid var(--color-brand-primary);
+    border-radius: 0 4px 4px 0;
+    padding: 0.5em 0.75em;
+    font-size: 0.95em;
+}
+
+/* === Admonition styling === */
+.admonition {
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* === Tables === */
+.content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1.5em 0;
+}
+
+.content table th {
+    background: var(--color-background-secondary);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.75em 1em;
+    border-bottom: 2px solid var(--color-brand-primary);
+}
+
+.content table td {
+    padding: 0.6em 1em;
+    border-bottom: 1px solid var(--color-foreground-border);
+}
+
+.content table tr:hover {
+    background: var(--color-background-hover);
+}
+
+/* === Mermaid diagram containers === */
+.mermaid {
+    text-align: center;
+    margin: 1.5em 0;
+    padding: 1em;
+    background: var(--color-background-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--color-background-border);
+    overflow-x: auto;
+}
+
+/* === Code blocks === */
+pre {
+    border-radius: 6px;
+    border: 1px solid var(--color-foreground-border);
+}
+
+/* === Sidebar active item === */
+.sidebar-tree .current-page > .reference {
+    font-weight: 600;
+}
+
+/* === Content width === */
+.page-content .content {
+    max-width: 52em;
+}
+
+/* === Smooth scrolling === */
+html {
+    scroll-behavior: smooth;
+}
+
+/* === Blockquotes === */
+blockquote {
+    border-left: 3px solid var(--color-brand-primary);
+    padding: 0.5em 1em;
+    margin: 1em 0;
+    background: var(--color-background-secondary);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.95em;
+    color: var(--color-foreground-secondary);
+}
+
+/* === Landing page: pipeline visualization === */
+.pipeline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    margin: 2em 0;
+    font-size: 0.92em;
+}
+
+.pipeline-step {
+    background: var(--color-background-secondary);
+    border: 1px solid var(--color-background-border);
+    border-radius: 6px;
+    padding: 0.5em 1em;
+    font-weight: 500;
+}
+
+.pipeline-arrow {
+    color: var(--color-brand-primary);
+    font-weight: bold;
+    font-size: 1.4em;
+}
+
+/* === Landing page: card grid === */
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.25em;
+    margin: 1.5em 0;
+}
+
+.card-grid a.card {
+    display: block;
+    background: var(--color-background-secondary);
+    border: 1px solid var(--color-background-border);
+    border-radius: 8px;
+    padding: 1.25em 1.5em;
+    text-decoration: none;
+    color: inherit;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.card-grid a.card:hover {
+    border-color: var(--color-brand-primary);
+    box-shadow: 0 4px 12px rgba(13, 110, 170, 0.12);
+    transform: translateY(-2px);
+}
+
+.card-grid .card h3 {
+    margin: 0 0 0.4em 0;
+    font-size: 1.05em;
+    color: var(--color-foreground-primary);
+}
+
+.card-grid .card p {
+    margin: 0;
+    color: var(--color-foreground-secondary);
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+/* === Autosummary tables === */
+table.autosummary td {
+    padding: 0.5em 1em;
+}
+
+table.autosummary td:first-child {
+    font-family: var(--font-stack--monospace);
+    white-space: nowrap;
+}
+
+/* === Definition lists (Core Concepts) === */
+.content dl.simple dt {
+    font-weight: 600;
+    color: var(--color-brand-primary);
+}
