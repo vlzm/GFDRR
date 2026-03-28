@@ -676,6 +676,37 @@ ResolvedModelData (with period_id, spines)
 </div></blockquote>
 </section>
 <hr class="docutils" />
+<section id="environment-engine-simulation-loop">
+<h2>13. Environment Engine — Simulation Loop<a class="headerlink" href="#environment-engine-simulation-loop" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> How the Environment orchestrates a full simulation run — initialization, the period-by-period loop, state management, and log output.</p>
+<p>The Environment takes a <code class="docutils literal notranslate"><span class="pre">ResolvedModelData</span></code> and an <code class="docutils literal notranslate"><span class="pre">EnvironmentConfig</span></code> (list of phases). It creates an initial <code class="docutils literal notranslate"><span class="pre">SimulationState</span></code> from inventory/fleet data, then iterates over all periods. In each period it executes phases sequentially — each phase receives immutable state and returns a <code class="docutils literal notranslate"><span class="pre">PhaseResult</span></code> with updated state + events. After all phases, the engine snapshots state into <code class="docutils literal notranslate"><span class="pre">SimulationLog</span></code> and advances to the next period.</p>
+<p>Key concepts:</p>
+<ul class="simple">
+<li><p><strong>SimulationState</strong> — frozen dataclass (inventory, in_transit, resources). Updated via <code class="docutils literal notranslate"><span class="pre">with_*</span></code> helpers that return new instances.</p></li>
+<li><p><strong>Phase Protocol</strong> — <code class="docutils literal notranslate"><span class="pre">should_run(period)</span></code> + <code class="docutils literal notranslate"><span class="pre">execute(state,</span> <span class="pre">resolved,</span> <span class="pre">period)</span> <span class="pre">→</span> <span class="pre">PhaseResult</span></code>.</p></li>
+<li><p><strong>Schedule</strong> — controls when phases fire (<code class="docutils literal notranslate"><span class="pre">every()</span></code>, <code class="docutils literal notranslate"><span class="pre">every_n(n)</span></code>, <code class="docutils literal notranslate"><span class="pre">custom(predicate)</span></code>).</p></li>
+<li><p><strong>SimulationLog</strong> — accumulates 5 output tables (inventory, flow, resource, unmet demand, rejected dispatches).</p></li>
+</ul>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/8771baf98c317e6dac892be74f4cc42a/13_environment_engine.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/13_environment_engine.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
+<section id="environment-phases-per-period-execution-detail">
+<h2>14. Environment Phases — Per-Period Execution Detail<a class="headerlink" href="#environment-phases-per-period-execution-detail" title="Link to this heading">¶</a></h2>
+<p><strong>What to learn:</strong> What happens inside each phase during a single period — data flow from state through DemandPhase, ArrivalsPhase, and DispatchPhase back to updated state.</p>
+<p>Three built-in phases execute in order within each period:</p>
+<ol class="arabic simple">
+<li><p><strong>DemandPhase</strong> — filters demand for current period, merges with inventory, computes fulfilled/deficit via <code class="docutils literal notranslate"><span class="pre">np.minimum()</span></code>, decrements inventory. Outputs flow events + unmet demand.</p></li>
+<li><p><strong>ArrivalsPhase</strong> — filters in-transit shipments arriving this period, adds quantities to destination inventory, releases resources (IN_TRANSIT → AVAILABLE). Outputs flow events.</p></li>
+<li><p><strong>DispatchPhase(Task)</strong> — delegates to a domain-specific Task that produces dispatches. Then: auto-assigns resources (greedy, compatible), validates dispatches (5 checks: arrival period, edge existence, resource availability, capacity, inventory sufficiency), applies valid ones (decrement inventory, add to in-transit, mark resources IN_TRANSIT). Rejected dispatches are logged with reason.</p></li>
+</ol>
+<p>Each phase returns a <code class="docutils literal notranslate"><span class="pre">PhaseResult</span></code> (updated state + events), which the engine feeds to the next phase and records in the log.</p>
+<blockquote>
+<div><p>Full diagram: <a class="reference download internal" download="" href="_downloads/970daddc3670ce23f393165bf664f525/14_environment_phases.mermaid"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docs/diagrams/14_environment_phases.mermaid</span></code></span></a></p>
+</div></blockquote>
+</section>
+<hr class="docutils" />
 <section id="reading-order">
 <h2>Reading Order<a class="headerlink" href="#reading-order" title="Link to this heading">¶</a></h2>
 <p>For a progressive understanding of the model, follow this path:</p>
@@ -749,6 +780,16 @@ ResolvedModelData (with period_id, spines)
 <td><p>Advanced</p></td>
 <td><p>#8</p></td>
 </tr>
+<tr class="row-even"><td><p>13</p></td>
+<td><p>Environment Engine</p></td>
+<td><p>Advanced</p></td>
+<td><p>#9</p></td>
+</tr>
+<tr class="row-odd"><td><p>14</p></td>
+<td><p>Environment Phases</p></td>
+<td><p>Advanced</p></td>
+<td><p>#9, #13</p></td>
+</tr>
 </tbody>
 </table>
 </div>
@@ -784,6 +825,9 @@ ResolvedModelData (with period_id, spines)
 </tr>
 <tr class="row-even"><td><p>12</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">gbp.io</span></code>, <code class="docutils literal notranslate"><span class="pre">gbp.loaders</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>13–14</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">gbp.consumers.simulator</span></code></p></td>
 </tr>
 </tbody>
 </table>
@@ -862,6 +906,8 @@ ResolvedModelData (with period_id, spines)
 <li><a class="reference internal" href="#full-er-diagram">10. Full ER Diagram</a></li>
 <li><a class="reference internal" href="#hierarchy-aggregation">11. Hierarchy &amp; Aggregation</a></li>
 <li><a class="reference internal" href="#i-o-loaders-data-flow-in-and-out">12. I/O &amp; Loaders — Data Flow In and Out</a></li>
+<li><a class="reference internal" href="#environment-engine-simulation-loop">13. Environment Engine — Simulation Loop</a></li>
+<li><a class="reference internal" href="#environment-phases-per-period-execution-detail">14. Environment Phases — Per-Period Execution Detail</a></li>
 <li><a class="reference internal" href="#reading-order">Reading Order</a></li>
 <li><a class="reference internal" href="#package-mapping">Package Mapping</a></li>
 </ul>

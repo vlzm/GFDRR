@@ -283,6 +283,38 @@ Both formats support `RawModelData` and `ResolvedModelData` with round-trip fide
 
 ---
 
+## 13. Environment Engine — Simulation Loop
+
+**What to learn:** How the Environment orchestrates a full simulation run — initialization, the period-by-period loop, state management, and log output.
+
+The Environment takes a `ResolvedModelData` and an `EnvironmentConfig` (list of phases). It creates an initial `SimulationState` from inventory/fleet data, then iterates over all periods. In each period it executes phases sequentially — each phase receives immutable state and returns a `PhaseResult` with updated state + events. After all phases, the engine snapshots state into `SimulationLog` and advances to the next period.
+
+Key concepts:
+- **SimulationState** — frozen dataclass (inventory, in_transit, resources). Updated via `with_*` helpers that return new instances.
+- **Phase Protocol** — `should_run(period)` + `execute(state, resolved, period) → PhaseResult`.
+- **Schedule** — controls when phases fire (`every()`, `every_n(n)`, `custom(predicate)`).
+- **SimulationLog** — accumulates 5 output tables (inventory, flow, resource, unmet demand, rejected dispatches).
+
+> Full diagram: [`docs/diagrams/13_environment_engine.mermaid`](diagrams/13_environment_engine.mermaid)
+
+---
+
+## 14. Environment Phases — Per-Period Execution Detail
+
+**What to learn:** What happens inside each phase during a single period — data flow from state through DemandPhase, ArrivalsPhase, and DispatchPhase back to updated state.
+
+Three built-in phases execute in order within each period:
+
+1. **DemandPhase** — filters demand for current period, merges with inventory, computes fulfilled/deficit via `np.minimum()`, decrements inventory. Outputs flow events + unmet demand.
+2. **ArrivalsPhase** — filters in-transit shipments arriving this period, adds quantities to destination inventory, releases resources (IN_TRANSIT → AVAILABLE). Outputs flow events.
+3. **DispatchPhase(Task)** — delegates to a domain-specific Task that produces dispatches. Then: auto-assigns resources (greedy, compatible), validates dispatches (5 checks: arrival period, edge existence, resource availability, capacity, inventory sufficiency), applies valid ones (decrement inventory, add to in-transit, mark resources IN_TRANSIT). Rejected dispatches are logged with reason.
+
+Each phase returns a `PhaseResult` (updated state + events), which the engine feeds to the next phase and records in the log.
+
+> Full diagram: [`docs/diagrams/14_environment_phases.mermaid`](diagrams/14_environment_phases.mermaid)
+
+---
+
 ## Reading Order
 
 For a progressive understanding of the model, follow this path:
@@ -301,6 +333,8 @@ For a progressive understanding of the model, follow this path:
 | 10 | ER Diagram | Reference | All above |
 | 11 | Hierarchy | Advanced | #1, #3 |
 | 12 | I/O & Loaders | Advanced | #8 |
+| 13 | Environment Engine | Advanced | #9 |
+| 14 | Environment Phases | Advanced | #9, #13 |
 
 ---
 
@@ -315,3 +349,4 @@ For a progressive understanding of the model, follow this path:
 | 10 | `gbp.core.model`, `gbp.core.schemas` |
 | 11 | `gbp.core.schemas.hierarchy` |
 | 12 | `gbp.io`, `gbp.loaders` |
+| 13–14 | `gbp.consumers.simulator` |
