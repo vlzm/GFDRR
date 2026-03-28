@@ -1480,6 +1480,38 @@ other domains may use string facility_type/operation_type in schemas instead.</p
 
 </dd></dl>
 
+<dl class="py class">
+<dt class="sig sig-object py" id="gbp.core.enums.ResourceStatus">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">ResourceStatus</span></span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/enums.py#L68-L74"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.enums.ResourceStatus" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.Enum" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></a></p>
+<p>Runtime status of an individual resource instance (L3).</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbp.core.enums.ResourceStatus.AVAILABLE">
+<span class="sig-name descname"><span class="pre">AVAILABLE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'available'</span></span><a class="headerlink" href="#gbp.core.enums.ResourceStatus.AVAILABLE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbp.core.enums.ResourceStatus.IN_TRANSIT">
+<span class="sig-name descname"><span class="pre">IN_TRANSIT</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'in_transit'</span></span><a class="headerlink" href="#gbp.core.enums.ResourceStatus.IN_TRANSIT" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbp.core.enums.ResourceStatus.BUSY">
+<span class="sig-name descname"><span class="pre">BUSY</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'busy'</span></span><a class="headerlink" href="#gbp.core.enums.ResourceStatus.BUSY" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="gbp.core.enums.ResourceStatus.MAINTENANCE">
+<span class="sig-name descname"><span class="pre">MAINTENANCE</span></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'maintenance'</span></span><a class="headerlink" href="#gbp.core.enums.ResourceStatus.MAINTENANCE" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="gbp.core.enums.ResourceStatus.__new__">
+<span class="sig-name descname"><span class="pre">__new__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/../../../../../opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/enum.py#L1095-L1149"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.enums.ResourceStatus.__new__" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
 </section>
 <section id="facility-roles">
 <h2>Facility Roles<a class="headerlink" href="#facility-roles" title="Link to this heading">¶</a></h2>
@@ -4608,6 +4640,14 @@ attributes or non-standard grains.</p>
 <li><a class="reference internal" href="#gbp.core.enums.OperationType.HANDLING"><code class="docutils literal notranslate"><span class="pre">OperationType.HANDLING</span></code></a></li>
 <li><a class="reference internal" href="#gbp.core.enums.OperationType.REPAIR"><code class="docutils literal notranslate"><span class="pre">OperationType.REPAIR</span></code></a></li>
 <li><a class="reference internal" href="#gbp.core.enums.OperationType.__new__"><code class="docutils literal notranslate"><span class="pre">OperationType.__new__()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#gbp.core.enums.ResourceStatus"><code class="docutils literal notranslate"><span class="pre">ResourceStatus</span></code></a><ul>
+<li><a class="reference internal" href="#gbp.core.enums.ResourceStatus.AVAILABLE"><code class="docutils literal notranslate"><span class="pre">ResourceStatus.AVAILABLE</span></code></a></li>
+<li><a class="reference internal" href="#gbp.core.enums.ResourceStatus.IN_TRANSIT"><code class="docutils literal notranslate"><span class="pre">ResourceStatus.IN_TRANSIT</span></code></a></li>
+<li><a class="reference internal" href="#gbp.core.enums.ResourceStatus.BUSY"><code class="docutils literal notranslate"><span class="pre">ResourceStatus.BUSY</span></code></a></li>
+<li><a class="reference internal" href="#gbp.core.enums.ResourceStatus.MAINTENANCE"><code class="docutils literal notranslate"><span class="pre">ResourceStatus.MAINTENANCE</span></code></a></li>
+<li><a class="reference internal" href="#gbp.core.enums.ResourceStatus.__new__"><code class="docutils literal notranslate"><span class="pre">ResourceStatus.__new__()</span></code></a></li>
 </ul>
 </li>
 </ul>
