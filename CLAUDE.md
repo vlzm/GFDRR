@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Graph-Based Logistics Platform (`gbp`) — a universal graph-based logistics platform for network flow problems built on multi-commodity flow formulation. Domain-agnostic data model validated against bike-sharing (Citi Bike-style). Current phase: **Foundation** (stabilizing core library).
+Graph-Based Logistics Platform (`gbp`) — a universal graph-based logistics platform for network flow problems built on multi-commodity flow formulation. Domain-agnostic data model validated against bike-sharing (Citi Bike-style). Completed phases: **Foundation**, **Environment**. Next phase: **Rebalancer** (first real Task inside Environment).
 
 The core concept is **Environment** — a step-by-step simulation/digital twin. The Strategic Optimizer (LP/MILP) is a separate, later consumer. Both use the same `ResolvedModelData`.
 
@@ -61,12 +61,23 @@ gbp/
 │   ├── dataloader_graph.py  # Bike-sharing loader (main loader)
 │   ├── dataloader_mock.py   # Mock data for tests
 │   └── protocols.py         # BikeShareSourceProtocol
+├── consumers/         # Consumers of ResolvedModelData
+│   └── simulator/     # Environment — step-by-step simulation engine
+│       ├── state.py          # SimulationState (frozen), PeriodRow, init_state()
+│       ├── phases.py         # Phase Protocol, PhaseResult, Schedule
+│       ├── log.py            # SimulationLog (5 output tables), RejectReason
+│       ├── built_in_phases.py # DemandPhase, ArrivalsPhase
+│       ├── dispatch_phase.py  # DispatchPhase (validate + apply + auto-assign)
+│       ├── task.py           # Task Protocol, DISPATCH_COLUMNS
+│       ├── engine.py         # Environment class (run, step, step_phase)
+│       ├── config.py         # EnvironmentConfig
+│       └── tasks/            # Task implementations (noop.py, future: rebalancer)
 ├── io/                # Serialization (raw_to_dict / dict_to_raw, parquet)
 ├── loading/           # CSV loading utilities
-└── rebalancer/        # EARLY PROTOTYPE — PDP solver using OR-Tools (will be redesigned)
+└── rebalancer/        # EARLY PROTOTYPE — PDP solver using OR-Tools (will be redesigned as Task)
 ```
 
-**Test structure** mirrors source: `tests/unit/core/`, `tests/unit/build/`, `tests/unit/test_io/`, `tests/integration/`, plus top-level `tests/test_graph_loader.py` and `tests/test_rebalancer.py`.
+**Test structure** mirrors source: `tests/unit/core/`, `tests/unit/build/`, `tests/unit/consumers/simulator/`, `tests/unit/test_io/`, `tests/integration/`, plus top-level `tests/test_graph_loader.py` and `tests/test_rebalancer.py`.
 
 ## Data Model Invariants (NEVER VIOLATE)
 
@@ -90,10 +101,10 @@ gbp/
 
 ## AI Collaboration Rules
 
-- Provide skeletons with detailed TODO comments, NOT full implementations of core algorithms (solver formulation, simulation engine, VRP).
+- Provide skeletons with detailed TODO comments, NOT full implementations of core algorithms (solver formulation, VRP).
 - Refactoring, docstrings, boilerplate, and test scaffolds are OK to generate fully.
 - Always validate changes against the data model invariants above.
-- **Do NOT build or extend:** Environment engine, optimizer/solver, API, UI, Docker, database, cloud — these have their own future phases.
+- **Do NOT build or extend:** optimizer/solver, API, UI, Docker, database, cloud — these have their own future phases.
 - **After completing a task**, check if `PROJECT_STATE.md` should be updated (e.g. marking items as done, adding new findings). Update it if relevant.
 - **Verification notebook:** after completing a code task, create or update a notebook in `notebooks/verify/` that lets the user interactively test what changed. Keep cells minimal and focused — one cell per behavior. Name pattern: `NN_short_description.ipynb`. The user runs these by hand to build intuition. Notebooks must be in English (markdown cells, comments, print messages) — same rule as code.
 - **Language:** code, comments, docstrings — English only. Communication with the user — Russian.
@@ -103,6 +114,8 @@ gbp/
 - **Data model:** `gbp/core/model.py` + `gbp/core/schemas/`
 - **Build pipeline:** `gbp/build/pipeline.py`
 - **Attribute system:** `docs/design/attribute_system.md` + `gbp/core/attributes/`
+- **Environment:** `docs/design/environment_design.md` + `gbp/consumers/simulator/`
 - **Architecture diagrams:** `docs/architecture_diagrams.md`
+- **Storytelling guides:** `docs/story_telling/` (onboarding-friendly overviews of each design doc)
 - **Current project state:** `PROJECT_STATE.md`
 - **Design rationale:** `docs/design/graph_data_model.md`

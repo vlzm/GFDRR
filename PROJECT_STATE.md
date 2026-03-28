@@ -140,7 +140,8 @@ Step-by-step simulation engine поверх `ResolvedModelData`. Design doc: `do
 | Attribute system design | `docs/design/attribute_system.md` |
 | Environment design | `docs/design/environment_design.md` |
 | Environment code | `gbp/consumers/simulator/` (state, phases, engine, built_in_phases, dispatch_phase) |
-| Architecture overview (visual) | `docs/architecture_diagrams.md` |
+| Architecture overview (visual) | `docs/architecture_diagrams.md` (diagrams 13-14 for Environment) |
+| Storytelling guides (onboarding) | `docs/story_telling/` (01_graph_data_model, 02_attribute_system, 03_environment) |
 | Data journey end-to-end | `docs/DATA_JOURNEY.md` |
 | Refactoring plan | `docs/design/refactoring.md` |
 | Repository structure | `docs/repo_struct.md` |
