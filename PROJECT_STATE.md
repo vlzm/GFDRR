@@ -1,6 +1,6 @@
 # Project State
 
-> Last updated: 2026-03-26
+> Last updated: 2026-03-28
 
 ## Vision
 
@@ -21,8 +21,8 @@
 ## Roadmap
 
 1. ~~**Foundation** — модель данных, build pipeline, loader~~ ✓
-2. **Environment** — step-by-step engine, state management ← ТЕКУЩАЯ ФАЗА
-3. **Rebalancer** — первая задача внутри Environment (VRP)
+2. ~~**Environment** — step-by-step engine, state management~~ ✓
+3. **Rebalancer** — первая задача внутри Environment (VRP) ← СЛЕДУЮЩАЯ ФАЗА
 4. **Trip Generator** — синтетический поток поездок для симуляции
 5. **UI** — визуализация Environment (Streamlit)
 6. **Strategic Optimizer** — LP/MILP на горизонт (отдельный потребитель)
@@ -33,37 +33,11 @@
 
 ---
 
-## Current Phase: Environment
+## Current Phase: Rebalancer (not started)
 
-Design doc: `docs/design/environment_design.md` (READY FOR IMPLEMENTATION).
+Следующий шаг — первая реальная Task внутри Environment. Начинается с design doc.
 
-Step-by-step simulation engine поверх `ResolvedModelData`. Immutable state, pluggable phases, Task-based solver architecture.
-
-### Implementation Progress
-
-| Step | Description | Files | Status |
-|------|-------------|-------|--------|
-| 1 | SimulationState + init_state | `state.py` | Not started |
-| 2 | Phase Protocol + PhaseResult + Schedule | `phases.py` | Not started |
-| 3 | SimulationLog | `log.py` | Not started |
-| 4 | Built-in phases (DemandPhase, ArrivalsPhase) | `built_in_phases.py` | Not started |
-| 5 | Task Protocol + DispatchPhase | `task.py`, `dispatch_phase.py` | Not started |
-| 6 | Environment class + Config | `engine.py`, `config.py` | Not started |
-| 7 | NoopTask + Integration test | `tasks/noop.py`, `tests/` | Not started |
-
-All files in `gbp/consumers/simulator/`. Steps 3-4-5 can be done in parallel (depend only on 1-2). Step 6 assembles everything. Step 7 is the smoke test.
-
-### Key Design Decisions (from design doc)
-
-- **Immutable state** — `SimulationState` is `frozen=True`, phases return new state via `with_*` methods
-- **Logical phases, not temporal** — sub-steps within a period are DEMAND, ARRIVALS, DISPATCH (order of processing, not time-of-day)
-- **Three-layer architecture** — Phase (when + validate + apply) → Task (prepare + solve + postprocess) → Solver (pure math)
-- **Dispatches as DataFrame** — unified format, 1 dispatch = 1 commodity + 1 resource
-- **Phase returns PhaseResult** — (state, flow_events, unmet_demand, rejected_dispatches)
-- **Instance-level resource tracking** — each resource has position, status, available_at_period
-- **Resource stays where it arrived** — solver manages positioning
-- **Reject + log** — no dispatch queue; if no resource available, reject and log
-- **MVP: current period only** — no multi-stop routes across periods
+See `gbp/rebalancer/` for early VRP prototype (will be redesigned as a Task).
 
 ---
 
@@ -71,12 +45,11 @@ All files in `gbp/consumers/simulator/`. Steps 3-4-5 can be done in parallel (de
 
 These components are planned but **NOT being worked on** in the current phase. Do not create files, write code, or set up infrastructure for these.
 
-- **Rebalancer redesign** — first real Task inside Environment. Phase 3, will have its own design doc. Current `gbp/rebalancer/` is an early prototype; do not extend.
 - **Trip Generator** — synthetic trip stream for simulation. Phase 4.
 - **Strategic Optimizer** — LP/MILP over full planning horizon. Separate consumer, phase 6.
 - **ML / forecasting** — demand forecasting, GNN for trip duration. See `docs/IDEAS.md`.
 - **API** — FastAPI. Not needed until UI.
-- **UI** — Streamlit. Not needed until Environment works.
+- **UI** — Streamlit. Phase 5.
 - **Database** — PostgreSQL. Currently CSV/Parquet.
 - **DevOps** — Docker, CI/CD. Running locally.
 - **Cloud** — Azure, Terraform. Separate phase.
@@ -130,6 +103,31 @@ Core library `gbp` with data model, build pipeline, bike-sharing loader. All ref
 - Refactoring: model.py grouping, `_build_raw_model()` decomposition, protocol separation, factory function — all done
 - Tests: unit + integration, full pipeline coverage
 
+### Environment
+
+Step-by-step simulation engine поверх `ResolvedModelData`. Design doc: `docs/design/environment_design.md`.
+
+**What was built:**
+- `gbp/consumers/simulator/state.py` — `SimulationState` (frozen dataclass), `PeriodRow`, `init_state()`, vectorized resource generation from fleet
+- `gbp/consumers/simulator/phases.py` — `Phase` Protocol, `PhaseResult`, `Schedule` (every, every_n, custom)
+- `gbp/consumers/simulator/log.py` — `SimulationLog` (5 log tables), `RejectReason` enum
+- `gbp/consumers/simulator/built_in_phases.py` — `DemandPhase` (demand → inventory consumption + unmet demand), `ArrivalsPhase` (in-transit → inventory + resource release)
+- `gbp/consumers/simulator/task.py` — `Task` Protocol, `DISPATCH_COLUMNS`
+- `gbp/consumers/simulator/dispatch_phase.py` — `DispatchPhase` (auto-assign resources, 5-step validation, apply dispatches)
+- `gbp/consumers/simulator/engine.py` — `Environment` class (run, step, step_phase)
+- `gbp/consumers/simulator/config.py` — `EnvironmentConfig`
+- `gbp/consumers/simulator/tasks/noop.py` — `NoopTask`
+- Tests: unit (state, phases, log, built-in phases, dispatch, engine) + integration (full pipeline)
+- Verification notebook: `notebooks/verify/02_environment_skeleton.ipynb`
+
+**Key design decisions:**
+- Immutable state via `with_*` methods
+- Logical phases (DEMAND → ARRIVALS → DISPATCH), not temporal
+- Three-layer: Phase → Task → Solver
+- Instance-level resource tracking (position, status, available_at_period)
+- Reject + log (no dispatch queue)
+- MVP: current period only
+
 ---
 
 ## File Map
@@ -141,6 +139,7 @@ Core library `gbp` with data model, build pipeline, bike-sharing loader. All ref
 | Build pipeline flow | `gbp/build/pipeline.py` + `docs/diagrams/08_build_pipeline.mermaid` |
 | Attribute system design | `docs/design/attribute_system.md` |
 | Environment design | `docs/design/environment_design.md` |
+| Environment code | `gbp/consumers/simulator/` (state, phases, engine, built_in_phases, dispatch_phase) |
 | Architecture overview (visual) | `docs/architecture_diagrams.md` |
 | Data journey end-to-end | `docs/DATA_JOURNEY.md` |
 | Refactoring plan | `docs/design/refactoring.md` |

@@ -63,3 +63,12 @@ class OperationType(str, Enum):
     DISPATCH = "dispatch"
     HANDLING = "handling"
     REPAIR = "repair"
+
+
+class ResourceStatus(str, Enum):
+    """Runtime status of an individual resource instance (L3)."""
+
+    AVAILABLE = "available"
+    IN_TRANSIT = "in_transit"
+    BUSY = "busy"
+    MAINTENANCE = "maintenance"
