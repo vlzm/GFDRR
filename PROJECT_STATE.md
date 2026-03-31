@@ -1,6 +1,6 @@
 # Project State
 
-> Last updated: 2026-03-28
+> Last updated: 2026-03-31
 
 ## Vision
 
@@ -93,13 +93,15 @@ These decisions were made during collaborative design sessions and should not be
 Core library `gbp` with data model, build pipeline, bike-sharing loader. All refactoring steps completed.
 
 **What was built:**
-- `gbp/core` — RawModelData (~46 tables), ResolvedModelData (~52 tables), Pydantic schemas, grouped table access, `table_summary()`
+- `gbp/core` — RawModelData (~48 tables), ResolvedModelData (~54 tables), Pydantic schemas, grouped table access, `table_summary()`
 - `gbp/core/attributes` — AttributeRegistry with grain-aware registration, kind validation, grain groups, spine assembly
 - `gbp/build` — `build_model()` pipeline: validation → time resolution → edge building → lead times → transformations → fleet capacity → spines
 - `gbp/loaders` — DataLoaderMock, DataLoaderGraph, BikeShareSourceProtocol, GenericSourceProtocol
 - `gbp/core/factory` — `make_raw_model()` quick-start helper
 - `gbp/io` — Parquet + JSON serialization with AttributeRegistry support
 - `gbp/build/validation` — unit consistency, referential integrity, resource completeness, graph connectivity (BFS)
+- `gbp/core/schemas/observations.py` — ObservedFlow, ObservedInventory schemas
+- Observations (`observed_flow`, `observed_inventory`) integrated into model, build pipeline (time resolution, validation), and loader (trips → observed_flow, telemetry → observed_inventory, demand derivation)
 - Refactoring: model.py grouping, `_build_raw_model()` decomposition, protocol separation, factory function — all done
 - Tests: unit + integration, full pipeline coverage
 
@@ -137,6 +139,7 @@ Step-by-step simulation engine поверх `ResolvedModelData`. Design doc: `do
 | Table schemas and structure | `gbp/core/model.py` + `gbp/core/schemas/` |
 | Data model design rationale | `docs/design/graph_data_model.md` |
 | Build pipeline flow | `gbp/build/pipeline.py` + `docs/diagrams/08_build_pipeline.mermaid` |
+| Observations design | `docs/design/observations_design.md` |
 | Attribute system design | `docs/design/attribute_system.md` |
 | Environment design | `docs/design/environment_design.md` |
 | Environment code | `gbp/consumers/simulator/` (state, phases, engine, built_in_phases, dispatch_phase) |

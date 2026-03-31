@@ -37,6 +37,7 @@ from gbp.core.schemas.hierarchy import (
     FacilityHierarchyNode,
     FacilityHierarchyType,
 )
+from gbp.core.schemas.observations import ObservedFlow, ObservedInventory
 from gbp.core.schemas.output import (
     SimulationFlowLog,
     SimulationInventoryLog,
@@ -103,6 +104,8 @@ __all__ = [
     "FacilityRoleRecord",
     "InventoryInitial",
     "InventoryInTransit",
+    "ObservedFlow",
+    "ObservedInventory",
     "OperationCapacity",
     "OperationCost",
     "Period",

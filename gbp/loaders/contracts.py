@@ -24,6 +24,7 @@ class GraphLoaderConfig(BaseModel):
     distance_backend: Literal["haversine", "euclidean"] = "haversine"
     default_speed_kmh: float = Field(default=50.0, gt=0)
     build_edges: bool = True
+    build_observations: bool = True
 
 
 # =============================================================================
@@ -61,6 +62,18 @@ class ResourcesSourceSchema(pa.DataFrameModel):
 
     resource_id: Series[str] = pa.Field(unique=True, str_length={"min_value": 1})
     capacity: Series[int] = pa.Field(gt=0)
+
+    class Config:
+        strict = False
+        coerce = True
+
+
+class TripsSourceSchema(pa.DataFrameModel):
+    """Validates the trips DataFrame from a data source."""
+
+    started_at: Series  # type: ignore[type-arg]  # datetime, validated by coercion
+    start_station_id: Series[str] = pa.Field(str_length={"min_value": 1})
+    end_station_id: Series[str] = pa.Field(str_length={"min_value": 1})
 
     class Config:
         strict = False

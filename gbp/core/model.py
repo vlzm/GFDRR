@@ -15,6 +15,7 @@ Groups (in reading order):
     behavior     — roles, operations, availability, edge rules (4, 3 req.)
     edge         — edge identity and attributes (5 optional)
     flow_data    — demand, supply, inventory (4 optional)
+    observations  — historical flow and inventory (2 optional)
     transformation — N:M commodity conversion (3 optional)
     resource     — fleet, compatibility, availability (4 optional)
     hierarchy    — facility + commodity hierarchies (8 optional)
@@ -63,6 +64,8 @@ from gbp.core.schemas import (
     FacilityRoleRecord,
     InventoryInitial,
     InventoryInTransit,
+    ObservedFlow,
+    ObservedInventory,
     Period,
     PlanningHorizon,
     PlanningHorizonSegment,
@@ -280,6 +283,10 @@ class RawModelData:
     inventory_initial: pd.DataFrame | None = None
     inventory_in_transit: pd.DataFrame | None = None
 
+    # ── observations: historical flow and inventory ──────────────
+    observed_flow: pd.DataFrame | None = None
+    observed_inventory: pd.DataFrame | None = None
+
     # ── transformation: N:M commodity conversion ──────────────────────
     transformations: pd.DataFrame | None = None
     transformation_inputs: pd.DataFrame | None = None
@@ -333,6 +340,9 @@ class RawModelData:
         "flow_data": [
             "demand", "supply", "inventory_initial", "inventory_in_transit",
         ],
+        "observations": [
+            "observed_flow", "observed_inventory",
+        ],
         "transformation": [
             "transformations", "transformation_inputs", "transformation_outputs",
         ],
@@ -374,6 +384,8 @@ class RawModelData:
         "supply": Supply,
         "inventory_initial": InventoryInitial,
         "inventory_in_transit": InventoryInTransit,
+        "observed_flow": ObservedFlow,
+        "observed_inventory": ObservedInventory,
         "transformations": Transformation,
         "transformation_inputs": TransformationInput,
         "transformation_outputs": TransformationOutput,
@@ -433,6 +445,11 @@ class RawModelData:
     def flow_tables(self) -> dict[str, pd.DataFrame]:
         """Demand, supply, and inventory data."""
         return _collect_group(self, self._GROUPS["flow_data"])
+
+    @property
+    def observation_tables(self) -> dict[str, pd.DataFrame]:
+        """Observed (historical) flow and inventory data."""
+        return _collect_group(self, self._GROUPS["observations"])
 
     @property
     def transformation_tables(self) -> dict[str, pd.DataFrame]:
@@ -569,6 +586,10 @@ class ResolvedModelData:
     inventory_initial: pd.DataFrame | None = None
     inventory_in_transit: pd.DataFrame | None = None
 
+    # ── observations ─────────────────────────────────────────────────
+    observed_flow: pd.DataFrame | None = None
+    observed_inventory: pd.DataFrame | None = None
+
     # ── transformation ────────────────────────────────────────────────
     transformations: pd.DataFrame | None = None
     transformation_inputs: pd.DataFrame | None = None
@@ -654,6 +675,11 @@ class ResolvedModelData:
     def flow_tables(self) -> dict[str, pd.DataFrame]:
         """Demand, supply, and inventory data."""
         return _collect_group(self, self._GROUPS["flow_data"])
+
+    @property
+    def observation_tables(self) -> dict[str, pd.DataFrame]:
+        """Observed (historical) flow and inventory data."""
+        return _collect_group(self, self._GROUPS["observations"])
 
     @property
     def transformation_tables(self) -> dict[str, pd.DataFrame]:
@@ -810,6 +836,10 @@ class ResolvedModelData:
             supply=_coalesce("supply", raw.supply),
             inventory_initial=raw.inventory_initial,
             inventory_in_transit=raw.inventory_in_transit,
+            observed_flow=_coalesce("observed_flow", raw.observed_flow),
+            observed_inventory=_coalesce(
+                "observed_inventory", raw.observed_inventory,
+            ),
             facility_hierarchy_types=raw.facility_hierarchy_types,
             facility_hierarchy_levels=raw.facility_hierarchy_levels,
             facility_hierarchy_nodes=raw.facility_hierarchy_nodes,

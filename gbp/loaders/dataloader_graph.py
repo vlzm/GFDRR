@@ -1,9 +1,8 @@
 """Assemble ``RawModelData`` from a ``DataSourceProtocol`` and run ``gbp.build.build_model``.
 
-This module only produces what lives in ``gbp.core`` / ``gbp.build``: validated
-``RawModelData``, then ``ResolvedModelData``.  Extra wide tables from the source
-(telemetry, trips, hourly inventory matrix, etc.) are **not** part of that model;
-read them from ``loader.source`` (the same object passed into the constructor).
+Trips and telemetry from the source are mapped to ``observed_flow`` and
+``observed_inventory`` tables in the model.  Other wide tables (hourly
+inventory matrix) remain on ``loader.source``.
 
 Usage::
 
@@ -34,6 +33,7 @@ from .contracts import (
     GraphLoaderConfig,
     ResourcesSourceSchema,
     StationsSourceSchema,
+    TripsSourceSchema,
 )
 from .protocols import BikeShareSourceProtocol
 
@@ -147,6 +147,8 @@ class DataLoaderGraph:
         StationsSourceSchema.validate(self._source.df_stations)
         DepotsSourceSchema.validate(self._source.df_depots)
         ResourcesSourceSchema.validate(self._source.df_resources)
+        if self._config.build_observations:
+            TripsSourceSchema.validate(self._source.df_trips)
         self._log.debug("source_validated")
 
     # ------------------------------------------------------------------
@@ -161,6 +163,15 @@ class DataLoaderGraph:
         edge_data = self._build_edges(entities) if self._config.build_edges else {}
         resources = self._build_resources(entities)
 
+        observations: dict[str, pd.DataFrame | None] = {}
+        if self._config.build_observations:
+            observations = self._build_observations(entities)
+            obs_flow = observations.get("observed_flow")
+            if obs_flow is not None and not obs_flow.empty:
+                demand = self._build_demand_from_observations(obs_flow)
+                if demand is not None:
+                    observations["demand"] = demand
+
         registry = AttributeRegistry()
         node_params = self._build_node_parameters(entities, registry)
         self._register_costs(registry, temporal)
@@ -173,6 +184,7 @@ class DataLoaderGraph:
             **edge_data,
             **node_params,
             **resources,
+            **{k: v for k, v in observations.items() if v is not None},
         }
         return RawModelData(
             **{k: v for k, v in all_tables.items() if v is not None},
@@ -514,3 +526,99 @@ class DataLoaderGraph:
                     aggregation="mean",
                     unit="USD",
                 )
+
+    # ------------------------------------------------------------------
+    # Internal — observations (trips / telemetry → observed_flow / observed_inventory)
+    # ------------------------------------------------------------------
+
+    def _build_observations(
+        self, entities: _EntityResult,
+    ) -> dict[str, pd.DataFrame | None]:
+        """Map trips → observed_flow and telemetry → observed_inventory."""
+        known_ids = set(entities.station_ids) | set(entities.depot_ids)
+        result: dict[str, pd.DataFrame | None] = {}
+
+        # ── trips → observed_flow ────────────────────────────────────
+        df_trips = self._source.df_trips
+        if df_trips is not None and not df_trips.empty:
+            trips = df_trips[["start_station_id", "end_station_id", "started_at"]].copy()
+            trips = trips.rename(columns={
+                "start_station_id": "source_id",
+                "end_station_id": "target_id",
+            })
+            trips["date"] = pd.to_datetime(trips["started_at"]).dt.date
+            trips["commodity_category"] = COMMODITY_CATEGORY
+            trips["quantity"] = 1.0
+            trips["quantity_unit"] = "bike"
+            trips["modal_type"] = None
+            trips["resource_id"] = None
+
+            mask = trips["source_id"].isin(known_ids) & trips["target_id"].isin(known_ids)
+            trips = trips.loc[mask]
+
+            if not trips.empty:
+                grain = ["source_id", "target_id", "commodity_category", "date"]
+                agg = trips.groupby(grain, as_index=False).agg(
+                    quantity=("quantity", "sum"),
+                    quantity_unit=("quantity_unit", "first"),
+                    modal_type=("modal_type", "first"),
+                    resource_id=("resource_id", "first"),
+                )
+                result["observed_flow"] = agg
+                n = len(agg)
+                self._log.debug("observed_flow_built", rows=n)
+            else:
+                result["observed_flow"] = None
+        else:
+            result["observed_flow"] = None
+
+        # ── telemetry → observed_inventory ───────────────────────────
+        df_tel = self._source.df_telemetry_ts
+        if df_tel is not None and not df_tel.empty:
+            tel = df_tel[["station_id", "timestamp", "num_bikes_available"]].copy()
+            tel = tel.rename(columns={
+                "station_id": "facility_id",
+                "num_bikes_available": "quantity",
+            })
+            tel["date"] = pd.to_datetime(tel["timestamp"]).dt.date
+            tel["commodity_category"] = COMMODITY_CATEGORY
+            tel["quantity_unit"] = "bike"
+            tel["quantity"] = tel["quantity"].astype(float)
+
+            tel = tel.loc[tel["facility_id"].isin(known_ids)]
+
+            if not tel.empty:
+                grain = ["facility_id", "commodity_category", "date"]
+                agg = tel.groupby(grain, as_index=False).agg(
+                    quantity=("quantity", "mean"),
+                    quantity_unit=("quantity_unit", "first"),
+                )
+                result["observed_inventory"] = agg
+                n = len(agg)
+                self._log.debug("observed_inventory_built", rows=n)
+            else:
+                result["observed_inventory"] = None
+        else:
+            result["observed_inventory"] = None
+
+        return result
+
+    @staticmethod
+    def _build_demand_from_observations(
+        observed_flow: pd.DataFrame,
+    ) -> pd.DataFrame | None:
+        """Derive demand from observed_flow (departures per facility per date).
+
+        Only organic flows (resource_id is null) are counted.
+        """
+        mask = observed_flow["resource_id"].isna()
+        df = observed_flow.loc[mask]
+        if df.empty:
+            return None
+
+        demand = (
+            df.groupby(["source_id", "date", "commodity_category"], as_index=False)
+            .agg(quantity=("quantity", "sum"), quantity_unit=("quantity_unit", "first"))
+            .rename(columns={"source_id": "facility_id"})
+        )
+        return demand

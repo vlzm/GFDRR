@@ -227,6 +227,62 @@ class TestSourceExposed:
 # =============================================================================
 
 
+class TestObservations:
+    """Observed flow and inventory built from trips/telemetry."""
+
+    def test_observed_flow_populated(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        raw = loaded_graph_loader.raw
+        assert raw.observed_flow is not None
+        assert not raw.observed_flow.empty
+        expected = {
+            "source_id", "target_id", "commodity_category",
+            "date", "quantity", "quantity_unit",
+        }
+        assert expected.issubset(raw.observed_flow.columns)
+
+    def test_observed_inventory_populated(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        raw = loaded_graph_loader.raw
+        assert raw.observed_inventory is not None
+        assert not raw.observed_inventory.empty
+        expected = {
+            "facility_id", "commodity_category",
+            "date", "quantity", "quantity_unit",
+        }
+        assert expected.issubset(raw.observed_inventory.columns)
+
+    def test_demand_derived_from_observations(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        raw = loaded_graph_loader.raw
+        assert raw.demand is not None
+        assert not raw.demand.empty
+
+    def test_observed_flow_references_known_facilities(
+        self, loaded_graph_loader: DataLoaderGraph,
+    ) -> None:
+        raw = loaded_graph_loader.raw
+        known = set(raw.facilities["facility_id"])
+        assert raw.observed_flow is not None
+        assert set(raw.observed_flow["source_id"]).issubset(known)
+        assert set(raw.observed_flow["target_id"]).issubset(known)
+
+    def test_build_observations_false(self, mock_config: dict) -> None:
+        mock = DataLoaderMock(mock_config)
+        loader = DataLoaderGraph(mock, GraphLoaderConfig(build_observations=False))
+        loader.load_data()
+        assert loader.raw.observed_flow is None
+        assert loader.raw.observed_inventory is None
+
+    def test_resolved_observations_have_period_id(
+        self, loaded_graph_loader: DataLoaderGraph,
+    ) -> None:
+        res = loaded_graph_loader.resolved
+        if res.observed_flow is not None and not res.observed_flow.empty:
+            assert "period_id" in res.observed_flow.columns
+            assert "date" not in res.observed_flow.columns
+        if res.observed_inventory is not None and not res.observed_inventory.empty:
+            assert "period_id" in res.observed_inventory.columns
+            assert "date" not in res.observed_inventory.columns
+
+
 class TestCoreTableAccess:
     def test_operation_capacities_for_stations(self, loaded_graph_loader: DataLoaderGraph) -> None:
         assert "operation_capacity" in loaded_graph_loader.raw.attributes
