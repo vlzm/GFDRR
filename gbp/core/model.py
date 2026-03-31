@@ -114,6 +114,97 @@ def _collect_group(obj: object, field_names: list[str]) -> dict[str, pd.DataFram
     return result
 
 
+def _compact_repr(obj: object, groups: dict[str, list[str]], required: frozenset[str]) -> str:
+    """One-line-per-table repr: ``ClassName(tables=N, rows=M)`` + detail lines."""
+    cls_name = type(obj).__name__
+    table_count = 0
+    total_rows = 0
+    detail_parts: list[str] = []
+
+    for group_name, field_names in groups.items():
+        items: list[str] = []
+        for fname in field_names:
+            val = getattr(obj, fname, None)
+            if val is not None and isinstance(val, pd.DataFrame):
+                table_count += 1
+                total_rows += len(val)
+                items.append(f"{fname}={len(val)}")
+        if items:
+            detail_parts.append(f"  {group_name}: {', '.join(items)}")
+
+    # Include registry attribute count
+    attrs = getattr(obj, "attributes", None)
+    n_attrs = len(attrs) if attrs else 0
+    if n_attrs:
+        detail_parts.append(f"  attributes: {n_attrs} registered")
+
+    header = f"{cls_name}(tables={table_count}, total_rows={total_rows})"
+    if detail_parts:
+        return header + "\n" + "\n".join(detail_parts)
+    return header
+
+
+def _compact_repr_html(
+    obj: object, groups: dict[str, list[str]], required: frozenset[str],
+) -> str:
+    """HTML table for rich Jupyter display."""
+    cls_name = type(obj).__name__
+    rows_html: list[str] = []
+
+    for group_name, field_names in groups.items():
+        first_in_group = True
+        group_size = sum(
+            1 for f in field_names
+            if getattr(obj, f, None) is not None and isinstance(getattr(obj, f), pd.DataFrame)
+        )
+        for fname in field_names:
+            val = getattr(obj, fname, None)
+            if val is not None and isinstance(val, pd.DataFrame):
+                n_rows = len(val)
+                cols = ", ".join(val.columns[:6])
+                if len(val.columns) > 6:
+                    cols += f", ... (+{len(val.columns) - 6})"
+                tag = " *" if fname in required else ""
+                group_cell = (
+                    f'<td rowspan="{group_size}" '
+                    f'style="vertical-align:top;font-weight:bold;background:#f0f0f0">'
+                    f"{group_name}</td>"
+                    if first_in_group else ""
+                )
+                rows_html.append(
+                    f"<tr>{group_cell}"
+                    f"<td>{fname}{tag}</td>"
+                    f"<td style='text-align:right'>{n_rows}</td>"
+                    f"<td><code style='font-size:0.85em'>{cols}</code></td>"
+                    f"</tr>"
+                )
+                first_in_group = False
+
+    attrs = getattr(obj, "attributes", None)
+    n_attrs = len(attrs) if attrs else 0
+    if n_attrs:
+        rows_html.append(
+            f"<tr><td style='font-weight:bold;background:#f0f0f0'>parameters</td>"
+            f"<td colspan='3'>{n_attrs} attributes registered</td></tr>"
+        )
+
+    total_tables = sum(
+        1 for g in groups.values() for f in g
+        if getattr(obj, f, None) is not None and isinstance(getattr(obj, f), pd.DataFrame)
+    )
+
+    return (
+        f"<div><strong>{cls_name}</strong> "
+        f"<span style='color:#666'>({total_tables} tables)</span>"
+        f"<table style='margin-top:4px;border-collapse:collapse;font-size:0.9em'>"
+        f"<tr style='border-bottom:1px solid #ccc'>"
+        f"<th>Group</th><th>Table</th><th>Rows</th><th>Columns</th></tr>"
+        + "\n".join(rows_html)
+        + "</table>"
+        + "<span style='font-size:0.8em;color:#999'>* = required</span></div>"
+    )
+
+
 def _table_summary(obj: object, groups: dict[str, list[str]], required: frozenset[str]) -> str:
     """Human-readable overview: group → table (rows) or '—'."""
     lines: list[str] = []
@@ -401,6 +492,14 @@ class RawModelData:
             summary += "\n    (no attributes registered)"
         return summary
 
+    # ── display ─────────────────────────────────────────────────────────
+
+    def __repr__(self) -> str:
+        return _compact_repr(self, self._GROUPS, self._REQUIRED)
+
+    def _repr_html_(self) -> str:
+        return _compact_repr_html(self, self._GROUPS, self._REQUIRED)
+
     # ── validation ────────────────────────────────────────────────────
 
     def validate(self) -> None:
@@ -623,6 +722,14 @@ class ResolvedModelData:
             summary += f"\n  {'─' * 31}"
             summary += "\n    (no attributes registered)"
         return summary
+
+    # ── display ─────────────────────────────────────────────────────────
+
+    def __repr__(self) -> str:
+        return _compact_repr(self, self._GROUPS, self._REQUIRED)
+
+    def _repr_html_(self) -> str:
+        return _compact_repr_html(self, self._GROUPS, self._REQUIRED)
 
     # ── factory ────────────────────────────────────────────────────────
 

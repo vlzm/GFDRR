@@ -162,7 +162,7 @@ class DataLoaderGraph:
         resources = self._build_resources(entities)
 
         registry = AttributeRegistry()
-        flow_data = self._build_flow_data(entities, registry)
+        node_params = self._build_node_parameters(entities, registry)
         self._register_costs(registry, temporal)
         self._register_resource_costs(registry, entities)
 
@@ -171,7 +171,7 @@ class DataLoaderGraph:
             **entities.tables,
             **behavior,
             **edge_data,
-            **flow_data,
+            **node_params,
             **resources,
         }
         return RawModelData(
@@ -361,12 +361,12 @@ class DataLoaderGraph:
             "edge_commodities": pd.DataFrame(ec_records),
         }
 
-    def _build_flow_data(
+    def _build_node_parameters(
         self,
         entities: _EntityResult,
         registry: AttributeRegistry,
     ) -> dict[str, pd.DataFrame]:
-        """Initial inventory and operation capacities from source."""
+        """Initial inventory and storage capacities from source."""
         station_ids = entities.station_ids
         stations = self._source.df_stations
 

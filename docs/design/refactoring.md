@@ -72,7 +72,7 @@ def _build_raw_model(self) -> RawModelData:
     entities = self._build_entities()
     behavior = self._build_behavior(entities)
     edges_data = self._build_edges(entities) if self._config.build_edges else {}
-    flow = self._build_flow_data(entities, temporal)
+    flow = self._build_node_parameters(entities, temporal)
     resources = self._build_resources(entities)
 
     registry = AttributeRegistry()
@@ -89,7 +89,7 @@ Methods:
 - `_build_entities()` — facilities, commodity_categories, resource_categories
 - `_build_behavior(entities)` — facility_roles, facility_operations, edge_rules
 - `_build_edges(entities)` — edges, edge_commodities (with haversine distance)
-- `_build_flow_data(entities, temporal)` — demand, inventory_initial
+- `_build_node_parameters(entities, temporal)` — demand, inventory_initial
 - `_build_resources(entities)` — resource_fleet, resource_commodity_compatibility, resource_modal_compatibility
 - `_register_costs(registry, temporal)` — registers operation_cost, transport_cost
 - `_register_resource_costs(registry, entities)` — registers resource_fixed_cost, resource_maintenance_cost
