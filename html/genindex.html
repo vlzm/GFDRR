@@ -455,15 +455,17 @@
 </li>
         <li><a href="modules/core.html#gbp.core.schemas.transformation.Transformation.batch_size_unit">batch_size_unit (Transformation attribute)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.model.RawModelData.behavior_tables">behavior_tables (RawModelData property)</a>
 
         <ul>
           <li><a href="modules/core.html#gbp.core.model.ResolvedModelData.behavior_tables">(ResolvedModelData property)</a>
 </li>
         </ul></li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/loaders.html#gbp.loaders.contracts.GraphLoaderConfig.build_edges">build_edges (GraphLoaderConfig attribute)</a>
+</li>
+        <li><a href="modules/loaders.html#gbp.loaders.contracts.GraphLoaderConfig.build_observations">build_observations (GraphLoaderConfig attribute)</a>
 </li>
         <li><a href="modules/core.html#gbp.core.attributes.builder.AttributeBuilder.build_spines">build_spines() (AttributeBuilder method)</a>
 </li>
@@ -513,6 +515,8 @@
           <li><a href="modules/rebalancer.html#gbp.rebalancer.contracts.RouteSchema.Config.coerce">(RouteSchema.Config attribute)</a>
 </li>
           <li><a href="modules/loaders.html#gbp.loaders.contracts.StationsSourceSchema.Config.coerce">(StationsSourceSchema.Config attribute)</a>
+</li>
+          <li><a href="modules/loaders.html#gbp.loaders.contracts.TripsSourceSchema.Config.coerce">(TripsSourceSchema.Config attribute)</a>
 </li>
         </ul></li>
         <li><a href="modules/core.html#gbp.core.model.RawModelData.commodities">commodities (RawModelData attribute)</a>
@@ -829,14 +833,14 @@
 </li>
         <li><a href="modules/core.html#gbp.core.schemas.behavior.EdgeRule">EdgeRule (class in gbp.core.schemas.behavior)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.model.RawModelData.edges">edges (RawModelData attribute)</a>
 
         <ul>
           <li><a href="modules/core.html#gbp.core.model.ResolvedModelData.edges">(ResolvedModelData attribute)</a>
 </li>
         </ul></li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.schemas.edge.EdgeVehicle">EdgeVehicle (class in gbp.core.schemas.edge)</a>
 </li>
         <li><a href="modules/core.html#gbp.core.schemas.edge.EdgeCommodity.enabled">enabled (EdgeCommodity attribute)</a>
@@ -861,6 +865,8 @@
           <li><a href="modules/core.html#gbp.core.schemas.temporal.PlanningHorizonSegment.end_date">(PlanningHorizonSegment attribute)</a>
 </li>
         </ul></li>
+        <li><a href="modules/loaders.html#gbp.loaders.contracts.TripsSourceSchema.end_station_id">end_station_id (TripsSourceSchema attribute)</a>
+</li>
         <li><a href="modules/core.html#gbp.core.attributes.builder.AttributeBuilder.entity_grain">entity_grain (AttributeBuilder property)</a>
 
         <ul>
@@ -1722,6 +1728,8 @@
 </li>
           <li><a href="modules/loaders.html#gbp.loaders.contracts.StationsSourceSchema.Config.name">(StationsSourceSchema.Config attribute)</a>
 </li>
+          <li><a href="modules/loaders.html#gbp.loaders.contracts.TripsSourceSchema.Config.name">(TripsSourceSchema.Config attribute)</a>
+</li>
           <li><a href="modules/rebalancer.html#gbp.rebalancer.contracts.UpdatedInventorySchema.Config.name">(UpdatedInventorySchema.Config attribute)</a>
 </li>
         </ul></li>
@@ -1773,8 +1781,28 @@
     <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.schemas.output.SolutionMetadata.objective_value">objective_value (SolutionMetadata attribute)</a>
 </li>
+        <li><a href="modules/core.html#gbp.core.model.RawModelData.observation_tables">observation_tables (RawModelData property)</a>
+
+        <ul>
+          <li><a href="modules/core.html#gbp.core.model.ResolvedModelData.observation_tables">(ResolvedModelData property)</a>
+</li>
+        </ul></li>
+        <li><a href="modules/core.html#gbp.core.model.RawModelData.observed_flow">observed_flow (RawModelData attribute)</a>
+
+        <ul>
+          <li><a href="modules/core.html#gbp.core.model.ResolvedModelData.observed_flow">(ResolvedModelData attribute)</a>
+</li>
+        </ul></li>
+        <li><a href="modules/core.html#gbp.core.model.RawModelData.observed_inventory">observed_inventory (RawModelData attribute)</a>
+
+        <ul>
+          <li><a href="modules/core.html#gbp.core.model.ResolvedModelData.observed_inventory">(ResolvedModelData attribute)</a>
+</li>
+        </ul></li>
         <li><a href="modules/rebalancer.html#gbp.rebalancer.contracts.UpdatedInventorySchema.old_quantity">old_quantity (UpdatedInventorySchema attribute)</a>
 </li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.schemas.behavior.FacilityOperation.operation_type">operation_type (FacilityOperation attribute)</a>
 
         <ul>
@@ -1785,8 +1813,6 @@
           <li><a href="modules/core.html#gbp.core.schemas.transformation.Transformation.operation_type">(Transformation attribute)</a>
 </li>
         </ul></li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.schemas.parameters.OperationCapacity">OperationCapacity (class in gbp.core.schemas.parameters)</a>
 </li>
         <li><a href="modules/core.html#gbp.core.schemas.parameters.OperationCost">OperationCost (class in gbp.core.schemas.parameters)</a>
@@ -2233,10 +2259,10 @@
 </li>
         <li><a href="modules/core.html#gbp.core.schemas.output.SolutionUnmetDemand">SolutionUnmetDemand (class in gbp.core.schemas.output)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.schemas.output.SolutionMetadata.solve_time_seconds">solve_time_seconds (SolutionMetadata attribute)</a>
 </li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.schemas.output.SolutionMetadata.solve_timestamp">solve_timestamp (SolutionMetadata attribute)</a>
 </li>
         <li><a href="modules/core.html#gbp.core.schemas.output.SolutionMetadata.solver_status">solver_status (SolutionMetadata attribute)</a>
@@ -2295,6 +2321,10 @@
           <li><a href="modules/core.html#gbp.core.schemas.temporal.PlanningHorizonSegment.start_date">(PlanningHorizonSegment attribute)</a>
 </li>
         </ul></li>
+        <li><a href="modules/loaders.html#gbp.loaders.contracts.TripsSourceSchema.start_station_id">start_station_id (TripsSourceSchema attribute)</a>
+</li>
+        <li><a href="modules/loaders.html#gbp.loaders.contracts.TripsSourceSchema.started_at">started_at (TripsSourceSchema attribute)</a>
+</li>
         <li><a href="modules/core.html#gbp.core.enums.FacilityType.STATION">STATION (FacilityType attribute)</a>
 </li>
         <li><a href="modules/loaders.html#gbp.loaders.contracts.StationsSourceSchema">StationsSourceSchema (class in gbp.loaders.contracts)</a>
@@ -2321,6 +2351,8 @@
           <li><a href="modules/rebalancer.html#gbp.rebalancer.contracts.RouteSchema.Config.strict">(RouteSchema.Config attribute)</a>
 </li>
           <li><a href="modules/loaders.html#gbp.loaders.contracts.StationsSourceSchema.Config.strict">(StationsSourceSchema.Config attribute)</a>
+</li>
+          <li><a href="modules/loaders.html#gbp.loaders.contracts.TripsSourceSchema.Config.strict">(TripsSourceSchema.Config attribute)</a>
 </li>
         </ul></li>
         <li><a href="modules/core.html#gbp.core.attributes.registry.AttributeRegistry.summary">summary() (AttributeRegistry method)</a>
@@ -2393,10 +2425,10 @@
         </ul></li>
         <li><a href="modules/rebalancer.html#gbp.rebalancer.contracts.RebalancerConfig.time_limit_seconds">time_limit_seconds (RebalancerConfig attribute)</a>
 </li>
-    </ul></td>
-    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.attributes.spec.AttributeSpec.time_varying">time_varying (AttributeSpec property)</a>
 </li>
+    </ul></td>
+    <td style="width: 33%; vertical-align: top;"><ul>
         <li><a href="modules/core.html#gbp.core.attributes.registry.AttributeRegistry.to_dict">to_dict() (AttributeRegistry method)</a>
 </li>
         <li><a href="modules/core.html#gbp.core.schemas.output.SimulationMetadata.total_cost">total_cost (SimulationMetadata attribute)</a>
@@ -2448,6 +2480,10 @@
         <li><a href="modules/core.html#gbp.core.enums.FacilityRole.TRANSSHIPMENT">TRANSSHIPMENT (FacilityRole attribute)</a>
 </li>
         <li><a href="modules/core.html#gbp.core.schemas.output.SimulationResourceLog.trips_completed">trips_completed (SimulationResourceLog attribute)</a>
+</li>
+        <li><a href="modules/loaders.html#gbp.loaders.contracts.TripsSourceSchema">TripsSourceSchema (class in gbp.loaders.contracts)</a>
+</li>
+        <li><a href="modules/loaders.html#gbp.loaders.contracts.TripsSourceSchema.Config">TripsSourceSchema.Config (class in gbp.loaders.contracts)</a>
 </li>
     </ul></td>
   </tr></table>
