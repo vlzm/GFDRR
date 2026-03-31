@@ -456,8 +456,8 @@
 <h3>3.4. <code class="docutils literal notranslate"><span class="pre">_build_edges()</span></code> — рёбра графа<a class="headerlink" href="#build-edges" title="Link to this heading">¶</a></h3>
 <p>90 рёбер (10 x 9), каждое с distance (haversine) и lead_time_hours (distance / 50 км/ч). Плюс edge_commodities — working_bike разрешён на каждом ребре.</p>
 </section>
-<section id="build-flow-data">
-<h3>3.5. <code class="docutils literal notranslate"><span class="pre">_build_flow_data()</span></code> — начальный инвентарь (структурное)<a class="headerlink" href="#build-flow-data" title="Link to this heading">¶</a></h3>
+<section id="build-node-parameters">
+<h3>3.5. <code class="docutils literal notranslate"><span class="pre">_build_node_parameters()</span></code> — начальный инвентарь (структурное)<a class="headerlink" href="#build-node-parameters" title="Link to this heading">¶</a></h3>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">inventory_initial</span> <span class="p">(</span><span class="mi">8</span> <span class="n">строк</span><span class="p">):</span>
   <span class="n">facility_id</span> <span class="o">|</span> <span class="n">commodity_category</span> <span class="o">|</span> <span class="n">quantity</span>
   <span class="o">------------|--------------------|---------</span>
@@ -504,7 +504,7 @@
     <span class="n">entities</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_entities</span><span class="p">()</span>
     <span class="n">behavior</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_behavior</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
     <span class="n">edge_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_edges</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
-    <span class="n">flow</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_flow_data</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
+    <span class="n">flow</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_node_parameters</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
 
     <span class="c1"># Структурные таблицы -&gt; RawModelData</span>
     <span class="n">raw</span> <span class="o">=</span> <span class="n">RawModelData</span><span class="p">(</span><span class="o">**</span><span class="p">{</span><span class="o">**</span><span class="n">temporal</span><span class="p">,</span> <span class="o">**</span><span class="n">entities</span><span class="o">.</span><span class="n">tables</span><span class="p">,</span> <span class="o">**</span><span class="n">behavior</span><span class="p">,</span> <span class="o">**</span><span class="n">edge_data</span><span class="p">,</span> <span class="o">**</span><span class="n">flow</span><span class="p">})</span>
@@ -666,7 +666,7 @@
   <span class="o">|</span>  <span class="n">_build_entities</span><span class="p">()</span>           <span class="o">=</span> <span class="n">registry</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>            <span class="p">(</span><span class="n">registry</span><span class="o">.</span><span class="n">specs</span>
   <span class="o">|</span>  <span class="n">_build_behavior</span><span class="p">()</span>                                            <span class="o">+</span> <span class="n">structural</span> <span class="n">specs</span><span class="p">)</span>
   <span class="o">|</span>  <span class="n">_build_edges</span><span class="p">()</span>            <span class="n">registry</span><span class="o">.</span><span class="n">register</span><span class="p">()</span>                      <span class="o">|</span>
-  <span class="o">|</span>  <span class="n">_build_flow_data</span><span class="p">()</span>        <span class="n">registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>                       <span class="n">v</span>
+  <span class="o">|</span>  <span class="n">_build_node_parameters</span><span class="p">()</span>        <span class="n">registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>                       <span class="n">v</span>
   <span class="o">|</span> <span class="n">параметрические</span><span class="p">:</span>           <span class="n">registry</span><span class="o">.</span><span class="n">get_by_kind</span><span class="p">(</span><span class="n">COST</span><span class="p">)</span>      <span class="n">ResolvedModelData</span>
   <span class="o">|</span>  <span class="n">_register_costs</span><span class="p">()</span>                                           <span class="o">+</span> <span class="n">resolved</span> <span class="n">registry</span>
   <span class="o">|</span>  <span class="n">_register_capacities</span><span class="p">()</span>                                      <span class="o">+</span> <span class="n">spines</span>
@@ -828,7 +828,7 @@
 <li><a class="reference internal" href="#build-entities">3.2. <code class="docutils literal notranslate"><span class="pre">_build_entities()</span></code> — объекты сети</a></li>
 <li><a class="reference internal" href="#build-behavior">3.3. <code class="docutils literal notranslate"><span class="pre">_build_behavior()</span></code> — роли и операции</a></li>
 <li><a class="reference internal" href="#build-edges">3.4. <code class="docutils literal notranslate"><span class="pre">_build_edges()</span></code> — рёбра графа</a></li>
-<li><a class="reference internal" href="#build-flow-data">3.5. <code class="docutils literal notranslate"><span class="pre">_build_flow_data()</span></code> — начальный инвентарь (структурное)</a></li>
+<li><a class="reference internal" href="#build-node-parameters">3.5. <code class="docutils literal notranslate"><span class="pre">_build_node_parameters()</span></code> — начальный инвентарь (структурное)</a></li>
 <li><a class="reference internal" href="#register-costs-register-capacities-registry">3.6. <code class="docutils literal notranslate"><span class="pre">_register_costs()</span></code> и <code class="docutils literal notranslate"><span class="pre">_register_capacities()</span></code> — параметры через registry</a></li>
 <li><a class="reference internal" href="#build-raw-model">3.7. Оркестратор: <code class="docutils literal notranslate"><span class="pre">_build_raw_model()</span></code></a></li>
 <li><a class="reference internal" href="#table-summary">3.8. Итог: table_summary()</a></li>

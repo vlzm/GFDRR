@@ -432,7 +432,7 @@ spines       — assembled attribute spines per entity type</p>
 </dl>
 <dl class="py class">
 <dt class="sig sig-object py" id="gbp.core.model.RawModelData">
-<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">RawModelData</span></span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L144-L422"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.RawModelData" title="Link to this definition">¶</a></dt>
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">RawModelData</span></span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L235-L521"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.RawModelData" title="Link to this definition">¶</a></dt>
 <dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
 <p>Raw input tables keyed by <code class="docutils literal notranslate"><span class="pre">date</span></code> where time-varying (pre-resolution).</p>
 <p>Tables are organized into logical groups — see module docstring.
@@ -733,7 +733,7 @@ arguments, so this reordering does not break any call site.</p>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="gbp.core.model.RawModelData.table_summary">
-<span class="sig-name descname"><span class="pre">table_summary</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L386-L402"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.RawModelData.table_summary" title="Link to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">table_summary</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L477-L493"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.RawModelData.table_summary" title="Link to this definition">¶</a></dt>
 <dd><p>Human-readable overview of populated tables, grouped logically.</p>
 <p>Usage:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">raw</span><span class="o">.</span><span class="n">table_summary</span><span class="p">())</span>
@@ -748,7 +748,7 @@ arguments, so this reordering does not break any call site.</p>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="gbp.core.model.RawModelData.validate">
-<span class="sig-name descname"><span class="pre">validate</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L406-L422"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.RawModelData.validate" title="Link to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">validate</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L505-L521"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.RawModelData.validate" title="Link to this definition">¶</a></dt>
 <dd><p>Check required tables exist and columns match row schemas.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
@@ -816,7 +816,7 @@ arguments, so this reordering does not break any call site.</p>
 
 <dl class="py class">
 <dt class="sig sig-object py" id="gbp.core.model.ResolvedModelData">
-<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">ResolvedModelData</span></span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L429-L739"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.ResolvedModelData" title="Link to this definition">¶</a></dt>
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">ResolvedModelData</span></span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L528-L846"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.ResolvedModelData" title="Link to this definition">¶</a></dt>
 <dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
 <p>Tables after time resolution (<code class="docutils literal notranslate"><span class="pre">period_id</span></code>) plus generated artifacts.</p>
 <p>Inherits the same logical groups as <code class="docutils literal notranslate"><span class="pre">RawModelData</span></code> and adds:</p>
@@ -1161,7 +1161,7 @@ arguments, so this reordering does not break any call site.</p>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="gbp.core.model.ResolvedModelData.table_summary">
-<span class="sig-name descname"><span class="pre">table_summary</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L614-L625"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.ResolvedModelData.table_summary" title="Link to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">table_summary</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L713-L724"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.ResolvedModelData.table_summary" title="Link to this definition">¶</a></dt>
 <dd><p>Human-readable overview of populated tables, grouped logically.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
@@ -1172,7 +1172,7 @@ arguments, so this reordering does not break any call site.</p>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="gbp.core.model.ResolvedModelData.from_raw">
-<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">from_raw</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">raw</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">periods</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolved_time</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolved_attrs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">edges</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">edge_commodities</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">edge_lead_time_resolved</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">transformation_resolved</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fleet_capacity</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L629-L719"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.ResolvedModelData.from_raw" title="Link to this definition">¶</a></dt>
+<span class="property"><span class="k"><span class="pre">classmethod</span></span><span class="w"> </span></span><span class="sig-name descname"><span class="pre">from_raw</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">raw</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">periods</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolved_time</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resolved_attrs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">edges</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">edge_commodities</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">edge_lead_time_resolved</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">transformation_resolved</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fleet_capacity</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L736-L826"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.ResolvedModelData.from_raw" title="Link to this definition">¶</a></dt>
 <dd><p>Build <code class="docutils literal notranslate"><span class="pre">ResolvedModelData</span></code> from raw tables and build artifacts.</p>
 <p>Centralizes the <code class="docutils literal notranslate"><span class="pre">raw.field</span> <span class="pre">→</span> <span class="pre">resolved.field</span></code> mapping so that
 <code class="docutils literal notranslate"><span class="pre">build_model()</span></code> and notebooks share one canonical constructor call.</p>
@@ -1199,7 +1199,7 @@ arguments, so this reordering does not break any call site.</p>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="gbp.core.model.ResolvedModelData.validate">
-<span class="sig-name descname"><span class="pre">validate</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L723-L739"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.ResolvedModelData.validate" title="Link to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">validate</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference external" href="https://github.com/vlzm/GFDRR/blob/main/gbp/core/model.py#L830-L846"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#gbp.core.model.ResolvedModelData.validate" title="Link to this definition">¶</a></dt>
 <dd><p>Check required tables exist and columns match row schemas.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Return type<span class="colon">:</span></dt>

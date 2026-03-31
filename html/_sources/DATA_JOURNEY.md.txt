@@ -94,7 +94,7 @@ periods (2 строки):
 
 90 рёбер (10 x 9), каждое с distance (haversine) и lead_time_hours (distance / 50 км/ч). Плюс edge_commodities — working_bike разрешён на каждом ребре.
 
-### 3.5. `_build_flow_data()` — начальный инвентарь (структурное)
+### 3.5. `_build_node_parameters()` — начальный инвентарь (структурное)
 
 ```
 inventory_initial (8 строк):
@@ -146,7 +146,7 @@ def _build_raw_model(self) -> RawModelData:
     entities = self._build_entities()
     behavior = self._build_behavior(entities)
     edge_data = self._build_edges(entities)
-    flow = self._build_flow_data(entities)
+    flow = self._build_node_parameters(entities)
 
     # Структурные таблицы -> RawModelData
     raw = RawModelData(**{**temporal, **entities.tables, **behavior, **edge_data, **flow})
@@ -315,7 +315,7 @@ DataLoaderGraph                hierarchy / scenario            resolve_lead_time
   |  _build_entities()           = registry.to_dict()            (registry.specs
   |  _build_behavior()                                            + structural specs)
   |  _build_edges()            registry.register()                      |
-  |  _build_flow_data()        registry.get(name)                       v
+  |  _build_node_parameters()        registry.get(name)                       v
   | параметрические:           registry.get_by_kind(COST)      ResolvedModelData
   |  _register_costs()                                           + resolved registry
   |  _register_capacities()                                      + spines

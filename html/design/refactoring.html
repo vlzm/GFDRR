@@ -405,7 +405,7 @@
     <span class="n">entities</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_entities</span><span class="p">()</span>
     <span class="n">behavior</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_behavior</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
     <span class="n">edges_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_edges</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">build_edges</span> <span class="k">else</span> <span class="p">{}</span>
-    <span class="n">flow</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_flow_data</span><span class="p">(</span><span class="n">entities</span><span class="p">,</span> <span class="n">temporal</span><span class="p">)</span>
+    <span class="n">flow</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_node_parameters</span><span class="p">(</span><span class="n">entities</span><span class="p">,</span> <span class="n">temporal</span><span class="p">)</span>
     <span class="n">resources</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_resources</span><span class="p">(</span><span class="n">entities</span><span class="p">)</span>
 
     <span class="n">registry</span> <span class="o">=</span> <span class="n">AttributeRegistry</span><span class="p">()</span>
@@ -422,7 +422,7 @@
 <li><p><code class="docutils literal notranslate"><span class="pre">_build_entities()</span></code> — facilities, commodity_categories, resource_categories</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">_build_behavior(entities)</span></code> — facility_roles, facility_operations, edge_rules</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">_build_edges(entities)</span></code> — edges, edge_commodities (with haversine distance)</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">_build_flow_data(entities,</span> <span class="pre">temporal)</span></code> — demand, inventory_initial</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">_build_node_parameters(entities,</span> <span class="pre">temporal)</span></code> — demand, inventory_initial</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">_build_resources(entities)</span></code> — resource_fleet, resource_commodity_compatibility, resource_modal_compatibility</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">_register_costs(registry,</span> <span class="pre">temporal)</span></code> — registers operation_cost, transport_cost</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">_register_resource_costs(registry,</span> <span class="pre">entities)</span></code> — registers resource_fixed_cost, resource_maintenance_cost</p></li>
