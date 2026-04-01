@@ -42,24 +42,28 @@ pytest is configured with `asyncio_mode = "auto"`, `testpaths = ["tests"]`, and 
 ```
 gbp/
 ├── core/              # Data model + schemas + attribute system
-│   ├── model.py       # RawModelData & ResolvedModelData (central contract, ~46/~52 DataFrame fields)
+│   ├── model.py       # RawModelData & ResolvedModelData (_ModelDataMixin, ~46/~52 DataFrame fields)
 │   ├── schemas/       # Pydantic row schemas per table (entity, edge, temporal, etc.)
 │   ├── attributes/    # AttributeRegistry, AttributeSpec, grain groups, spine assembly
+│   ├── columns.py     # Centralized column-name constants
 │   ├── enums.py       # All enumerations (FacilityType, ModalType, etc.)
 │   ├── roles.py       # FacilityType → FacilityRole derivation
 │   └── factory.py     # Model factory utilities
 ├── build/             # Build pipeline: raw → resolved (stateless, deterministic)
-│   ├── pipeline.py    # Orchestrator: build_model(raw) runs all steps
+│   ├── pipeline.py    # Orchestrator: build_model(raw) runs all steps; BuildError
 │   ├── validation.py  # Unit consistency, referential integrity, graph connectivity (BFS)
-│   ├── time_resolution.py  # date → period_id with aggregation
+│   ├── time_resolution.py  # date → period_id with aggregation (merge_asof)
 │   ├── edge_builder.py     # Edge materialization from rules + manual pairs
-│   ├── lead_time.py        # hours → periods per edge × period
+│   ├── lead_time.py        # hours → periods per edge × period (searchsorted)
 │   ├── transformation.py   # N→M commodity conversion
 │   ├── fleet_capacity.py   # count × base_capacity per facility × resource_category
 │   └── spine.py            # Grain-grouped attribute DataFrames for vectorized lookups
-├── loaders/           # Source data → RawModelData
+├── loaders/           # Source data → RawModelData + CSV loading
 │   ├── dataloader_graph.py  # Bike-sharing loader (main loader)
 │   ├── dataloader_mock.py   # Mock data for tests
+│   ├── csv_loader.py        # CsvLoader, load_csv_folder
+│   ├── validators.py        # CSV column validation
+│   ├── contracts.py         # GraphLoaderConfig, pandera source schemas
 │   └── protocols.py         # BikeShareSourceProtocol
 ├── consumers/         # Consumers of ResolvedModelData
 │   └── simulator/     # Environment — step-by-step simulation engine
@@ -67,13 +71,12 @@ gbp/
 │       ├── phases.py         # Phase Protocol, PhaseResult, Schedule
 │       ├── log.py            # SimulationLog (5 output tables), RejectReason
 │       ├── built_in_phases.py # DemandPhase, ArrivalsPhase
-│       ├── dispatch_phase.py  # DispatchPhase (validate + apply + auto-assign)
+│       ├── dispatch_phase.py  # DispatchPhase (5 validators + apply + auto-assign)
 │       ├── task.py           # Task Protocol, DISPATCH_COLUMNS
 │       ├── engine.py         # Environment class (run, step, step_phase)
 │       ├── config.py         # EnvironmentConfig
 │       └── tasks/            # Task implementations (noop.py, future: rebalancer)
 ├── io/                # Serialization (raw_to_dict / dict_to_raw, parquet)
-├── loading/           # CSV loading utilities
 └── rebalancer/        # EARLY PROTOTYPE — PDP solver using OR-Tools (will be redesigned as Task)
 ```
 

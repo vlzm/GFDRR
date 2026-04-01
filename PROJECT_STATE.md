@@ -109,7 +109,7 @@ Core library `gbp` with data model, build pipeline, bike-sharing loader. All ref
 - `_ModelDataMixin` extracts shared properties/display/validation from RawModelData and ResolvedModelData (DRY)
 - `gbp/core/columns.py` — centralized column-name constants
 - `gbp/__init__.py` — public API surface (`build_model`, `Environment`, `make_raw_model`, enums)
-- `gbp/loading/` consolidated into `gbp/loaders/` (backward-compat shim remains)
+- `gbp/loading/` removed, consolidated into `gbp/loaders/`
 - `BuildError` wraps pipeline step exceptions with step name context
 - `dispatch_phase.py` — 5 standalone validator functions, sequential inventory allocation (bugfix)
 - `PeriodRow` construction fixed (keyword args instead of positional)
