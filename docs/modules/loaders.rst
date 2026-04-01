@@ -6,7 +6,7 @@ gbp.loaders
 High-level data loaders that assemble ``RawModelData`` from external sources.
 
 :class:`DataLoaderGraph` is the main production loader — it reads data from a
-source that implements :class:`DataSourceProtocol`, builds the graph, and runs
+source that implements :class:`BikeShareSourceProtocol`, builds the graph, and runs
 the full build pipeline.  :class:`DataLoaderMock` generates synthetic Citi
 Bike-style data for testing and experimentation.
 
@@ -15,7 +15,6 @@ Bike-style data for testing and experimentation.
 
    GenericSourceProtocol
    BikeShareSourceProtocol
-   DataSourceProtocol
    GraphLoaderProtocol
    GraphLoaderConfig
    DataLoaderGraph

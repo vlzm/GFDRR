@@ -2,10 +2,6 @@
 
 from gbp.core.attributes.builder import AttributeBuilder
 from gbp.core.attributes.defaults import (
-    get_all_default_specs,
-    get_edge_attribute_specs,
-    get_facility_attribute_specs,
-    get_resource_attribute_specs,
     get_structural_attribute_specs,
     register_bike_sharing_defaults,
 )
@@ -22,10 +18,6 @@ __all__ = [
     "MergePlan",
     "RegisteredAttribute",
     "auto_group_attributes",
-    "get_all_default_specs",
-    "get_edge_attribute_specs",
-    "get_facility_attribute_specs",
-    "get_resource_attribute_specs",
     "get_structural_attribute_specs",
     "plan_merges",
     "register_bike_sharing_defaults",

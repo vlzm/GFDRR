@@ -2,7 +2,6 @@
 
 GenericSourceProtocol  — minimal interface for any data source.
 BikeShareSourceProtocol — bike-sharing specific: stations, depots, trips, etc.
-DataSourceProtocol     — backward-compatible alias for BikeShareSourceProtocol.
 GraphLoaderProtocol    — what any graph loader must expose.
 """
 
@@ -46,10 +45,6 @@ class BikeShareSourceProtocol(Protocol):
     df_truck_rates: pd.DataFrame
 
     def load_data(self) -> None: ...
-
-
-DataSourceProtocol = BikeShareSourceProtocol
-"""Backward-compatible alias — existing code importing DataSourceProtocol keeps working."""
 
 
 # ---------------------------------------------------------------------------

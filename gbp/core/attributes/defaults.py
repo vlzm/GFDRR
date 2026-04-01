@@ -88,41 +88,6 @@ def get_structural_attribute_specs() -> list[AttributeSpec]:
     ]
 
 
-# ── Legacy spec helpers (structural only after parametric cleanup) ────────
-
-def get_facility_attribute_specs() -> list[AttributeSpec]:
-    """DEPRECATED: use ``register_bike_sharing_defaults()`` + ``get_structural_attribute_specs()``.
-
-    Returns structural facility specs (none currently — parametric data
-    is now in ``AttributeRegistry``).
-    """
-    return [s for s in get_structural_attribute_specs() if s.entity_type == "facility"]
-
-
-def get_edge_attribute_specs() -> list[AttributeSpec]:
-    """DEPRECATED: use ``register_bike_sharing_defaults()`` + ``get_structural_attribute_specs()``.
-
-    Returns structural edge specs only.
-    """
-    return [s for s in get_structural_attribute_specs() if s.entity_type == "edge"]
-
-
-def get_resource_attribute_specs() -> list[AttributeSpec]:
-    """DEPRECATED: use ``register_bike_sharing_defaults()`` + ``get_structural_attribute_specs()``.
-
-    Returns structural resource specs only.
-    """
-    return [s for s in get_structural_attribute_specs() if s.entity_type == "resource"]
-
-
-def get_all_default_specs() -> list[AttributeSpec]:
-    """DEPRECATED: use ``register_bike_sharing_defaults()`` + ``get_structural_attribute_specs()``.
-
-    Returns structural specs only (parametric data lives in ``AttributeRegistry``).
-    """
-    return get_structural_attribute_specs()
-
-
 # ── Convenience registration for bike-sharing ────────────────────────────
 
 def register_bike_sharing_defaults(

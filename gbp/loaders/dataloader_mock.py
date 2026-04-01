@@ -9,7 +9,7 @@ import pandas as pd
 class DataLoaderMock:
     """Generate Citi Bike-like temporal mock data for rebalancing tests.
 
-    Required by ``DataSourceProtocol``:
+    Required by ``BikeShareSourceProtocol``:
         - df_stations     [node_id, inventory_capacity, lat, lon, ...extra metadata]
         - df_depots       [node_id, lat, lon]
         - df_resources    [resource_id, capacity]

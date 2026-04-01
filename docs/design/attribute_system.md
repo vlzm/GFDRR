@@ -169,7 +169,7 @@ register_bike_sharing_defaults(
 
 This calls `registry.register()` with typical bike-sharing grains. Users call `registry.register()` directly for custom attributes.
 
-Functions `get_all_default_specs()`, `get_facility_attribute_specs()`, `get_edge_attribute_specs()` are **deprecated** — they exist for backward compatibility in `spine.py` fallback logic only.
+`get_structural_attribute_specs()` returns attribute specs sourced from structural tables (edges, resource_categories). These are used by `spine.py` during spine assembly.
 
 ---
 

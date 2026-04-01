@@ -1,35 +1,23 @@
-gbp.loading
-===========
+gbp.loaders — CSV utilities
+===========================
 
-.. currentmodule:: gbp.loading
-
-Low-level data source layer: read raw files into ``RawModelData``.
+.. currentmodule:: gbp.loaders
 
 :class:`CsvLoader` reads a folder of CSV files (one per table) and validates
-columns against expected schemas.  Implements :class:`DataSourceProtocol`
-which can be plugged into higher-level loaders from :mod:`gbp.loaders`.
+columns against expected schemas.
 
 .. autosummary::
    :nosignatures:
 
-   DataSourceProtocol
    CsvLoader
    load_csv_folder
-
-Data Source Protocol
---------------------
-
-Abstract interface that all data sources implement.
-
-.. automodule:: gbp.loading.base
-   :members:
 
 CSV Loader
 ----------
 
 Load a folder of CSV files into ``RawModelData``.
 
-.. automodule:: gbp.loading.csv_loader
+.. automodule:: gbp.loaders.csv_loader
    :members:
 
 Validators
@@ -37,5 +25,5 @@ Validators
 
 Column validation helpers for loaded DataFrames.
 
-.. automodule:: gbp.loading.validators
+.. automodule:: gbp.loaders.validators
    :members:

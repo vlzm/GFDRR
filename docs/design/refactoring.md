@@ -98,7 +98,7 @@ Methods:
 
 ## Step 3: Separate bike-specific source from generic protocol ✓
 
-**What:** Renamed `DataSourceProtocol` → `BikeShareSourceProtocol`, added `GenericSourceProtocol`, kept backward-compatible alias.
+**What:** Renamed `DataSourceProtocol` → `BikeShareSourceProtocol`, added `GenericSourceProtocol`.
 
 **Why:** Makes it clear where "bike-sharing" ends and "universal graph" begins.
 
@@ -123,10 +123,9 @@ class BikeShareSourceProtocol(Protocol):
     df_truck_rates: pd.DataFrame
     def load_data(self) -> None: ...
 
-DataSourceProtocol = BikeShareSourceProtocol  # backward-compatible alias
 ```
 
-`DataLoaderGraph` accepts `BikeShareSourceProtocol`. `DataLoaderMock` satisfies it without changes.
+`DataLoaderGraph` accepts `BikeShareSourceProtocol`. `DataLoaderMock` satisfies it without changes. The backward-compatible `DataSourceProtocol` alias was removed during architecture cleanup.
 
 ---
 

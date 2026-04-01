@@ -1,4 +1,4 @@
-"""Assemble ``RawModelData`` from a ``DataSourceProtocol`` and run ``gbp.build.build_model``.
+"""Assemble ``RawModelData`` from a ``BikeShareSourceProtocol`` and run ``gbp.build.build_model``.
 
 Trips and telemetry from the source are mapped to ``observed_flow`` and
 ``observed_inventory`` tables in the model.  Other wide tables (hourly
@@ -87,7 +87,7 @@ class _EntityResult(NamedTuple):
 # ---------------------------------------------------------------------------
 
 class DataLoaderGraph:
-    """Build ``RawModelData`` from a ``DataSourceProtocol`` and run ``gbp.build.build_model``."""
+    """Build ``RawModelData`` from a ``BikeShareSourceProtocol`` and run ``gbp.build.build_model``."""
 
     def __init__(
         self,

@@ -268,7 +268,7 @@ Aggregation level is configured per scenario (`scenario.facility_aggregation_lev
 **What to learn:** How data enters the system (loaders) and how models are serialized/deserialized (I/O).
 
 **Loaders (`gbp.loaders`):**
-- `DataSourceProtocol` — interface for any data source (CSV, DB, API, mock)
+- `BikeShareSourceProtocol` — interface for bike-sharing data sources (stations, depots, trips)
 - `DataLoaderMock` — generates synthetic Citi Bike-style data
 - `DataLoaderGraph` — source data → `RawModelData` + `build_model` → `ResolvedModelData`; Pandera validates sources
 - `GraphLoaderProtocol` — `raw`, `resolved`, `source`, `available_dates`, `rebalancer_snapshot` for PDP
