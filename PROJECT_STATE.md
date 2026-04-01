@@ -1,6 +1,6 @@
 # Project State
 
-> Last updated: 2026-03-31
+> Last updated: 2026-04-01
 
 ## Vision
 
@@ -96,7 +96,7 @@ Core library `gbp` with data model, build pipeline, bike-sharing loader. All ref
 - `gbp/core` — RawModelData (~48 tables), ResolvedModelData (~54 tables), Pydantic schemas, grouped table access, `table_summary()`
 - `gbp/core/attributes` — AttributeRegistry with grain-aware registration, kind validation, grain groups, spine assembly
 - `gbp/build` — `build_model()` pipeline: validation → time resolution → edge building → lead times → transformations → fleet capacity → spines
-- `gbp/loaders` — DataLoaderMock, DataLoaderGraph, BikeShareSourceProtocol, GenericSourceProtocol
+- `gbp/loaders` — DataLoaderMock, DataLoaderGraph, BikeShareSourceProtocol, GenericSourceProtocol, CsvLoader
 - `gbp/core/factory` — `make_raw_model()` quick-start helper
 - `gbp/io` — Parquet + JSON serialization with AttributeRegistry support
 - `gbp/build/validation` — unit consistency, referential integrity, resource completeness, graph connectivity (BFS)
@@ -104,6 +104,21 @@ Core library `gbp` with data model, build pipeline, bike-sharing loader. All ref
 - Observations (`observed_flow`, `observed_inventory`) integrated into model, build pipeline (time resolution, validation), and loader (trips → observed_flow, telemetry → observed_inventory, demand derivation)
 - Refactoring: model.py grouping, `_build_raw_model()` decomposition, protocol separation, factory function — all done
 - Tests: unit + integration, full pipeline coverage
+
+**Architecture cleanup (2026-04-01):**
+- `_ModelDataMixin` extracts shared properties/display/validation from RawModelData and ResolvedModelData (DRY)
+- `gbp/core/columns.py` — centralized column-name constants
+- `gbp/__init__.py` — public API surface (`build_model`, `Environment`, `make_raw_model`, enums)
+- `gbp/loading/` consolidated into `gbp/loaders/` (backward-compat shim remains)
+- `BuildError` wraps pipeline step exceptions with step name context
+- `dispatch_phase.py` — 5 standalone validator functions, sequential inventory allocation (bugfix)
+- `PeriodRow` construction fixed (keyword args instead of positional)
+- `validation.py` — vectorized with set ops instead of iterrows
+- `factory.py` — vectorized role/operation generation
+- `time_resolution.py` — `pd.merge_asof` instead of period-loop (O(N log N) vs O(N×P))
+- `lead_time.py` — `np.searchsorted` instead of triple loop (O(E×P×log P) vs O(E×P²))
+- `pyproject.toml` — unused future deps moved to optional groups (api, db, observability, storage)
+- `rebalancer/` marked as early prototype (will be redesigned as Task)
 
 ### Environment
 

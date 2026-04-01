@@ -9,34 +9,12 @@ dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.24.0",
     "pydantic>=2.0.0",
-    "pydantic-settings>=2.0.0",
     "pandera>=0.18.0",
-    "scipy==1.17.0",
-    
-    # API & Web
-    "fastapi>=0.100.0",
-    "uvicorn[standard]>=0.23.0",
-    "streamlit>=1.25.0",
-    
-    # Database
-    "sqlalchemy[asyncio]>=2.0.0",
-    "asyncpg>=0.28.0",
-    "alembic>=1.11.0",
-    
-    # Math Engine
-    "ortools>=9.6.0",
-    
-    # Observability
-    "opentelemetry-api>=1.20.0",
-    "opentelemetry-sdk>=1.20.0",
-    "opentelemetry-exporter-otlp>=1.20.0",
-    "opentelemetry-instrumentation-fastapi>=0.41b0",
-    "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
     "structlog>=23.1.0",
-    
-    # Storage
-    "boto3>=1.28.0",  # S3/MinIO client
-    "pyarrow>=12.0.0",  # Parquet support
+    "pyarrow>=12.0.0",
+
+    # Math Engine (used by rebalancer prototype)
+    "ortools>=9.6.0",
 ]
 
 [project.optional-dependencies]
@@ -44,7 +22,7 @@ dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.1.0",
-    "httpx>=0.24.0",  # For TestClient
+    "httpx>=0.24.0",
     "ruff>=0.1.0",
     "mypy>=1.5.0",
     "pre-commit>=3.3.0",
@@ -55,6 +33,26 @@ docs = [
     "myst-parser>=2.0.0",
     "sphinx-autodoc-typehints>=1.24.0",
     "sphinxcontrib-mermaid>=1.0.0",
+]
+api = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "streamlit>=1.25.0",
+]
+db = [
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.28.0",
+    "alembic>=1.11.0",
+]
+observability = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
+]
+storage = [
+    "boto3>=1.28.0",
 ]
 
 [build-system]
@@ -90,4 +88,4 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 # Default norecursedirs includes "build", which skips tests/unit/build; override explicitly.
 norecursedirs = [".git", ".tox", "dist", "venv", ".venv", "__pycache__", "*.egg", ".eggs", "node_modules"]
-addopts = "-v --cov=src --cov-report=term-missing"
+addopts = "-v --cov=gbp --cov-report=term-missing"

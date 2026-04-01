@@ -21,6 +21,131 @@ if TYPE_CHECKING:
     from gbp.core.model import ResolvedModelData
 
 
+# ---------------------------------------------------------------------------
+# Individual dispatch validators
+# ---------------------------------------------------------------------------
+
+def _reject_invalid_arrival(
+    dispatches: pd.DataFrame, period: PeriodRow,
+) -> None:
+    """Mark dispatches whose arrival_period is before the current period."""
+    bad = dispatches["arrival_period"] < period.period_index
+    dispatches.loc[bad & dispatches["_reject_reason"].isna(), "_reject_reason"] = (
+        RejectReason.INVALID_ARRIVAL.value
+    )
+
+
+def _reject_invalid_edge(
+    dispatches: pd.DataFrame, resolved: ResolvedModelData,
+) -> None:
+    """Mark dispatches referencing non-existent edges."""
+    if resolved.edges is None:
+        return
+    has_modal = dispatches["modal_type"].notna() & dispatches["_reject_reason"].isna()
+    if not has_modal.any():
+        return
+    edge_keys = set(
+        zip(
+            resolved.edges["source_id"],
+            resolved.edges["target_id"],
+            resolved.edges["modal_type"],
+            strict=False,
+        )
+    )
+    sub = dispatches.loc[has_modal]
+    bad_edge = pd.Series(
+        [
+            (s, t, m) not in edge_keys
+            for s, t, m in zip(sub["source_id"], sub["target_id"], sub["modal_type"], strict=False)
+        ],
+        index=sub.index,
+    )
+    dispatches.loc[bad_edge[bad_edge].index, "_reject_reason"] = (
+        RejectReason.INVALID_EDGE.value
+    )
+
+
+def _reject_unavailable_resource(
+    dispatches: pd.DataFrame, state: SimulationState,
+) -> None:
+    """Mark dispatches whose resource is not available at the source facility."""
+    has_resource = dispatches["resource_id"].notna() & dispatches["_reject_reason"].isna()
+    if not has_resource.any():
+        return
+    avail = state.resources[state.resources["status"] == ResourceStatus.AVAILABLE.value]
+    avail_at_source = set(
+        zip(avail["resource_id"], avail["current_facility_id"], strict=False)
+    )
+    sub = dispatches.loc[has_resource]
+    bad_res = pd.Series(
+        [(r, s) not in avail_at_source for r, s in zip(sub["resource_id"], sub["source_id"], strict=False)],
+        index=sub.index,
+    )
+    dispatches.loc[bad_res[bad_res].index, "_reject_reason"] = (
+        RejectReason.NO_AVAILABLE_RESOURCE.value
+    )
+
+
+def _reject_over_capacity(
+    dispatches: pd.DataFrame, state: SimulationState, resolved: ResolvedModelData,
+) -> None:
+    """Mark dispatches that exceed a resource's base capacity."""
+    has_resource_valid = (
+        dispatches["resource_id"].notna() & dispatches["_reject_reason"].isna()
+    )
+    if not has_resource_valid.any() or resolved.resource_categories is None:
+        return
+    cap_map = resolved.resource_categories.set_index("resource_category_id")["base_capacity"]
+    res_cat = state.resources.set_index("resource_id")["resource_category"]
+
+    sub = dispatches[has_resource_valid].copy()
+    sub["_res_cat"] = sub["resource_id"].map(res_cat)
+    sub["_cap"] = sub["_res_cat"].map(cap_map)
+    used = sub.groupby("resource_id")["quantity"].transform("sum")
+    over = used > sub["_cap"]
+    if over.any():
+        over_idx = sub.index[over]
+        not_yet = dispatches.loc[over_idx, "_reject_reason"].isna()
+        dispatches.loc[not_yet[not_yet].index, "_reject_reason"] = (
+            RejectReason.OVER_CAPACITY.value
+        )
+
+
+def _reject_insufficient_inventory(
+    dispatches: pd.DataFrame, state: SimulationState,
+) -> None:
+    """Reject dispatches that would overdraw facility inventory.
+
+    Uses sequential allocation: dispatches are processed in row order.
+    Earlier dispatches consume available inventory; later ones may be
+    rejected if the remaining stock is insufficient.
+    """
+    pending_mask = dispatches["_reject_reason"].isna()
+    if not pending_mask.any():
+        return
+
+    # Build a mutable copy of available inventory keyed by (facility, commodity)
+    remaining: dict[tuple[str, str], float] = {}
+    for _, row in state.inventory.iterrows():
+        key = (str(row["facility_id"]), str(row["commodity_category"]))
+        remaining[key] = float(row["quantity"])
+
+    for idx in dispatches.index[pending_mask]:
+        row = dispatches.loc[idx]
+        key = (str(row["source_id"]), str(row["commodity_category"]))
+        avail = remaining.get(key, 0.0)
+        qty = float(row["quantity"])
+        if qty > avail:
+            dispatches.at[idx, "_reject_reason"] = RejectReason.INSUFFICIENT_INVENTORY.value
+        else:
+            remaining[key] = avail - qty
+
+
+# ---------------------------------------------------------------------------
+# DispatchPhase
+# ---------------------------------------------------------------------------
+
+
 class DispatchPhase:
     """Phase that delegates to a Task and applies dispatches to state.
 
@@ -93,125 +218,18 @@ class DispatchPhase:
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Validate dispatches against current state and model.
 
+        Checks run in order; the first failing check sets the reject reason.
+
         Returns (valid_dispatches, rejected_dispatches).
         """
         dispatches = dispatches.copy()
         dispatches["_reject_reason"] = None
 
-        # 1. Arrival period sanity
-        bad_arrival = dispatches["arrival_period"] < period.period_index
-        dispatches.loc[bad_arrival, "_reject_reason"] = (
-            RejectReason.INVALID_ARRIVAL.value
-        )
-
-        # 2. Edge existence (skip rows with null modal_type)
-        if resolved.edges is not None:
-            has_modal = dispatches["modal_type"].notna()
-            if has_modal.any():
-                edge_keys = set(
-                    zip(
-                        resolved.edges["source_id"],
-                        resolved.edges["target_id"],
-                        resolved.edges["modal_type"],
-                        strict=False,
-                    )
-                )
-                dispatch_keys = list(
-                    zip(
-                        dispatches.loc[has_modal, "source_id"],
-                        dispatches.loc[has_modal, "target_id"],
-                        dispatches.loc[has_modal, "modal_type"],
-                        strict=False,
-                    )
-                )
-                bad_edge = pd.Series(
-                    [k not in edge_keys for k in dispatch_keys],
-                    index=dispatches.loc[has_modal].index,
-                )
-                dispatches.loc[
-                    bad_edge[bad_edge].index, "_reject_reason"
-                ] = RejectReason.INVALID_EDGE.value
-
-        # 3. Resource availability (only for rows with explicit resource_id)
-        has_resource = dispatches["resource_id"].notna()
-        if has_resource.any():
-            avail = state.resources[
-                state.resources["status"] == ResourceStatus.AVAILABLE.value
-            ]
-            avail_at_source = set(
-                zip(avail["resource_id"], avail["current_facility_id"], strict=False)
-            )
-            dispatch_res = list(
-                zip(
-                    dispatches.loc[has_resource, "resource_id"],
-                    dispatches.loc[has_resource, "source_id"],
-                    strict=False,
-                )
-            )
-            bad_res = pd.Series(
-                [k not in avail_at_source for k in dispatch_res],
-                index=dispatches.loc[has_resource].index,
-            )
-            not_yet_rejected = dispatches.loc[bad_res[bad_res].index, "_reject_reason"].isna()
-            dispatches.loc[
-                not_yet_rejected[not_yet_rejected].index, "_reject_reason"
-            ] = RejectReason.NO_AVAILABLE_RESOURCE.value
-
-        # 4. Capacity check per resource
-        has_resource_valid = (
-            dispatches["resource_id"].notna() & dispatches["_reject_reason"].isna()
-        )
-        if has_resource_valid.any() and resolved.resource_categories is not None:
-            cap_map = resolved.resource_categories.set_index(
-                "resource_category_id"
-            )["base_capacity"]
-            res_cat = state.resources.set_index("resource_id")["resource_category"]
-
-            sub = dispatches[has_resource_valid].copy()
-            sub["_res_cat"] = sub["resource_id"].map(res_cat)
-            sub["_cap"] = sub["_res_cat"].map(cap_map)
-            used = sub.groupby("resource_id")["quantity"].transform("sum")
-            over = used > sub["_cap"]
-            if over.any():
-                over_idx = sub.index[over]
-                not_yet = dispatches.loc[over_idx, "_reject_reason"].isna()
-                dispatches.loc[
-                    not_yet[not_yet].index, "_reject_reason"
-                ] = RejectReason.OVER_CAPACITY.value
-
-        # 5. Inventory sufficiency (check aggregated dispatches vs available)
-        pending = dispatches[dispatches["_reject_reason"].isna()]
-        if not pending.empty:
-            dispatched_qty = (
-                pending
-                .groupby(["source_id", "commodity_category"], as_index=False)["quantity"]
-                .sum()
-                .rename(columns={"source_id": "facility_id", "quantity": "dispatched"})
-            )
-            inv_check = dispatched_qty.merge(
-                state.inventory[["facility_id", "commodity_category", "quantity"]],
-                on=["facility_id", "commodity_category"],
-                how="left",
-            )
-            inv_check["quantity"] = inv_check["quantity"].fillna(0.0)
-            over_inv = inv_check[inv_check["dispatched"] > inv_check["quantity"]]
-
-            if not over_inv.empty:
-                bad_pairs = set(
-                    zip(
-                        over_inv["facility_id"],
-                        over_inv["commodity_category"],
-                        strict=False,
-                    )
-                )
-                match = dispatches.apply(
-                    lambda r: (r["source_id"], r["commodity_category"]) in bad_pairs,
-                    axis=1,
-                )
-                not_yet = match & dispatches["_reject_reason"].isna()
-                dispatches.loc[
-                    not_yet, "_reject_reason"
-                ] = RejectReason.INSUFFICIENT_INVENTORY.value
+        _reject_invalid_arrival(dispatches, period)
+        _reject_invalid_edge(dispatches, resolved)
+        _reject_unavailable_resource(dispatches, state)
+        _reject_over_capacity(dispatches, state, resolved)
+        _reject_insufficient_inventory(dispatches, state)
 
         # Split
         rejected_mask = dispatches["_reject_reason"].notna()

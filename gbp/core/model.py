@@ -232,11 +232,149 @@ def _table_summary(obj: object, groups: dict[str, list[str]], required: frozense
 
 
 # ---------------------------------------------------------------------------
+# Shared mixin — properties, display, validation
+# ---------------------------------------------------------------------------
+
+class _ModelDataMixin:
+    """Shared group-access properties, display, and validation logic.
+
+    Both ``RawModelData`` and ``ResolvedModelData`` inherit this mixin.
+    Subclasses must define ``_GROUPS``, ``_SCHEMAS``, ``_REQUIRED``,
+    ``_NON_TABLE_FIELDS`` class variables and an ``attributes`` field.
+    """
+
+    _GROUPS: ClassVar[dict[str, list[str]]]
+    _SCHEMAS: ClassVar[dict[str, type[BaseModel]]]
+    _REQUIRED: ClassVar[frozenset[str]]
+    _NON_TABLE_FIELDS: ClassVar[frozenset[str]]
+    attributes: AttributeRegistry
+
+    # ── group access properties ───────────────────────────────────────
+
+    @property
+    def entity_tables(self) -> dict[str, pd.DataFrame]:
+        """Core entities: facilities, commodity/resource categories, L3 items."""
+        return _collect_group(self, self._GROUPS["entity"])
+
+    @property
+    def temporal_tables(self) -> dict[str, pd.DataFrame]:
+        """Planning horizon, segments, and generated periods."""
+        return _collect_group(self, self._GROUPS["temporal"])
+
+    @property
+    def behavior_tables(self) -> dict[str, pd.DataFrame]:
+        """Facility roles, operations, availability, edge generation rules."""
+        return _collect_group(self, self._GROUPS["behavior"])
+
+    @property
+    def edge_tables(self) -> dict[str, pd.DataFrame]:
+        """Edge identity, commodities, capacities, vehicles."""
+        return _collect_group(self, self._GROUPS["edge"])
+
+    @property
+    def flow_tables(self) -> dict[str, pd.DataFrame]:
+        """Demand, supply, and inventory data."""
+        return _collect_group(self, self._GROUPS["flow_data"])
+
+    @property
+    def observation_tables(self) -> dict[str, pd.DataFrame]:
+        """Observed (historical) flow and inventory data."""
+        return _collect_group(self, self._GROUPS["observations"])
+
+    @property
+    def transformation_tables(self) -> dict[str, pd.DataFrame]:
+        """N:M commodity transformation definitions."""
+        return _collect_group(self, self._GROUPS["transformation"])
+
+    @property
+    def resource_tables(self) -> dict[str, pd.DataFrame]:
+        """Resource fleet, compatibility, and availability."""
+        return _collect_group(self, self._GROUPS["resource"])
+
+    @property
+    def parameter_tables(self) -> dict[str, pd.DataFrame]:
+        """All registered parametric attribute tables."""
+        return self.attributes.to_dict()
+
+    @property
+    def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
+        """Facility and commodity hierarchy trees."""
+        return _collect_group(self, self._GROUPS["hierarchy"])
+
+    @property
+    def scenario_tables(self) -> dict[str, pd.DataFrame]:
+        """Scenario configuration and overrides."""
+        return _collect_group(self, self._GROUPS["scenario"])
+
+    # ── navigation helpers ────────────────────────────────────────────
+
+    @property
+    def populated_tables(self) -> dict[str, pd.DataFrame]:
+        """All non-None DataFrames: structural fields + registry attributes."""
+        result: dict[str, pd.DataFrame] = {}
+        for f in fields(self):
+            if f.name.startswith("_") or f.name in self._NON_TABLE_FIELDS:
+                continue
+            val = getattr(self, f.name)
+            if isinstance(val, pd.DataFrame):
+                result[f.name] = val
+        result.update(self.attributes.to_dict())
+        return result
+
+    def table_summary(self) -> str:
+        """Human-readable overview of populated tables, grouped logically.
+
+        Usage::
+
+            print(model.table_summary())
+        """
+        summary = _table_summary(self, self._GROUPS, self._REQUIRED)
+        if self.attributes:
+            summary += "\n\n  parameters (AttributeRegistry)"
+            summary += f"\n  {'─' * 31}"
+            summary += "\n" + self.attributes.summary()
+        else:
+            summary += "\n\n  parameters (AttributeRegistry)"
+            summary += f"\n  {'─' * 31}"
+            summary += "\n    (no attributes registered)"
+        return summary
+
+    # ── display ─────────────────────────────────────────────────────────
+
+    def __repr__(self) -> str:
+        return _compact_repr(self, self._GROUPS, self._REQUIRED)
+
+    def _repr_html_(self) -> str:
+        return _compact_repr_html(self, self._GROUPS, self._REQUIRED)
+
+    # ── validation ────────────────────────────────────────────────────
+
+    def validate(self) -> None:
+        """Check required tables exist and columns match row schemas."""
+        cls_name = type(self).__name__
+        errors: list[str] = []
+        for f in fields(self):
+            if f.name.startswith("_") or f.name not in self._SCHEMAS:
+                continue
+            df = getattr(self, f.name)
+            if f.name in self._REQUIRED:
+                if df is None:
+                    errors.append(f"{f.name} is required but is None")
+                    continue
+                errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
+            elif df is not None:
+                errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
+
+        if errors:
+            raise ValueError(f"{cls_name} validation failed: " + "; ".join(errors))
+
+
+# ---------------------------------------------------------------------------
 # RawModelData
 # ---------------------------------------------------------------------------
 
 @dataclass
-class RawModelData:
+class RawModelData(_ModelDataMixin):
     """Raw input tables keyed by ``date`` where time-varying (pre-resolution).
 
     Tables are organized into logical groups — see module docstring.
@@ -419,131 +557,13 @@ class RawModelData:
         "edge_rules",
     })
 
-    # ── group access properties ───────────────────────────────────────
-
-    @property
-    def entity_tables(self) -> dict[str, pd.DataFrame]:
-        """Core entities: facilities, commodity/resource categories, L3 items."""
-        return _collect_group(self, self._GROUPS["entity"])
-
-    @property
-    def temporal_tables(self) -> dict[str, pd.DataFrame]:
-        """Planning horizon, segments, and generated periods."""
-        return _collect_group(self, self._GROUPS["temporal"])
-
-    @property
-    def behavior_tables(self) -> dict[str, pd.DataFrame]:
-        """Facility roles, operations, availability, edge generation rules."""
-        return _collect_group(self, self._GROUPS["behavior"])
-
-    @property
-    def edge_tables(self) -> dict[str, pd.DataFrame]:
-        """Edge identity, commodities, capacities, vehicles."""
-        return _collect_group(self, self._GROUPS["edge"])
-
-    @property
-    def flow_tables(self) -> dict[str, pd.DataFrame]:
-        """Demand, supply, and inventory data."""
-        return _collect_group(self, self._GROUPS["flow_data"])
-
-    @property
-    def observation_tables(self) -> dict[str, pd.DataFrame]:
-        """Observed (historical) flow and inventory data."""
-        return _collect_group(self, self._GROUPS["observations"])
-
-    @property
-    def transformation_tables(self) -> dict[str, pd.DataFrame]:
-        """N:M commodity transformation definitions."""
-        return _collect_group(self, self._GROUPS["transformation"])
-
-    @property
-    def resource_tables(self) -> dict[str, pd.DataFrame]:
-        """Resource fleet, compatibility, and availability."""
-        return _collect_group(self, self._GROUPS["resource"])
-
-    @property
-    def parameter_tables(self) -> dict[str, pd.DataFrame]:
-        """All registered parametric attribute tables."""
-        return self.attributes.to_dict()
-
-    @property
-    def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
-        """Facility and commodity hierarchy trees."""
-        return _collect_group(self, self._GROUPS["hierarchy"])
-
-    @property
-    def scenario_tables(self) -> dict[str, pd.DataFrame]:
-        """Scenario configuration and overrides."""
-        return _collect_group(self, self._GROUPS["scenario"])
-
-    # ── navigation helpers ────────────────────────────────────────────
-
-    @property
-    def populated_tables(self) -> dict[str, pd.DataFrame]:
-        """All non-None DataFrames: structural fields + registry attributes."""
-        result: dict[str, pd.DataFrame] = {}
-        for f in fields(self):
-            if f.name.startswith("_") or f.name in self._NON_TABLE_FIELDS:
-                continue
-            val = getattr(self, f.name)
-            if isinstance(val, pd.DataFrame):
-                result[f.name] = val
-        result.update(self.attributes.to_dict())
-        return result
-
-    def table_summary(self) -> str:
-        """Human-readable overview of populated tables, grouped logically.
-
-        Usage::
-
-            print(raw.table_summary())
-        """
-        summary = _table_summary(self, self._GROUPS, self._REQUIRED)
-        if self.attributes:
-            summary += "\n\n  parameters (AttributeRegistry)"
-            summary += f"\n  {'─' * 31}"
-            summary += "\n" + self.attributes.summary()
-        else:
-            summary += "\n\n  parameters (AttributeRegistry)"
-            summary += f"\n  {'─' * 31}"
-            summary += "\n    (no attributes registered)"
-        return summary
-
-    # ── display ─────────────────────────────────────────────────────────
-
-    def __repr__(self) -> str:
-        return _compact_repr(self, self._GROUPS, self._REQUIRED)
-
-    def _repr_html_(self) -> str:
-        return _compact_repr_html(self, self._GROUPS, self._REQUIRED)
-
-    # ── validation ────────────────────────────────────────────────────
-
-    def validate(self) -> None:
-        """Check required tables exist and columns match row schemas."""
-        errors: list[str] = []
-        for f in fields(self):
-            if f.name.startswith("_") or f.name not in self._SCHEMAS:
-                continue
-            df = getattr(self, f.name)
-            if f.name in self._REQUIRED:
-                if df is None:
-                    errors.append(f"{f.name} is required but is None")
-                    continue
-                errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
-            elif df is not None:
-                errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
-
-        if errors:
-            raise ValueError("RawModelData validation failed: " + "; ".join(errors))
-
 
 # ---------------------------------------------------------------------------
 # ResolvedModelData
 # ---------------------------------------------------------------------------
 
 @dataclass
-class ResolvedModelData:
+class ResolvedModelData(_ModelDataMixin):
     """Tables after time resolution (``period_id``) plus generated artifacts.
 
     Inherits the same logical groups as ``RawModelData`` and adds:
@@ -649,62 +669,7 @@ class ResolvedModelData:
 
     _REQUIRED: ClassVar[frozenset[str]] = RawModelData._REQUIRED
 
-    # ── group access properties (same as Raw + generated + spines) ────
-
-    @property
-    def entity_tables(self) -> dict[str, pd.DataFrame]:
-        """Core entities: facilities, commodity/resource categories, L3 items."""
-        return _collect_group(self, self._GROUPS["entity"])
-
-    @property
-    def temporal_tables(self) -> dict[str, pd.DataFrame]:
-        """Planning horizon, segments, and generated periods."""
-        return _collect_group(self, self._GROUPS["temporal"])
-
-    @property
-    def behavior_tables(self) -> dict[str, pd.DataFrame]:
-        """Facility roles, operations, availability, edge generation rules."""
-        return _collect_group(self, self._GROUPS["behavior"])
-
-    @property
-    def edge_tables(self) -> dict[str, pd.DataFrame]:
-        """Edge identity, commodities, capacities, vehicles."""
-        return _collect_group(self, self._GROUPS["edge"])
-
-    @property
-    def flow_tables(self) -> dict[str, pd.DataFrame]:
-        """Demand, supply, and inventory data."""
-        return _collect_group(self, self._GROUPS["flow_data"])
-
-    @property
-    def observation_tables(self) -> dict[str, pd.DataFrame]:
-        """Observed (historical) flow and inventory data."""
-        return _collect_group(self, self._GROUPS["observations"])
-
-    @property
-    def transformation_tables(self) -> dict[str, pd.DataFrame]:
-        """N:M commodity transformation definitions."""
-        return _collect_group(self, self._GROUPS["transformation"])
-
-    @property
-    def resource_tables(self) -> dict[str, pd.DataFrame]:
-        """Resource fleet, compatibility, and availability."""
-        return _collect_group(self, self._GROUPS["resource"])
-
-    @property
-    def parameter_tables(self) -> dict[str, pd.DataFrame]:
-        """All registered parametric attribute tables."""
-        return self.attributes.to_dict()
-
-    @property
-    def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
-        """Facility and commodity hierarchy trees."""
-        return _collect_group(self, self._GROUPS["hierarchy"])
-
-    @property
-    def scenario_tables(self) -> dict[str, pd.DataFrame]:
-        """Scenario configuration and overrides."""
-        return _collect_group(self, self._GROUPS["scenario"])
+    # ── Resolved-only group access properties ───────────────────────────
 
     @property
     def generated_tables(self) -> dict[str, pd.DataFrame]:
@@ -720,42 +685,6 @@ class ResolvedModelData:
             if val is not None:
                 result[name] = val
         return result
-
-    # ── navigation helpers ────────────────────────────────────────────
-
-    @property
-    def populated_tables(self) -> dict[str, pd.DataFrame]:
-        """All non-None DataFrames: structural fields + registry attributes."""
-        result: dict[str, pd.DataFrame] = {}
-        for f in fields(self):
-            if f.name.startswith("_") or f.name in self._NON_TABLE_FIELDS:
-                continue
-            val = getattr(self, f.name)
-            if isinstance(val, pd.DataFrame):
-                result[f.name] = val
-        result.update(self.attributes.to_dict())
-        return result
-
-    def table_summary(self) -> str:
-        """Human-readable overview of populated tables, grouped logically."""
-        summary = _table_summary(self, self._GROUPS, self._REQUIRED)
-        if self.attributes:
-            summary += "\n\n  parameters (AttributeRegistry)"
-            summary += f"\n  {'─' * 31}"
-            summary += "\n" + self.attributes.summary()
-        else:
-            summary += "\n\n  parameters (AttributeRegistry)"
-            summary += f"\n  {'─' * 31}"
-            summary += "\n    (no attributes registered)"
-        return summary
-
-    # ── display ─────────────────────────────────────────────────────────
-
-    def __repr__(self) -> str:
-        return _compact_repr(self, self._GROUPS, self._REQUIRED)
-
-    def _repr_html_(self) -> str:
-        return _compact_repr_html(self, self._GROUPS, self._REQUIRED)
 
     # ── factory ────────────────────────────────────────────────────────
 
@@ -855,22 +784,3 @@ class ResolvedModelData:
             attributes=resolved_attrs,
         )
 
-    # ── validation ────────────────────────────────────────────────────
-
-    def validate(self) -> None:
-        """Check required tables exist and columns match row schemas."""
-        errors: list[str] = []
-        for f in fields(self):
-            if f.name.startswith("_") or f.name not in self._SCHEMAS:
-                continue
-            df = getattr(self, f.name)
-            if f.name in self._REQUIRED:
-                if df is None:
-                    errors.append(f"{f.name} is required but is None")
-                    continue
-                errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
-            elif df is not None:
-                errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
-
-        if errors:
-            raise ValueError("ResolvedModelData validation failed: " + "; ".join(errors))

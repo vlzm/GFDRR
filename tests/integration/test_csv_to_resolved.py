@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from gbp.build.pipeline import build_model
-from gbp.loading.csv_loader import load_csv_folder
+from gbp.loaders.csv_loader import load_csv_folder
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "bike_minimal"
 

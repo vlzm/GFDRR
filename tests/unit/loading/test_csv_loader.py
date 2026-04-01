@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from gbp.loading.csv_loader import CsvLoader, load_csv_folder
+from gbp.loaders.csv_loader import CsvLoader, load_csv_folder
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "bike_minimal"
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from gbp.core.model import RawModelData
-from gbp.loading.validators import validate_csv_columns
+from gbp.loaders.validators import validate_csv_columns
 
 _DEFAULT_DATE_COLUMNS = frozenset({
     "date",

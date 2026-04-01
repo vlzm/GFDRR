@@ -178,27 +178,35 @@ def _generate_temporal(
 
 def _generate_facility_roles(facilities: pd.DataFrame) -> pd.DataFrame:
     """Derive roles for each facility using ``DEFAULT_ROLES`` and ``derive_roles``."""
-    role_rows: list[dict] = []
-    for _, row in facilities.iterrows():
-        ftype = str(row["facility_type"])
+    # Pre-compute role set per unique facility_type (derive_roles is constant for fixed ops)
+    type_to_roles: dict[str, list[str]] = {}
+    for ftype in facilities["facility_type"].astype(str).unique():
         roles = derive_roles(ftype, _ALL_OPERATIONS)
-        for role in sorted(roles, key=lambda r: r.value):
-            role_rows.append({
-                "facility_id": str(row["facility_id"]),
-                "role": role.value,
-            })
-    return pd.DataFrame(role_rows)
+        type_to_roles[ftype] = sorted(r.value for r in roles)
+
+    # Explode via merge
+    ftype_roles = pd.DataFrame([
+        {"facility_type": ft, "role": r}
+        for ft, roles in type_to_roles.items()
+        for r in roles
+    ])
+    result = (
+        facilities[["facility_id", "facility_type"]]
+        .astype(str)
+        .merge(ftype_roles, on="facility_type")
+        [["facility_id", "role"]]
+    )
+    return result.reset_index(drop=True)
 
 
 def _generate_facility_operations(facilities: pd.DataFrame) -> pd.DataFrame:
     """Enable all standard operations for each facility."""
-    op_rows: list[dict] = []
-    for _, row in facilities.iterrows():
-        fid = str(row["facility_id"])
-        for op in sorted(_ALL_OPERATIONS):
-            op_rows.append({
-                "facility_id": fid,
-                "operation_type": op,
-                "enabled": True,
-            })
-    return pd.DataFrame(op_rows)
+    ops = sorted(_ALL_OPERATIONS)
+    fids = facilities["facility_id"].astype(str)
+    # Cross-join: each facility × each operation
+    result = pd.DataFrame({
+        "facility_id": fids.repeat(len(ops)).values,
+        "operation_type": ops * len(fids),
+        "enabled": True,
+    })
+    return result.reset_index(drop=True)

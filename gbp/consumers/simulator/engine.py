@@ -37,7 +37,7 @@ class Environment:
         self._state = init_state(resolved)
         self._log = SimulationLog()
         self._periods: list[PeriodRow] = [
-            PeriodRow(*row) for row in resolved.periods.itertuples()
+            PeriodRow(**row._asdict()) for row in resolved.periods.itertuples()
         ]
         self._period_cursor: int = 0
 
