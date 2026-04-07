@@ -35,8 +35,7 @@ class GraphLoaderConfig(BaseModel):
 class StationsSourceSchema(pa.DataFrameModel):
     """Validates the stations DataFrame from a data source."""
 
-    node_id: Series[str] = pa.Field(unique=True, str_length={"min_value": 1})
-    inventory_capacity: Series[int] = pa.Field(gt=0)
+    station_id: Series[str] = pa.Field(unique=True, str_length={"min_value": 1})
     lat: Series[float] = pa.Field(ge=-90, le=90)
     lon: Series[float] = pa.Field(ge=-180, le=180)
 
@@ -61,7 +60,6 @@ class ResourcesSourceSchema(pa.DataFrameModel):
     """Validates the resources DataFrame from a data source."""
 
     resource_id: Series[str] = pa.Field(unique=True, str_length={"min_value": 1})
-    capacity: Series[int] = pa.Field(gt=0)
 
     class Config:
         strict = False

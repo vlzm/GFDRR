@@ -37,11 +37,15 @@ class BikeShareSourceProtocol(Protocol):
     df_stations: pd.DataFrame
     df_depots: pd.DataFrame
     df_resources: pd.DataFrame
+    df_station_capacities: pd.DataFrame
+    df_depot_capacities: pd.DataFrame
+    df_resource_capacities: pd.DataFrame
     timestamps: pd.DatetimeIndex
     df_inventory_ts: pd.DataFrame
     df_telemetry_ts: pd.DataFrame
     df_trips: pd.DataFrame
     df_station_costs: pd.DataFrame
+    df_depot_costs: pd.DataFrame
     df_truck_rates: pd.DataFrame
 
     def load_data(self) -> None: ...

@@ -12,7 +12,7 @@ from gbp.loaders import DataLoaderMock, DataLoaderGraph, GraphLoaderConfig
 
 @pytest.fixture()
 def mock_config() -> dict:
-    return {"n": 8, "n_depots": 2, "n_timestamps": 48}
+    return {"n_stations": 8, "n_depots": 2, "n_timestamps": 48}
 
 
 @pytest.fixture()

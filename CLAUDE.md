@@ -101,6 +101,12 @@ gbp/
 - **English only** in code, comments, and docstrings.
 - Ruff config: line-length 100, target Python 3.11, rules: E, W, F, I, B, C4, UP, D (Google convention).
 - Mypy: strict mode.
+- **Notebook style:**
+  - Single cell per notebook, divided by `# %% N. Section Name` markers. Start with a markdown map of all blocks (`# %% [markdown]`) so the reader sees the structure before the code.
+  - No `display()`, no `print()`, no trailing bare expressions — cells end with assignments.
+  - Full descriptive variable names — `n_stations` not `n_st`, `low`/`high` not `lo`/`hi`, `inventory` not `inv`.
+  - Use intermediate variables to show data flow (`inv_after_demand`, `inv_after_returns`) instead of in-place mutation.
+  - Use domain terms, not generic model terms — `returns` not `supply` for bike-sharing arrivals.
 
 ## AI Collaboration Rules
 

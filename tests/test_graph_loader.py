@@ -7,11 +7,12 @@ import pandas as pd
 from gbp.core.enums import ModalType
 from gbp.core.model import RawModelData, ResolvedModelData
 from gbp.loaders import DataLoaderGraph, DataLoaderMock, GraphLoaderConfig
-from gbp.loaders.dataloader_graph import COMMODITY_CATEGORY, RESOURCE_CATEGORY
+from gbp.loaders.dataloader_graph import COMMODITY_CATEGORIES, RESOURCE_CATEGORY
 
 N_STATIONS = 8
 N_DEPOTS = 2
 N_TOTAL = N_STATIONS + N_DEPOTS
+N_CATEGORIES = len(COMMODITY_CATEGORIES)
 
 
 # =============================================================================
@@ -43,7 +44,8 @@ class TestRawModel:
 
     def test_commodity_and_resource_categories(self, loaded_graph_loader: DataLoaderGraph) -> None:
         raw = loaded_graph_loader.raw
-        assert COMMODITY_CATEGORY in raw.commodity_categories["commodity_category_id"].values
+        cc_ids = set(raw.commodity_categories["commodity_category_id"])
+        assert cc_ids == set(COMMODITY_CATEGORIES)
         assert RESOURCE_CATEGORY in raw.resource_categories["resource_category_id"].values
 
     def test_periods_align_with_mock_horizon(self, loaded_graph_loader: DataLoaderGraph) -> None:
@@ -70,7 +72,8 @@ class TestResolvedModel:
         res = loaded_graph_loader.resolved
         assert res.edge_commodities is not None
         assert not res.edge_commodities.empty
-        assert (res.edge_commodities["commodity_category"] == COMMODITY_CATEGORY).all()
+        cc_in_edges = set(res.edge_commodities["commodity_category"])
+        assert cc_in_edges == set(COMMODITY_CATEGORIES)
 
 
 # =============================================================================
@@ -79,9 +82,10 @@ class TestResolvedModel:
 
 
 class TestSourceInventoryWide:
-    def test_inventory_wide_matrix_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
+    def test_inventory_multiindex_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
         ts = loaded_graph_loader.source.df_inventory_ts
-        assert ts.shape == (48, N_STATIONS)
+        assert ts.shape == (48, N_TOTAL * N_CATEGORIES)
+        assert ts.columns.names == ["facility_id", "commodity_category"]
 
     def test_different_timestamps_may_differ(self, loaded_graph_loader: DataLoaderGraph) -> None:
         ts = loaded_graph_loader.source.df_inventory_ts
@@ -135,19 +139,25 @@ class TestConfig:
 
 
 class TestMockExtras:
-    def test_stations_include_citibike_metadata(self, mock_config: dict) -> None:
+    def test_stations_have_minimal_columns(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         mock.load_data()
-        assert {
-            "station_id",
-            "name",
-            "short_name",
-            "region_id",
-            "capacity",
-            "is_installed",
-            "is_renting",
-            "is_returning",
-        }.issubset(mock.df_stations.columns)
+        assert set(mock.df_stations.columns) == {"station_id", "lat", "lon"}
+
+    def test_station_capacities_have_commodity_category(self, mock_config: dict) -> None:
+        mock = DataLoaderMock(mock_config)
+        mock.load_data()
+        assert {"station_id", "commodity_category", "capacity"}.issubset(
+            mock.df_station_capacities.columns,
+        )
+        cc_vals = set(mock.df_station_capacities["commodity_category"])
+        assert cc_vals == set(COMMODITY_CATEGORIES)
+
+    def test_resources_without_capacity(self, mock_config: dict) -> None:
+        mock = DataLoaderMock(mock_config)
+        mock.load_data()
+        assert set(mock.df_resources.columns) == {"resource_id"}
+        assert {"resource_id", "capacity"}.issubset(mock.df_resource_capacities.columns)
 
     def test_telemetry_columns_exist(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
@@ -193,18 +203,21 @@ class TestMockExtras:
             "member_casual",
         }
         assert expected_cols.issubset(mock.df_trips.columns)
-        station_ids = set(mock.df_stations["node_id"])
+        station_ids = set(mock.df_stations["station_id"])
         assert set(mock.df_trips["start_station_id"]).issubset(station_ids)
         assert set(mock.df_trips["end_station_id"]).issubset(station_ids)
+
+    def test_trips_rideable_type_matches_commodities(self, mock_config: dict) -> None:
+        mock = DataLoaderMock(mock_config)
+        mock.load_data()
+        types = set(mock.df_trips["rideable_type"])
+        assert types.issubset(set(COMMODITY_CATEGORIES))
 
     def test_cost_tables_exist(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         mock.load_data()
-        assert {
-            "station_id",
-            "fixed_cost_per_visit",
-            "cost_per_bike_moved",
-        }.issubset(mock.df_station_costs.columns)
+        assert {"station_id", "fixed_cost_station"}.issubset(mock.df_station_costs.columns)
+        assert {"node_id", "fixed_cost_depot"}.issubset(mock.df_depot_costs.columns)
         assert {
             "resource_id",
             "cost_per_km",
@@ -214,8 +227,8 @@ class TestMockExtras:
 
 
 class TestSourceExposed:
-    def test_region_id_on_stations(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        assert "region_id" in loaded_graph_loader.source.df_stations.columns
+    def test_stations_minimal_columns(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        assert set(loaded_graph_loader.source.df_stations.columns) == {"station_id", "lat", "lon"}
 
     def test_telemetry_on_source(self, loaded_graph_loader: DataLoaderGraph) -> None:
         assert loaded_graph_loader.source.df_telemetry_ts is not None
@@ -240,6 +253,12 @@ class TestObservations:
         }
         assert expected.issubset(raw.observed_flow.columns)
 
+    def test_observed_flow_has_both_categories(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        raw = loaded_graph_loader.raw
+        assert raw.observed_flow is not None
+        cc_in_flow = set(raw.observed_flow["commodity_category"])
+        assert cc_in_flow == set(COMMODITY_CATEGORIES)
+
     def test_observed_inventory_populated(self, loaded_graph_loader: DataLoaderGraph) -> None:
         raw = loaded_graph_loader.raw
         assert raw.observed_inventory is not None
@@ -249,6 +268,12 @@ class TestObservations:
             "date", "quantity", "quantity_unit",
         }
         assert expected.issubset(raw.observed_inventory.columns)
+
+    def test_observed_inventory_has_both_categories(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        raw = loaded_graph_loader.raw
+        assert raw.observed_inventory is not None
+        cc_in_inv = set(raw.observed_inventory["commodity_category"])
+        assert cc_in_inv == set(COMMODITY_CATEGORIES)
 
     def test_demand_derived_from_observations(self, loaded_graph_loader: DataLoaderGraph) -> None:
         raw = loaded_graph_loader.raw
@@ -284,18 +309,21 @@ class TestObservations:
 
 
 class TestCoreTableAccess:
-    def test_operation_capacities_for_stations(self, loaded_graph_loader: DataLoaderGraph) -> None:
+    def test_operation_capacities_per_commodity(self, loaded_graph_loader: DataLoaderGraph) -> None:
         assert "operation_capacity" in loaded_graph_loader.raw.attributes
         oc = loaded_graph_loader.raw.attributes.get("operation_capacity").data
-        assert len(oc) == N_STATIONS
+        assert len(oc) == N_TOTAL * N_CATEGORIES
         assert (oc["operation_type"] == "storage").all()
+        cc_vals = set(oc["commodity_category"])
+        assert cc_vals == set(COMMODITY_CATEGORIES)
 
-    def test_inventory_initial_matches_first_timestep(self, loaded_graph_loader: DataLoaderGraph) -> None:
+    def test_inventory_initial_per_commodity(self, loaded_graph_loader: DataLoaderGraph) -> None:
         raw = loaded_graph_loader.raw
         inv = raw.inventory_initial
         assert inv is not None
-        assert len(inv) == N_STATIONS
+        assert len(inv) == N_TOTAL * N_CATEGORIES
         ts0 = loaded_graph_loader.source.df_inventory_ts.iloc[0]
         for _, row in inv.iterrows():
             fid = str(row["facility_id"])
-            assert int(row["quantity"]) == int(ts0[fid])
+            cc = str(row["commodity_category"])
+            assert int(row["quantity"]) == int(ts0[(fid, cc)])

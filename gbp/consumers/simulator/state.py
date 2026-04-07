@@ -140,9 +140,17 @@ def init_state(resolved: ResolvedModelData) -> SimulationState:
     else:
         inventory = pd.DataFrame(columns=INVENTORY_COLUMNS)
 
-    # In-transit
+    # In-transit: declared pre-horizon shipments + organic returns from supply
     if resolved.inventory_in_transit is not None:
-        in_transit = _init_in_transit(resolved.inventory_in_transit, resolved)
+        declared_transit = _init_in_transit(resolved.inventory_in_transit, resolved)
+    else:
+        declared_transit = pd.DataFrame(columns=IN_TRANSIT_COLUMNS)
+
+    organic_transit = _init_in_transit_from_supply(resolved)
+
+    transit_frames = [df for df in (declared_transit, organic_transit) if not df.empty]
+    if transit_frames:
+        in_transit = pd.concat(transit_frames, ignore_index=True)[IN_TRANSIT_COLUMNS]
     else:
         in_transit = pd.DataFrame(columns=IN_TRANSIT_COLUMNS)
 
@@ -175,6 +183,57 @@ def _init_in_transit(
     #       using resolved.periods (date range lookup).
     #       For now return empty frame — in-transit at init is rare in MVP.
     return pd.DataFrame(columns=IN_TRANSIT_COLUMNS)
+
+
+def _init_in_transit_from_supply(resolved: ResolvedModelData) -> pd.DataFrame:
+    """Convert ``resolved.supply`` into in-transit shipments for ``ArrivalsPhase``.
+
+    Each supply row represents organic arrivals (returns) at a facility during
+    a given period.  Seeding them into ``state.in_transit`` at init time lets
+    ``ArrivalsPhase`` pick them up automatically at the matching period and add
+    their quantity to the facility's inventory — this is the mirror of
+    ``DemandPhase`` processing ``resolved.demand``.
+
+    Source shipments carry ``source_id="EXT"`` and ``resource_id=None`` so
+    ``ArrivalsPhase`` treats them as organic (non-resource-backed) flow.
+
+    Args:
+        resolved: Fully resolved model.  ``resolved.supply`` may be ``None``
+            or empty, in which case an empty frame is returned.
+
+    Returns:
+        DataFrame with columns matching ``IN_TRANSIT_COLUMNS``.  Empty when
+        no supply is present.
+    """
+    if resolved.supply is None or resolved.supply.empty:
+        return pd.DataFrame(columns=IN_TRANSIT_COLUMNS)
+
+    period_map = dict(
+        zip(
+            resolved.periods["period_id"].astype(str),
+            resolved.periods["period_index"].astype(int),
+            strict=True,
+        )
+    )
+    supply = resolved.supply.copy()
+    supply["period_index"] = supply["period_id"].astype(str).map(period_map)
+    supply = supply.dropna(subset=["period_index"])
+    if supply.empty:
+        return pd.DataFrame(columns=IN_TRANSIT_COLUMNS)
+
+    period_index = supply["period_index"].astype(int).to_numpy()
+    n = len(supply)
+    shipments = pd.DataFrame({
+        "shipment_id": [f"organic_supply_{i}" for i in range(n)],
+        "source_id": ["EXT"] * n,
+        "target_id": supply["facility_id"].to_numpy(),
+        "commodity_category": supply["commodity_category"].to_numpy(),
+        "quantity": supply["quantity"].to_numpy(),
+        "resource_id": [None] * n,
+        "departure_period": period_index,
+        "arrival_period": period_index,
+    })
+    return shipments[IN_TRANSIT_COLUMNS]
 
 
 def _init_resources(resolved: ResolvedModelData) -> pd.DataFrame:

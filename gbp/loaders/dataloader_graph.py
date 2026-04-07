@@ -8,7 +8,7 @@ Usage::
 
     from gbp.loaders import DataLoaderMock, DataLoaderGraph, GraphLoaderConfig
 
-    mock = DataLoaderMock({"n": 10})
+    mock = DataLoaderMock({"n_stations": 10})
     loader = DataLoaderGraph(mock, GraphLoaderConfig())
     loader.load_data()
 
@@ -39,7 +39,7 @@ from .protocols import BikeShareSourceProtocol
 
 log = structlog.get_logger()
 
-COMMODITY_CATEGORY = "working_bike"
+COMMODITY_CATEGORIES = ("electric_bike", "classic_bike")
 RESOURCE_CATEGORY = "rebalancing_truck"
 
 
@@ -171,10 +171,13 @@ class DataLoaderGraph:
                 demand = self._build_demand_from_observations(obs_flow)
                 if demand is not None:
                     observations["demand"] = demand
+                supply = self._build_supply_from_observations(obs_flow)
+                if supply is not None:
+                    observations["supply"] = supply
 
         registry = AttributeRegistry()
         node_params = self._build_node_parameters(entities, registry)
-        self._register_costs(registry, temporal)
+        self._register_facility_costs(registry, temporal)
         self._register_resource_costs(registry, entities)
 
         all_tables = {
@@ -239,9 +242,9 @@ class DataLoaderGraph:
         depots = self._source.df_depots
 
         fac_stations = pd.DataFrame({
-            "facility_id": stations["node_id"].astype(str),
+            "facility_id": stations["station_id"].astype(str),
             "facility_type": "station",
-            "name": stations["name"] if "name" in stations.columns else stations["node_id"].astype(str),
+            "name": stations["station_id"].astype(str),
             "lat": stations["lat"].astype(float),
             "lon": stations["lon"].astype(float),
         })
@@ -254,23 +257,25 @@ class DataLoaderGraph:
         })
         facilities = pd.concat([fac_depots, fac_stations], ignore_index=True)
 
+        base_cap = float(self._source.df_resource_capacities["capacity"].max())
+
         tables: dict[str, pd.DataFrame] = {
             "facilities": facilities,
             "commodity_categories": pd.DataFrame({
-                "commodity_category_id": [COMMODITY_CATEGORY],
-                "name": ["Working bike"],
-                "unit": ["bike"],
+                "commodity_category_id": list(COMMODITY_CATEGORIES),
+                "name": ["Electric bike", "Classic bike"],
+                "unit": ["bike", "bike"],
             }),
             "resource_categories": pd.DataFrame({
                 "resource_category_id": [RESOURCE_CATEGORY],
                 "name": ["Rebalancing truck"],
-                "base_capacity": [float(self._source.df_resources["capacity"].max())],
+                "base_capacity": [base_cap],
                 "capacity_unit": ["bike"],
             }),
             "commodities": pd.DataFrame({
-                "commodity_id": [COMMODITY_CATEGORY],
-                "commodity_category": [COMMODITY_CATEGORY],
-                "description": [""],
+                "commodity_id": list(COMMODITY_CATEGORIES),
+                "commodity_category": list(COMMODITY_CATEGORIES),
+                "description": ["", ""],
             }),
         }
         return _EntityResult(
@@ -308,13 +313,23 @@ class DataLoaderGraph:
             ])
 
         if self._config.build_edges:
-            edge_rules = pd.DataFrame({
-                "source_type": ["depot", "station", "station", "depot"],
-                "target_type": ["station", "depot", "station", "depot"],
-                "commodity_category": [COMMODITY_CATEGORY] * 4,
-                "modal_type": [ModalType.ROAD.value] * 4,
-                "enabled": [True] * 4,
-            })
+            base_pairs = [
+                ("depot", "station"),
+                ("station", "depot"),
+                ("station", "station"),
+                ("depot", "depot"),
+            ]
+            rule_rows: list[dict] = []
+            for src_t, tgt_t in base_pairs:
+                for cc in COMMODITY_CATEGORIES:
+                    rule_rows.append({
+                        "source_type": src_t,
+                        "target_type": tgt_t,
+                        "commodity_category": cc,
+                        "modal_type": ModalType.ROAD.value,
+                        "enabled": True,
+                    })
+            edge_rules = pd.DataFrame(rule_rows)
         else:
             edge_rules = pd.DataFrame({
                 "source_type": pd.Series(dtype="string"),
@@ -359,14 +374,15 @@ class DataLoaderGraph:
                     "lead_time_hours": max(lt_h, 1e-6),
                     "reliability": None,
                 })
-                ec_records.append({
-                    "source_id": a,
-                    "target_id": b,
-                    "modal_type": ModalType.ROAD.value,
-                    "commodity_category": COMMODITY_CATEGORY,
-                    "enabled": True,
-                    "capacity_consumption": 1.0,
-                })
+                for cc in COMMODITY_CATEGORIES:
+                    ec_records.append({
+                        "source_id": a,
+                        "target_id": b,
+                        "modal_type": ModalType.ROAD.value,
+                        "commodity_category": cc,
+                        "enabled": True,
+                        "capacity_consumption": 1.0,
+                    })
 
         return {
             "edges": pd.DataFrame(edge_records),
@@ -379,30 +395,48 @@ class DataLoaderGraph:
         registry: AttributeRegistry,
     ) -> dict[str, pd.DataFrame]:
         """Initial inventory and storage capacities from source."""
-        station_ids = entities.station_ids
-        stations = self._source.df_stations
+        all_facility_ids = entities.station_ids + entities.depot_ids
 
+        # ── Initial inventory from MultiIndex df_inventory_ts ────────
         inv0 = self._source.df_inventory_ts.iloc[0]
-        inventory_initial = pd.DataFrame({
-            "facility_id": station_ids,
-            "commodity_category": COMMODITY_CATEGORY,
-            "quantity": [float(inv0[sid]) for sid in station_ids],
-            "quantity_unit": ["bike"] * len(station_ids),
-        })
+        inv_rows: list[dict] = []
+        for fid in all_facility_ids:
+            for cc in COMMODITY_CATEGORIES:
+                qty = float(inv0.get((fid, cc), 0))
+                inv_rows.append({
+                    "facility_id": fid,
+                    "commodity_category": cc,
+                    "quantity": qty,
+                    "quantity_unit": "bike",
+                })
+        inventory_initial = pd.DataFrame(inv_rows)
 
-        op_cap_rows = []
-        for _, r in stations.iterrows():
-            op_cap_rows.append({
+        # ── Storage capacities per commodity_category ────────────────
+        cap_rows: list[dict] = []
+
+        station_caps = self._source.df_station_capacities
+        for _, r in station_caps.iterrows():
+            cap_rows.append({
+                "facility_id": str(r["station_id"]),
+                "operation_type": "storage",
+                "commodity_category": str(r["commodity_category"]),
+                "capacity": float(r["capacity"]),
+                "capacity_unit": "bike",
+            })
+
+        depot_caps = self._source.df_depot_capacities
+        for _, r in depot_caps.iterrows():
+            cap_rows.append({
                 "facility_id": str(r["node_id"]),
                 "operation_type": "storage",
-                "commodity_category": COMMODITY_CATEGORY,
-                "capacity": float(r["inventory_capacity"]),
+                "commodity_category": str(r["commodity_category"]),
+                "capacity": float(r["capacity"]),
                 "capacity_unit": "bike",
             })
 
         registry.register(
             name="operation_capacity",
-            data=pd.DataFrame(op_cap_rows),
+            data=pd.DataFrame(cap_rows),
             entity_type="facility",
             kind=AttributeKind.CAPACITY,
             grain=("facility_id", "operation_type", "commodity_category"),
@@ -412,45 +446,46 @@ class DataLoaderGraph:
 
         return {"inventory_initial": inventory_initial}
 
-    def _register_costs(
+    def _register_facility_costs(
         self,
         registry: AttributeRegistry,
         temporal: dict[str, pd.DataFrame],
     ) -> None:
-        """Register operation costs (station visit/handling) in the attribute registry."""
+        """Register facility fixed costs (stations and depots) in the attribute registry."""
         periods = temporal["periods"]
         horizon_dates = [p["start_date"] for _, p in periods.iterrows()]
 
         cost_rows: list[dict] = []
-        costs = self._source.df_station_costs
-        if costs is not None and not costs.empty:
+
+        station_costs = self._source.df_station_costs
+        if station_costs is not None and not station_costs.empty:
             for d in horizon_dates:
-                for _, r in costs.iterrows():
-                    sid = str(r["station_id"])
+                for _, r in station_costs.iterrows():
                     cost_rows.append({
-                        "facility_id": sid,
-                        "operation_type": "visit",
-                        "commodity_category": COMMODITY_CATEGORY,
+                        "facility_id": str(r["station_id"]),
                         "date": d,
-                        "cost_per_unit": float(r["fixed_cost_per_visit"]),
+                        "cost_per_unit": float(r["fixed_cost_station"]),
                         "cost_unit": "USD",
                     })
+
+        depot_costs = self._source.df_depot_costs
+        if depot_costs is not None and not depot_costs.empty:
+            for d in horizon_dates:
+                for _, r in depot_costs.iterrows():
                     cost_rows.append({
-                        "facility_id": sid,
-                        "operation_type": "handling",
-                        "commodity_category": COMMODITY_CATEGORY,
+                        "facility_id": str(r["node_id"]),
                         "date": d,
-                        "cost_per_unit": float(r["cost_per_bike_moved"]),
+                        "cost_per_unit": float(r["fixed_cost_depot"]),
                         "cost_unit": "USD",
                     })
 
         if cost_rows:
             registry.register(
-                name="operation_cost",
+                name="facility_fixed_cost",
                 data=pd.DataFrame(cost_rows),
                 entity_type="facility",
                 kind=AttributeKind.COST,
-                grain=("facility_id", "operation_type", "commodity_category", "date"),
+                grain=("facility_id", "date"),
                 value_column="cost_per_unit",
                 aggregation="mean",
                 unit="USD",
@@ -466,23 +501,30 @@ class DataLoaderGraph:
             "count": [len(self._source.df_resources)],
         })
 
+        cap_map = dict(zip(
+            self._source.df_resource_capacities["resource_id"],
+            self._source.df_resource_capacities["capacity"],
+            strict=True,
+        ))
         resource_rows = []
         for _, r in self._source.df_resources.iterrows():
+            rid = str(r["resource_id"])
             resource_rows.append({
-                "resource_id": str(r["resource_id"]),
+                "resource_id": rid,
                 "resource_category": RESOURCE_CATEGORY,
                 "home_facility_id": home_depot,
-                "capacity_override": float(r["capacity"]),
+                "capacity_override": float(cap_map[rid]),
                 "description": None,
             })
 
+        n_cc = len(COMMODITY_CATEGORIES)
         return {
             "resource_fleet": resource_fleet,
             "resources": pd.DataFrame(resource_rows),
             "resource_commodity_compatibility": pd.DataFrame({
-                "resource_category": [RESOURCE_CATEGORY],
-                "commodity_category": [COMMODITY_CATEGORY],
-                "enabled": [True],
+                "resource_category": [RESOURCE_CATEGORY] * n_cc,
+                "commodity_category": list(COMMODITY_CATEGORIES),
+                "enabled": [True] * n_cc,
             }),
             "resource_modal_compatibility": pd.DataFrame({
                 "resource_category": [RESOURCE_CATEGORY],
@@ -541,13 +583,15 @@ class DataLoaderGraph:
         # ── trips → observed_flow ────────────────────────────────────
         df_trips = self._source.df_trips
         if df_trips is not None and not df_trips.empty:
-            trips = df_trips[["start_station_id", "end_station_id", "started_at"]].copy()
+            trips = df_trips[[
+                "start_station_id", "end_station_id", "started_at", "rideable_type",
+            ]].copy()
             trips = trips.rename(columns={
                 "start_station_id": "source_id",
                 "end_station_id": "target_id",
             })
             trips["date"] = pd.to_datetime(trips["started_at"]).dt.date
-            trips["commodity_category"] = COMMODITY_CATEGORY
+            trips["commodity_category"] = trips["rideable_type"]
             trips["quantity"] = 1.0
             trips["quantity_unit"] = "bike"
             trips["modal_type"] = None
@@ -565,37 +609,49 @@ class DataLoaderGraph:
                     resource_id=("resource_id", "first"),
                 )
                 result["observed_flow"] = agg
-                n = len(agg)
-                self._log.debug("observed_flow_built", rows=n)
+                self._log.debug("observed_flow_built", rows=len(agg))
             else:
                 result["observed_flow"] = None
         else:
             result["observed_flow"] = None
 
-        # ── telemetry → observed_inventory ───────────────────────────
+        # ── telemetry → observed_inventory (per commodity_category) ──
         df_tel = self._source.df_telemetry_ts
         if df_tel is not None and not df_tel.empty:
-            tel = df_tel[["station_id", "timestamp", "num_bikes_available"]].copy()
-            tel = tel.rename(columns={
+            tel_base = df_tel[["station_id", "timestamp", "num_bikes_available",
+                               "num_ebikes_available"]].copy()
+
+            # Electric bikes
+            tel_e = tel_base[["station_id", "timestamp", "num_ebikes_available"]].copy()
+            tel_e = tel_e.rename(columns={
                 "station_id": "facility_id",
-                "num_bikes_available": "quantity",
+                "num_ebikes_available": "quantity",
             })
+            tel_e["commodity_category"] = "electric_bike"
+
+            # Classic bikes = total - ebike
+            tel_c = tel_base[["station_id", "timestamp"]].copy()
+            tel_c["quantity"] = (
+                tel_base["num_bikes_available"] - tel_base["num_ebikes_available"]
+            )
+            tel_c = tel_c.rename(columns={"station_id": "facility_id"})
+            tel_c["commodity_category"] = "classic_bike"
+
+            tel = pd.concat([tel_e, tel_c], ignore_index=True)
             tel["date"] = pd.to_datetime(tel["timestamp"]).dt.date
-            tel["commodity_category"] = COMMODITY_CATEGORY
             tel["quantity_unit"] = "bike"
             tel["quantity"] = tel["quantity"].astype(float)
-
             tel = tel.loc[tel["facility_id"].isin(known_ids)]
 
             if not tel.empty:
                 grain = ["facility_id", "commodity_category", "date"]
+                tel = tel.sort_values("timestamp")
                 agg = tel.groupby(grain, as_index=False).agg(
-                    quantity=("quantity", "mean"),
+                    quantity=("quantity", "last"),
                     quantity_unit=("quantity_unit", "first"),
                 )
                 result["observed_inventory"] = agg
-                n = len(agg)
-                self._log.debug("observed_inventory_built", rows=n)
+                self._log.debug("observed_inventory_built", rows=len(agg))
             else:
                 result["observed_inventory"] = None
         else:
@@ -622,3 +678,23 @@ class DataLoaderGraph:
             .rename(columns={"source_id": "facility_id"})
         )
         return demand
+
+    @staticmethod
+    def _build_supply_from_observations(
+        observed_flow: pd.DataFrame,
+    ) -> pd.DataFrame | None:
+        """Derive supply from observed_flow (arrivals per facility per date).
+
+        Only organic flows (resource_id is null) are counted.
+        """
+        mask = observed_flow["resource_id"].isna()
+        df = observed_flow.loc[mask]
+        if df.empty:
+            return None
+
+        supply = (
+            df.groupby(["target_id", "date", "commodity_category"], as_index=False)
+            .agg(quantity=("quantity", "sum"), quantity_unit=("quantity_unit", "first"))
+            .rename(columns={"target_id": "facility_id"})
+        )
+        return supply

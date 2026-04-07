@@ -79,7 +79,8 @@ class DataLoaderRebalancer:
             raise ValueError("No operation capacities found in resolved model")
         capacities = (
             op_caps[op_caps["operation_type"] == "storage"]
-            [["facility_id", "capacity"]]
+            .groupby("facility_id", as_index=False)["capacity"]
+            .sum()
             .rename(columns={"facility_id": "node_id", "capacity": "inventory_capacity"})
         )
 
@@ -88,9 +89,10 @@ class DataLoaderRebalancer:
             nearest = inv_ts.index[inv_ts.index.get_indexer([date], method="nearest")[0]]
             date = pd.Timestamp(nearest)
         row = inv_ts.loc[date]
+        totals = row.groupby(level="facility_id").sum()
         inventory = pd.DataFrame({
             "node_id": inv_ids,
-            "quantity": [int(row[sid]) for sid in inv_ids],
+            "quantity": [int(totals[sid]) for sid in inv_ids],
         })
 
         df_node_state = (
@@ -115,7 +117,7 @@ class DataLoaderRebalancer:
             float(depot_facilities["lon"].mean()),
         )
 
-        resource_capacities = src.df_resources["capacity"].astype(int).tolist()
+        resource_capacities = src.df_resource_capacities["capacity"].astype(int).tolist()
         if len(resource_capacities) == 0:
             raise ValueError("No resources available in source data")
 

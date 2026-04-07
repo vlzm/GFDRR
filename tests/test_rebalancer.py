@@ -11,18 +11,23 @@ from gbp.rebalancer.demand import compute_utilization_and_balance
 def _inject_imbalance(loaded_graph_loader, date: pd.Timestamp) -> None:
     """Create a deterministic imbalance for one timestamp."""
     stations = loaded_graph_loader.source.df_stations.reset_index(drop=True)
+    caps = loaded_graph_loader.source.df_station_capacities
+    total_caps = caps.groupby("station_id")["capacity"].sum()
     inv = loaded_graph_loader.source.df_inventory_ts
 
     for index, row in stations.iterrows():
-        node_id = row["node_id"]
-        capacity = int(row["inventory_capacity"])
+        station_id = row["station_id"]
+        capacity = int(total_caps[station_id])
         if index == 0:
             quantity = capacity
         elif index == 1:
             quantity = 0
         else:
             quantity = capacity // 2
-        inv.loc[date, node_id] = quantity
+        ebike_qty = round(quantity * 0.3)
+        classic_qty = quantity - ebike_qty
+        inv.loc[date, (station_id, "electric_bike")] = ebike_qty
+        inv.loc[date, (station_id, "classic_bike")] = classic_qty
 
 
 def test_compute_utilization_and_balance_uses_quantity_column() -> None:
