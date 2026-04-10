@@ -19,7 +19,6 @@ class CommoditySellPriceTier(BaseModel):
     min_volume: float = Field(ge=0)
     max_volume: float | None = Field(default=None, ge=0)
     price_per_unit: float = Field(ge=0)
-    price_unit: str
 
 
 class CommodityProcurementCostTier(BaseModel):
@@ -34,4 +33,3 @@ class CommodityProcurementCostTier(BaseModel):
     min_volume: float = Field(ge=0)
     max_volume: float | None = Field(default=None, ge=0)
     cost_per_unit: float = Field(ge=0)
-    cost_unit: str

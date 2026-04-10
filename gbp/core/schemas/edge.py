@@ -16,13 +16,12 @@ class Edge(BaseModel):
     target_id: str
     modal_type: str
     distance: float = Field(ge=0)
-    distance_unit: str
     lead_time_hours: float = Field(ge=0)
     reliability: float | None = Field(default=None, ge=0, le=1)
 
 
 class EdgeCommodity(BaseModel):
-    """Allowed commodity on an edge and capacity consumption factor."""
+    """Allowed commodity on an edge."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -31,7 +30,6 @@ class EdgeCommodity(BaseModel):
     modal_type: str
     commodity_category: str
     enabled: bool = True
-    capacity_consumption: float = Field(default=1.0, ge=0)
 
 
 class EdgeCapacity(BaseModel):
@@ -44,7 +42,6 @@ class EdgeCapacity(BaseModel):
     modal_type: str
     date: dt.date
     capacity: float = Field(gt=0)
-    capacity_unit: str
 
 
 class EdgeCommodityCapacity(BaseModel):
@@ -59,7 +56,6 @@ class EdgeCommodityCapacity(BaseModel):
     date: dt.date
     min_shipment: float | None = Field(default=None, ge=0)
     max_shipment: float = Field(gt=0)
-    shipment_unit: str
 
 
 class EdgeVehicle(BaseModel):
@@ -72,7 +68,6 @@ class EdgeVehicle(BaseModel):
     modal_type: str
     resource_category: str
     vehicle_capacity: float = Field(gt=0)
-    vehicle_capacity_unit: str
     max_vehicles_per_period: int | None = Field(default=None, ge=0)
 
 

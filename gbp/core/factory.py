@@ -71,7 +71,7 @@ def make_raw_model(
         facilities: Must have ``facility_id``, ``facility_type``, ``name``.
         commodity_categories: Must have ``commodity_category_id``, ``name``, ``unit``.
         resource_categories: Must have ``resource_category_id``, ``name``,
-            ``base_capacity``, ``capacity_unit``.
+            ``base_capacity``.
         planning_start: First day of the planning horizon (inclusive).
         planning_end: Last day of the planning horizon (exclusive).
         period_type: Period granularity (``"day"``, ``"week"``, ``"month"``).

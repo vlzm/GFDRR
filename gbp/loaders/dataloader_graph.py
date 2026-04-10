@@ -270,7 +270,6 @@ class DataLoaderGraph:
                 "resource_category_id": [RESOURCE_CATEGORY],
                 "name": ["Rebalancing truck"],
                 "base_capacity": [base_cap],
-                "capacity_unit": ["bike"],
             }),
             "commodities": pd.DataFrame({
                 "commodity_id": list(COMMODITY_CATEGORIES),
@@ -370,7 +369,6 @@ class DataLoaderGraph:
                     "target_id": b,
                     "modal_type": ModalType.ROAD.value,
                     "distance": dkm,
-                    "distance_unit": "km",
                     "lead_time_hours": max(lt_h, 1e-6),
                     "reliability": None,
                 })
@@ -381,7 +379,6 @@ class DataLoaderGraph:
                         "modal_type": ModalType.ROAD.value,
                         "commodity_category": cc,
                         "enabled": True,
-                        "capacity_consumption": 1.0,
                     })
 
         return {
@@ -407,7 +404,6 @@ class DataLoaderGraph:
                     "facility_id": fid,
                     "commodity_category": cc,
                     "quantity": qty,
-                    "quantity_unit": "bike",
                 })
         inventory_initial = pd.DataFrame(inv_rows)
 
@@ -421,7 +417,6 @@ class DataLoaderGraph:
                 "operation_type": "storage",
                 "commodity_category": str(r["commodity_category"]),
                 "capacity": float(r["capacity"]),
-                "capacity_unit": "bike",
             })
 
         depot_caps = self._source.df_depot_capacities
@@ -431,7 +426,6 @@ class DataLoaderGraph:
                 "operation_type": "storage",
                 "commodity_category": str(r["commodity_category"]),
                 "capacity": float(r["capacity"]),
-                "capacity_unit": "bike",
             })
 
         registry.register(
@@ -593,7 +587,6 @@ class DataLoaderGraph:
             trips["date"] = pd.to_datetime(trips["started_at"]).dt.date
             trips["commodity_category"] = trips["rideable_type"]
             trips["quantity"] = 1.0
-            trips["quantity_unit"] = "bike"
             trips["modal_type"] = None
             trips["resource_id"] = None
 
@@ -604,7 +597,6 @@ class DataLoaderGraph:
                 grain = ["source_id", "target_id", "commodity_category", "date"]
                 agg = trips.groupby(grain, as_index=False).agg(
                     quantity=("quantity", "sum"),
-                    quantity_unit=("quantity_unit", "first"),
                     modal_type=("modal_type", "first"),
                     resource_id=("resource_id", "first"),
                 )
@@ -639,7 +631,6 @@ class DataLoaderGraph:
 
             tel = pd.concat([tel_e, tel_c], ignore_index=True)
             tel["date"] = pd.to_datetime(tel["timestamp"]).dt.date
-            tel["quantity_unit"] = "bike"
             tel["quantity"] = tel["quantity"].astype(float)
             tel = tel.loc[tel["facility_id"].isin(known_ids)]
 
@@ -648,7 +639,6 @@ class DataLoaderGraph:
                 tel = tel.sort_values("timestamp")
                 agg = tel.groupby(grain, as_index=False).agg(
                     quantity=("quantity", "last"),
-                    quantity_unit=("quantity_unit", "first"),
                 )
                 result["observed_inventory"] = agg
                 self._log.debug("observed_inventory_built", rows=len(agg))
@@ -674,7 +664,7 @@ class DataLoaderGraph:
 
         demand = (
             df.groupby(["source_id", "date", "commodity_category"], as_index=False)
-            .agg(quantity=("quantity", "sum"), quantity_unit=("quantity_unit", "first"))
+            .agg(quantity=("quantity", "sum"))
             .rename(columns={"source_id": "facility_id"})
         )
         return demand
@@ -694,7 +684,7 @@ class DataLoaderGraph:
 
         supply = (
             df.groupby(["target_id", "date", "commodity_category"], as_index=False)
-            .agg(quantity=("quantity", "sum"), quantity_unit=("quantity_unit", "first"))
+            .agg(quantity=("quantity", "sum"))
             .rename(columns={"target_id": "facility_id"})
         )
         return supply

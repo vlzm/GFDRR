@@ -34,7 +34,6 @@ def test_edge_reliability_bounds() -> None:
         target_id="b",
         modal_type="road",
         distance=1.0,
-        distance_unit="km",
         lead_time_hours=2.0,
         reliability=0.95,
     )
@@ -44,7 +43,6 @@ def test_edge_reliability_bounds() -> None:
             target_id="b",
             modal_type="road",
             distance=1.0,
-            distance_unit="km",
             lead_time_hours=2.0,
             reliability=1.5,
         )
@@ -57,7 +55,6 @@ def test_demand_min_order_optional() -> None:
         commodity_category="working_bike",
         date=date(2025, 1, 1),
         quantity=10.0,
-        quantity_unit="bike",
     )
     assert d.min_order_quantity is None
 

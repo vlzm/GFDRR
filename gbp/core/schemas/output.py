@@ -19,7 +19,6 @@ class SolutionFlow(BaseModel):
     commodity_category: str
     period_id: str
     quantity: float = Field(ge=0)
-    quantity_unit: str
 
 
 class SolutionInventory(BaseModel):
@@ -32,7 +31,6 @@ class SolutionInventory(BaseModel):
     commodity_category: str
     period_id: str
     quantity: float = Field(ge=0)
-    quantity_unit: str
 
 
 class SolutionUnmetDemand(BaseModel):
@@ -45,7 +43,6 @@ class SolutionUnmetDemand(BaseModel):
     commodity_category: str
     period_id: str
     shortfall: float = Field(ge=0)
-    quantity_unit: str
 
 
 class SolutionMetadata(BaseModel):
@@ -73,7 +70,6 @@ class SimulationFlowLog(BaseModel):
     commodity_category: str
     period_id: str
     quantity: float = Field(ge=0)
-    quantity_unit: str
 
 
 class SimulationInventoryLog(BaseModel):
@@ -86,7 +82,6 @@ class SimulationInventoryLog(BaseModel):
     commodity_category: str
     period_id: str
     quantity: float = Field(ge=0)
-    quantity_unit: str
 
 
 class SimulationResourceLog(BaseModel):

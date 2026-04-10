@@ -17,7 +17,6 @@ class Demand(BaseModel):
     date: dt.date
     quantity: float = Field(ge=0)
     min_order_quantity: float | None = Field(default=None, ge=0)
-    quantity_unit: str
 
 
 class Supply(BaseModel):
@@ -29,7 +28,6 @@ class Supply(BaseModel):
     commodity_category: str
     date: dt.date
     quantity: float = Field(ge=0)
-    quantity_unit: str
 
 
 class InventoryInitial(BaseModel):
@@ -40,7 +38,6 @@ class InventoryInitial(BaseModel):
     facility_id: str
     commodity_category: str
     quantity: float = Field(ge=0)
-    quantity_unit: str
 
 
 class InventoryInTransit(BaseModel):
@@ -53,6 +50,5 @@ class InventoryInTransit(BaseModel):
     modal_type: str
     commodity_category: str
     quantity: float = Field(ge=0)
-    quantity_unit: str
     departure_date: dt.date
     expected_arrival_date: dt.date

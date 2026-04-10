@@ -33,7 +33,6 @@ def _minimal_raw_frames() -> dict[str, pd.DataFrame]:
                 "resource_category_id": ["rebalancing_truck"],
                 "name": ["Rebalancing truck"],
                 "base_capacity": [20.0],
-                "capacity_unit": ["bike"],
             }
         ),
         "planning_horizon": pd.DataFrame(

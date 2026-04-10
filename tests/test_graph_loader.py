@@ -249,7 +249,7 @@ class TestObservations:
         assert not raw.observed_flow.empty
         expected = {
             "source_id", "target_id", "commodity_category",
-            "date", "quantity", "quantity_unit",
+            "date", "quantity",
         }
         assert expected.issubset(raw.observed_flow.columns)
 
@@ -265,7 +265,7 @@ class TestObservations:
         assert not raw.observed_inventory.empty
         expected = {
             "facility_id", "commodity_category",
-            "date", "quantity", "quantity_unit",
+            "date", "quantity",
         }
         assert expected.issubset(raw.observed_inventory.columns)
 

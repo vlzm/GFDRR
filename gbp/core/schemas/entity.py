@@ -36,7 +36,6 @@ class ResourceCategory(BaseModel):
     resource_category_id: str
     name: str
     base_capacity: float = Field(ge=0)
-    capacity_unit: str
     description: str | None = None
 
 

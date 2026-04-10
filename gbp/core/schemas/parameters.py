@@ -16,7 +16,6 @@ class OperationCapacity(BaseModel):
     operation_type: str
     commodity_category: str | None = None
     capacity: float = Field(gt=0)
-    capacity_unit: str
 
 
 class OperationCost(BaseModel):
@@ -29,7 +28,6 @@ class OperationCost(BaseModel):
     commodity_category: str
     date: dt.date
     cost_per_unit: float = Field(ge=0)
-    cost_unit: str
 
 
 class TransportCost(BaseModel):
@@ -43,7 +41,6 @@ class TransportCost(BaseModel):
     resource_category: str
     date: dt.date
     cost_per_unit: float = Field(ge=0)
-    cost_unit: str
 
 
 class ResourceCost(BaseModel):
@@ -56,4 +53,3 @@ class ResourceCost(BaseModel):
     attribute_name: str
     date: dt.date | None = None
     value: float
-    value_unit: str

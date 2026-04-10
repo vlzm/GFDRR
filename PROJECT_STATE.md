@@ -1,6 +1,6 @@
 # Project State
 
-> Last updated: 2026-04-01
+> Last updated: 2026-04-10
 
 ## Vision
 
@@ -119,6 +119,12 @@ Core library `gbp` with data model, build pipeline, bike-sharing loader. All ref
 - `lead_time.py` — `np.searchsorted` instead of triple loop (O(E×P×log P) vs O(E×P²))
 - `pyproject.toml` — unused future deps moved to optional groups (api, db, observability, storage)
 - `rebalancer/` marked as early prototype (will be redesigned as Task)
+
+**Dead field cleanup (2026-04-10):**
+- Removed all `*_unit` fields from schemas (demand, supply, inventory, edges, observations, parameters, pricing, output). Only `commodity_categories.unit` retained as single source of truth for measurement units.
+- Removed `capacity_consumption` from `EdgeCommodity` (never read by any consumer).
+- Removed `_check_unit_consistency` validation (no longer needed without per-table unit fields).
+- Updated loaders, factory, build pipeline, test fixtures accordingly.
 
 ### Environment
 

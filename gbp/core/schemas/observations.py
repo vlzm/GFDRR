@@ -17,7 +17,6 @@ class ObservedFlow(BaseModel):
     commodity_category: str
     date: dt.date
     quantity: float = Field(ge=0)
-    quantity_unit: str
     modal_type: str | None = None
     resource_id: str | None = None
 
@@ -31,4 +30,3 @@ class ObservedInventory(BaseModel):
     commodity_category: str
     date: dt.date
     quantity: float = Field(ge=0)
-    quantity_unit: str

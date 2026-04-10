@@ -32,7 +32,6 @@ def _minimal_resource_categories() -> pd.DataFrame:
         "resource_category_id": ["truck"],
         "name": ["Truck"],
         "base_capacity": [20.0],
-        "capacity_unit": ["unit"],
     })
 
 
@@ -129,7 +128,6 @@ class TestMakeRawModelCustom:
             "facility_id": ["s1"],
             "commodity_category": ["bike"],
             "quantity": [10.0],
-            "quantity_unit": ["unit"],
         })
         raw = make_raw_model(
             facilities=_minimal_facilities(),
@@ -148,7 +146,6 @@ class TestMakeRawModelCustom:
             "commodity_category": ["bike"],
             "date": [date(2025, 1, 1)],
             "quantity": [5.0],
-            "quantity_unit": ["unit"],
         })
         raw = make_raw_model(
             facilities=_minimal_facilities(),

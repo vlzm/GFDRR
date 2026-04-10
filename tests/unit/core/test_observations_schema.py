@@ -18,7 +18,6 @@ class TestObservedFlow:
             commodity_category="working_bike",
             date=date(2025, 1, 1),
             quantity=5.0,
-            quantity_unit="bike",
         )
         assert row.quantity == 5.0
 
@@ -29,7 +28,6 @@ class TestObservedFlow:
             commodity_category="working_bike",
             date=date(2025, 1, 1),
             quantity=1.0,
-            quantity_unit="bike",
             modal_type="road",
             resource_id="truck_1",
         )
@@ -43,7 +41,6 @@ class TestObservedFlow:
             commodity_category="working_bike",
             date=date(2025, 1, 1),
             quantity=1.0,
-            quantity_unit="bike",
         )
         assert row.modal_type is None
         assert row.resource_id is None
@@ -56,8 +53,7 @@ class TestObservedFlow:
                 commodity_category="working_bike",
                 date=date(2025, 1, 1),
                 quantity=-1.0,
-                quantity_unit="bike",
-            )
+                )
 
     def test_extra_field_rejected(self) -> None:
         with pytest.raises(ValidationError):
@@ -67,8 +63,7 @@ class TestObservedFlow:
                 commodity_category="working_bike",
                 date=date(2025, 1, 1),
                 quantity=1.0,
-                quantity_unit="bike",
-                extra_field="bad",  # type: ignore[call-arg]
+                    extra_field="bad",  # type: ignore[call-arg]
             )
 
 
@@ -79,7 +74,6 @@ class TestObservedInventory:
             commodity_category="working_bike",
             date=date(2025, 1, 1),
             quantity=10.0,
-            quantity_unit="bike",
         )
         assert row.facility_id == "s1"
 
@@ -90,8 +84,7 @@ class TestObservedInventory:
                 commodity_category="working_bike",
                 date=date(2025, 1, 1),
                 quantity=-1.0,
-                quantity_unit="bike",
-            )
+                )
 
     def test_extra_field_rejected(self) -> None:
         with pytest.raises(ValidationError):
@@ -100,6 +93,5 @@ class TestObservedInventory:
                 commodity_category="working_bike",
                 date=date(2025, 1, 1),
                 quantity=1.0,
-                quantity_unit="bike",
-                extra_field="bad",  # type: ignore[call-arg]
+                    extra_field="bad",  # type: ignore[call-arg]
             )
