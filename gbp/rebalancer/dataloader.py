@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pandas as pd
 
+from gbp.build.pipeline import build_model
 from gbp.loaders.protocols import GraphLoaderProtocol
 
 from .contracts import (
@@ -46,7 +47,7 @@ class DataLoaderRebalancer:
         if date is None:
             date = self.dataloader_graph.available_dates[0]
 
-        res = self.dataloader_graph.resolved
+        res = build_model(self.dataloader_graph.raw)
         src = self.dataloader_graph.source
 
         inventory_type = self.config.inventory_node_type

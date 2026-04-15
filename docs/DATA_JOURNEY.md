@@ -64,8 +64,11 @@ DataLoaderMock({"n": 8, "n_depots": 2, "n_timestamps": 48})
 `DataLoaderGraph` берёт доменные данные и собирает `RawModelData`. Внутри `_build_raw_model()` вызываются builder-методы для **структурных** таблиц и register-методы для **параметрических** атрибутов.
 
 ```python
+from gbp.build.pipeline import build_model
+
 loader = DataLoaderGraph(mock, GraphLoaderConfig(distance_backend="haversine"))
-loader.load_data()
+raw = loader.load()
+resolved = build_model(raw)
 ```
 
 ### 3.1. `_build_temporal()` — временная ось

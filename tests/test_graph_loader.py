@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import pandas as pd
-
+from gbp.build.pipeline import build_model
 from gbp.core.enums import ModalType
 from gbp.core.model import RawModelData, ResolvedModelData
 from gbp.loaders import DataLoaderGraph, DataLoaderMock, GraphLoaderConfig
@@ -25,9 +24,13 @@ class TestLoading:
         assert loaded_graph_loader.available_dates is not None
         assert len(loaded_graph_loader.available_dates) == 48
 
-    def test_raw_and_resolved_types(self, loaded_graph_loader: DataLoaderGraph) -> None:
+    def test_raw_and_resolved_types(
+        self,
+        loaded_graph_loader: DataLoaderGraph,
+        resolved_graph_model: ResolvedModelData,
+    ) -> None:
         assert isinstance(loaded_graph_loader.raw, RawModelData)
-        assert isinstance(loaded_graph_loader.resolved, ResolvedModelData)
+        assert isinstance(resolved_graph_model, ResolvedModelData)
 
 
 # =============================================================================
@@ -48,10 +51,19 @@ class TestRawModel:
         assert cc_ids == set(COMMODITY_CATEGORIES)
         assert RESOURCE_CATEGORY in raw.resource_categories["resource_category_id"].values
 
-    def test_periods_align_with_mock_horizon(self, loaded_graph_loader: DataLoaderGraph) -> None:
+    def test_periods_align_with_mock_horizon(
+        self,
+        loaded_graph_loader: DataLoaderGraph,
+        resolved_graph_model: ResolvedModelData,
+    ) -> None:
+        # The loader no longer emits ``periods`` directly — build_model derives
+        # them from the horizon segments.  ``raw.periods`` must stay absent,
+        # and the resolved grid must be daily.
         raw = loaded_graph_loader.raw
-        assert not raw.periods.empty
-        assert raw.periods["period_type"].iloc[0] == "day"
+        assert raw.periods is None
+        assert resolved_graph_model.periods is not None and not resolved_graph_model.periods.empty
+        assert resolved_graph_model.periods["period_type"].iloc[0] == "day"
+        assert "periods" in resolved_graph_model.build_report.derivations
 
 
 # =============================================================================
@@ -60,16 +72,18 @@ class TestRawModel:
 
 
 class TestResolvedModel:
-    def test_edges_fully_connected_when_enabled(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        res = loaded_graph_loader.resolved
+    def test_edges_fully_connected_when_enabled(
+        self, resolved_graph_model: ResolvedModelData,
+    ) -> None:
+        res = resolved_graph_model
         assert res.edges is not None
         expected = N_TOTAL * (N_TOTAL - 1)
         assert len(res.edges) == expected
         assert (res.edges["modal_type"] == ModalType.ROAD.value).all()
         assert (res.edges["distance"] > 0).all()
 
-    def test_edge_commodities(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        res = loaded_graph_loader.resolved
+    def test_edge_commodities(self, resolved_graph_model: ResolvedModelData) -> None:
+        res = resolved_graph_model
         assert res.edge_commodities is not None
         assert not res.edge_commodities.empty
         cc_in_edges = set(res.edge_commodities["commodity_category"])
@@ -99,9 +113,11 @@ class TestModelValidation:
     def test_raw_validate(self, loaded_graph_loader: DataLoaderGraph) -> None:
         loaded_graph_loader.raw.validate()
 
-    def test_resolved_has_expected_tables(self, loaded_graph_loader: DataLoaderGraph) -> None:
+    def test_resolved_has_expected_tables(
+        self, resolved_graph_model: ResolvedModelData,
+    ) -> None:
         """``ResolvedModelData.validate`` expects raw date columns; time-resolved tables use ``period_id``."""
-        res = loaded_graph_loader.resolved
+        res = resolved_graph_model
         assert res.facilities is not None
         assert res.edges is not None and not res.edges.empty
         assert res.edge_lead_time_resolved is not None
@@ -116,21 +132,21 @@ class TestConfig:
     def test_build_edges_false(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         loader = DataLoaderGraph(mock, GraphLoaderConfig(build_edges=False))
-        loader.load_data()
-        assert loader.resolved.edges is None or loader.resolved.edges.empty
+        resolved = build_model(loader.load())
+        assert resolved.edges is None or resolved.edges.empty
 
     def test_default_config_has_edges(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         loader = DataLoaderGraph(mock)
-        loader.load_data()
-        assert loader.resolved.edges is not None
-        assert not loader.resolved.edges.empty
+        resolved = build_model(loader.load())
+        assert resolved.edges is not None
+        assert not resolved.edges.empty
 
     def test_euclidean_backend(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         loader = DataLoaderGraph(mock, GraphLoaderConfig(distance_backend="euclidean"))
-        loader.load_data()
-        assert (loader.resolved.edges["distance"] > 0).all()
+        resolved = build_model(loader.load())
+        assert (resolved.edges["distance"] > 0).all()
 
 
 # =============================================================================
@@ -275,10 +291,17 @@ class TestObservations:
         cc_in_inv = set(raw.observed_inventory["commodity_category"])
         assert cc_in_inv == set(COMMODITY_CATEGORIES)
 
-    def test_demand_derived_from_observations(self, loaded_graph_loader: DataLoaderGraph) -> None:
+    def test_demand_derived_from_observations(
+        self,
+        loaded_graph_loader: DataLoaderGraph,
+        resolved_graph_model: ResolvedModelData,
+    ) -> None:
+        # Derivation now happens in build_model, not the loader — demand
+        # appears on the resolved model, not the raw model.
         raw = loaded_graph_loader.raw
-        assert raw.demand is not None
-        assert not raw.demand.empty
+        assert raw.demand is None
+        assert resolved_graph_model.demand is not None and not resolved_graph_model.demand.empty
+        assert "demand" in resolved_graph_model.build_report.derivations
 
     def test_observed_flow_references_known_facilities(
         self, loaded_graph_loader: DataLoaderGraph,
@@ -292,14 +315,14 @@ class TestObservations:
     def test_build_observations_false(self, mock_config: dict) -> None:
         mock = DataLoaderMock(mock_config)
         loader = DataLoaderGraph(mock, GraphLoaderConfig(build_observations=False))
-        loader.load_data()
-        assert loader.raw.observed_flow is None
-        assert loader.raw.observed_inventory is None
+        raw = loader.load()
+        assert raw.observed_flow is None
+        assert raw.observed_inventory is None
 
     def test_resolved_observations_have_period_id(
-        self, loaded_graph_loader: DataLoaderGraph,
+        self, resolved_graph_model: ResolvedModelData,
     ) -> None:
-        res = loaded_graph_loader.resolved
+        res = resolved_graph_model
         if res.observed_flow is not None and not res.observed_flow.empty:
             assert "period_id" in res.observed_flow.columns
             assert "date" not in res.observed_flow.columns

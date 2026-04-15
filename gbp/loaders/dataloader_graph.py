@@ -1,4 +1,4 @@
-"""Assemble ``RawModelData`` from a ``BikeShareSourceProtocol`` and run ``gbp.build.build_model``.
+"""Assemble ``RawModelData`` from a ``BikeShareSourceProtocol``.
 
 Trips and telemetry from the source are mapped to ``observed_flow`` and
 ``observed_inventory`` tables in the model.  Other wide tables (hourly
@@ -6,13 +6,13 @@ inventory matrix) remain on ``loader.source``.
 
 Usage::
 
-    from gbp.loaders import DataLoaderMock, DataLoaderGraph, GraphLoaderConfig
+    from gbp.build.pipeline import build_model
+    from gbp.loaders import DataLoaderGraph, DataLoaderMock, GraphLoaderConfig
 
     mock = DataLoaderMock({"n_stations": 10})
     loader = DataLoaderGraph(mock, GraphLoaderConfig())
-    loader.load_data()
-
-    raw, resolved = loader.raw, loader.resolved
+    raw = loader.load()
+    resolved = build_model(raw)
 """
 
 from __future__ import annotations
@@ -23,10 +23,9 @@ from typing import NamedTuple
 import pandas as pd
 import structlog
 
-from gbp.build.pipeline import build_model
 from gbp.core.attributes.registry import AttributeRegistry
-from gbp.core.enums import AttributeKind, FacilityRole, ModalType, PeriodType
-from gbp.core.model import RawModelData, ResolvedModelData
+from gbp.core.enums import AttributeKind, ModalType, PeriodType
+from gbp.core.model import RawModelData
 
 from .contracts import (
     DepotsSourceSchema,
@@ -87,7 +86,11 @@ class _EntityResult(NamedTuple):
 # ---------------------------------------------------------------------------
 
 class DataLoaderGraph:
-    """Build ``RawModelData`` from a ``BikeShareSourceProtocol`` and run ``gbp.build.build_model``."""
+    """Assemble ``RawModelData`` from a ``BikeShareSourceProtocol``.
+
+    The loader covers only the source → raw transition.  Call
+    ``gbp.build.pipeline.build_model`` explicitly to produce the resolved model.
+    """
 
     def __init__(
         self,
@@ -98,37 +101,31 @@ class DataLoaderGraph:
         self._config = config or GraphLoaderConfig()
         self._log = log.bind(loader="graph_core")
         self._raw: RawModelData | None = None
-        self._resolved: ResolvedModelData | None = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def load_data(self) -> None:
-        """Load source tables, assemble ``RawModelData``, run the build pipeline."""
+    def load(self) -> RawModelData:
+        """Load source tables and assemble ``RawModelData``.
+
+        Validation and derivation of optional tables happen later, inside
+        ``build_model``.  The returned raw model is cached on the loader and
+        also accessible via the :attr:`raw` property.
+        """
         self._log.info("load_start")
         self._source.load_data()
         self._validate_source()
 
         self._raw = self._build_raw_model()
-        self._raw.validate()
-        self._resolved = build_model(self._raw)
-
-        n_fac = len(self._resolved.facilities)
-        n_e = len(self._resolved.edges) if self._resolved.edges is not None else 0
-        self._log.info("load_done", facilities=n_fac, edges=n_e)
+        self._log.info("load_done", facilities=len(self._raw.facilities))
+        return self._raw
 
     @property
     def raw(self) -> RawModelData:
         if self._raw is None:
-            raise ValueError("Data is not loaded. Call load_data() first.")
+            raise ValueError("Data is not loaded. Call load() first.")
         return self._raw
-
-    @property
-    def resolved(self) -> ResolvedModelData:
-        if self._resolved is None:
-            raise ValueError("Data is not loaded. Call load_data() first.")
-        return self._resolved
 
     @property
     def available_dates(self) -> pd.DatetimeIndex:
@@ -166,14 +163,6 @@ class DataLoaderGraph:
         observations: dict[str, pd.DataFrame | None] = {}
         if self._config.build_observations:
             observations = self._build_observations(entities)
-            obs_flow = observations.get("observed_flow")
-            if obs_flow is not None and not obs_flow.empty:
-                demand = self._build_demand_from_observations(obs_flow)
-                if demand is not None:
-                    observations["demand"] = demand
-                supply = self._build_supply_from_observations(obs_flow)
-                if supply is not None:
-                    observations["supply"] = supply
 
         registry = AttributeRegistry()
         node_params = self._build_node_parameters(entities, registry)
@@ -195,29 +184,14 @@ class DataLoaderGraph:
         )
 
     def _build_temporal(self) -> dict[str, pd.DataFrame]:
-        """Planning horizon, segments, and daily periods from source timestamps."""
+        """Planning horizon + single daily segment covering the source timestamps.
+
+        The concrete daily ``periods`` grid is derived by ``build_model`` from
+        these segments, so the loader does not emit it directly.
+        """
         ts = self._source.timestamps
         start_d = pd.Timestamp(ts[0]).normalize().date()
         end_d = (pd.Timestamp(ts[-1]).normalize() + pd.Timedelta(days=1)).date()
-
-        unique_days = pd.date_range(
-            start=pd.Timestamp(ts[0]).normalize(),
-            end=pd.Timestamp(ts[-1]).normalize(),
-            freq="D",
-        )
-        period_rows = []
-        for i, day in enumerate(unique_days):
-            d0 = day.date()
-            d1 = (day + pd.Timedelta(days=1)).date()
-            period_rows.append({
-                "period_id": f"p{i}",
-                "planning_horizon_id": "h1",
-                "segment_index": 0,
-                "period_index": i,
-                "period_type": PeriodType.DAY.value,
-                "start_date": d0,
-                "end_date": d1,
-            })
 
         return {
             "planning_horizon": pd.DataFrame({
@@ -233,7 +207,6 @@ class DataLoaderGraph:
                 "end_date": [end_d],
                 "period_type": PeriodType.DAY.value,
             }),
-            "periods": pd.DataFrame(period_rows),
         }
 
     def _build_entities(self) -> _EntityResult:
@@ -284,15 +257,15 @@ class DataLoaderGraph:
         )
 
     def _build_behavior(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
-        """Facility roles, operations, and edge generation rules."""
-        role_rows: list[dict] = []
+        """Facility operations and edge generation rules.
+
+        Roles are derived by ``build_model`` from ``(facility_type, operations)``
+        via :func:`gbp.core.roles.derive_roles`; the loader intentionally does
+        not emit a ``facility_roles`` table.
+        """
         op_rows: list[dict] = []
 
         for did in entities.depot_ids:
-            role_rows.extend([
-                {"facility_id": did, "role": FacilityRole.STORAGE.value},
-                {"facility_id": did, "role": FacilityRole.TRANSSHIPMENT.value},
-            ])
             op_rows.extend([
                 {"facility_id": did, "operation_type": "receiving", "enabled": True},
                 {"facility_id": did, "operation_type": "storage", "enabled": True},
@@ -300,11 +273,6 @@ class DataLoaderGraph:
             ])
 
         for sid in entities.station_ids:
-            role_rows.extend([
-                {"facility_id": sid, "role": FacilityRole.SINK.value},
-                {"facility_id": sid, "role": FacilityRole.STORAGE.value},
-                {"facility_id": sid, "role": FacilityRole.SOURCE.value},
-            ])
             op_rows.extend([
                 {"facility_id": sid, "operation_type": "receiving", "enabled": True},
                 {"facility_id": sid, "operation_type": "storage", "enabled": True},
@@ -339,7 +307,6 @@ class DataLoaderGraph:
             })
 
         return {
-            "facility_roles": pd.DataFrame(role_rows),
             "facility_operations": pd.DataFrame(op_rows),
             "edge_rules": edge_rules,
         }
@@ -432,8 +399,15 @@ class DataLoaderGraph:
         temporal: dict[str, pd.DataFrame],
     ) -> None:
         """Register facility fixed costs (stations and depots) in the attribute registry."""
-        periods = temporal["periods"]
-        horizon_dates = [p["start_date"] for _, p in periods.iterrows()]
+        ts = self._source.timestamps
+        horizon_dates = [
+            d.date()
+            for d in pd.date_range(
+                start=pd.Timestamp(ts[0]).normalize(),
+                end=pd.Timestamp(ts[-1]).normalize(),
+                freq="D",
+            )
+        ]
 
         cost_rows: list[dict] = []
 
@@ -635,42 +609,3 @@ class DataLoaderGraph:
 
         return result
 
-    @staticmethod
-    def _build_demand_from_observations(
-        observed_flow: pd.DataFrame,
-    ) -> pd.DataFrame | None:
-        """Derive demand from observed_flow (departures per facility per date).
-
-        Only organic flows (resource_id is null) are counted.
-        """
-        mask = observed_flow["resource_id"].isna()
-        df = observed_flow.loc[mask]
-        if df.empty:
-            return None
-
-        demand = (
-            df.groupby(["source_id", "date", "commodity_category"], as_index=False)
-            .agg(quantity=("quantity", "sum"))
-            .rename(columns={"source_id": "facility_id"})
-        )
-        return demand
-
-    @staticmethod
-    def _build_supply_from_observations(
-        observed_flow: pd.DataFrame,
-    ) -> pd.DataFrame | None:
-        """Derive supply from observed_flow (arrivals per facility per date).
-
-        Only organic flows (resource_id is null) are counted.
-        """
-        mask = observed_flow["resource_id"].isna()
-        df = observed_flow.loc[mask]
-        if df.empty:
-            return None
-
-        supply = (
-            df.groupby(["target_id", "date", "commodity_category"], as_index=False)
-            .agg(quantity=("quantity", "sum"))
-            .rename(columns={"target_id": "facility_id"})
-        )
-        return supply

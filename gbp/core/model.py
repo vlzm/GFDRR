@@ -32,12 +32,15 @@ ResolvedModelData adds:
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import pandas as pd
 from pydantic import BaseModel
 
 from gbp.core.attributes.registry import AttributeRegistry
+
+if TYPE_CHECKING:
+    from gbp.build.report import BuildReport
 
 from gbp.core.schemas import (
     Commodity,
@@ -389,18 +392,18 @@ class _TabularModelBase(_ModelDataMixin):
 
     # ── entity: what exists in the network ────────────────────────────
     facilities: pd.DataFrame
-    commodity_categories: pd.DataFrame
-    resource_categories: pd.DataFrame
+    commodity_categories: pd.DataFrame | None = None
+    resource_categories: pd.DataFrame | None = None
     commodities: pd.DataFrame | None = None
     resources: pd.DataFrame | None = None
 
     # ── temporal: planning horizon and period grid ────────────────────
     planning_horizon: pd.DataFrame
     planning_horizon_segments: pd.DataFrame
-    periods: pd.DataFrame
+    periods: pd.DataFrame | None = None
 
     # ── behavior: roles, operations, rules ────────────────────────────
-    facility_roles: pd.DataFrame
+    facility_roles: pd.DataFrame | None = None
     facility_operations: pd.DataFrame
     facility_availability: pd.DataFrame | None = None
     edge_rules: pd.DataFrame
@@ -546,12 +549,8 @@ class _TabularModelBase(_ModelDataMixin):
 
     _REQUIRED: ClassVar[frozenset[str]] = frozenset({
         "facilities",
-        "commodity_categories",
-        "resource_categories",
         "planning_horizon",
         "planning_horizon_segments",
-        "periods",
-        "facility_roles",
         "facility_operations",
         "edge_rules",
     })
@@ -596,6 +595,9 @@ class ResolvedModelData(_TabularModelBase):
     edge_spines: dict[str, pd.DataFrame] | None = None
     resource_spines: dict[str, pd.DataFrame] | None = None
 
+    # ── diagnostics ────────────────────────────────────────────────────
+    build_report: BuildReport | None = None
+
     # ── class-level metadata ──────────────────────────────────────────
 
     _GROUPS: ClassVar[dict[str, list[str]]] = {
@@ -610,6 +612,10 @@ class ResolvedModelData(_TabularModelBase):
         **_TabularModelBase._SCHEMAS,
         "edge_lead_time_resolved": EdgeLeadTimeResolved,
     }
+
+    _NON_TABLE_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"attributes", "build_report"}
+    )
 
     # ── Resolved-only group access properties ───────────────────────────
 

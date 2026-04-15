@@ -12,10 +12,18 @@ Three levels of granularity:
 
 from __future__ import annotations
 
+import pandas as pd
+
 from gbp.consumers.simulator.config import EnvironmentConfig
+from gbp.consumers.simulator.exceptions import SimulatorConfigError
 from gbp.consumers.simulator.log import SimulationLog
 from gbp.consumers.simulator.state import PeriodRow, SimulationState, init_state
 from gbp.core.model import ResolvedModelData
+
+
+def _is_nonempty(df: pd.DataFrame | None) -> bool:
+    """Return ``True`` when a DataFrame is present and has at least one row."""
+    return df is not None and not df.empty
 
 
 class Environment:
@@ -31,7 +39,25 @@ class Environment:
         resolved: ResolvedModelData,
         config: EnvironmentConfig,
     ) -> None:
-        """Initialise the environment from resolved data and config."""
+        """Initialise the environment from resolved data and config.
+
+        Raises:
+            SimulatorConfigError: When the resolved model carries no demand,
+                supply, and no initial inventory — the simulator has nothing
+                to drive the flow.
+        """
+        has_any_flow_input = (
+            _is_nonempty(resolved.demand)
+            or _is_nonempty(resolved.supply)
+            or _is_nonempty(resolved.inventory_initial)
+        )
+        if not has_any_flow_input:
+            raise SimulatorConfigError(
+                "Environment requires demand, supply, or inventory_initial. "
+                "Provide them in RawModelData, or provide observed_flow / "
+                "observed_inventory so build_model() can derive them."
+            )
+
         self._resolved = resolved
         self._config = config
         self._state = init_state(resolved)

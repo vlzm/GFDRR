@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Protocol
 import pandas as pd
 
 if TYPE_CHECKING:
-    from gbp.core.model import RawModelData, ResolvedModelData
+    from gbp.core.model import RawModelData
 
 
 # ---------------------------------------------------------------------------
@@ -56,13 +56,14 @@ class BikeShareSourceProtocol(Protocol):
 # ---------------------------------------------------------------------------
 
 class GraphLoaderProtocol(Protocol):
-    """Builds ``gbp.core`` model tables from a data source."""
+    """Builds a ``RawModelData`` from a data source.
+
+    Consumers that need a ``ResolvedModelData`` must call
+    ``gbp.build.pipeline.build_model(loader.raw)`` themselves.
+    """
 
     @property
     def raw(self) -> RawModelData: ...
-
-    @property
-    def resolved(self) -> ResolvedModelData: ...
 
     @property
     def source(self) -> BikeShareSourceProtocol: ...
@@ -70,4 +71,4 @@ class GraphLoaderProtocol(Protocol):
     @property
     def available_dates(self) -> pd.DatetimeIndex: ...
 
-    def load_data(self) -> None: ...
+    def load(self) -> RawModelData: ...
