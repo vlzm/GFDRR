@@ -71,6 +71,21 @@ class EdgeVehicle(BaseModel):
     max_vehicles_per_period: int | None = Field(default=None, ge=0)
 
 
+class DistanceMatrix(BaseModel):
+    """Pairwise distance / travel duration between facilities.
+
+    Declarative fact table: the loader computes distances (haversine, OSRM, …)
+    and ``build_model()`` merges them onto materialized edges.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_id: str
+    target_id: str
+    distance: float = Field(ge=0)
+    duration: float = Field(ge=0)
+
+
 class EdgeLeadTimeResolved(BaseModel):
     """Generated: lead time in periods from departure period (edge x period_id)."""
 

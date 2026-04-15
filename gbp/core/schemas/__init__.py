@@ -13,6 +13,7 @@ from gbp.core.schemas.demand_supply import (
     Supply,
 )
 from gbp.core.schemas.edge import (
+    DistanceMatrix,
     Edge,
     EdgeCapacity,
     EdgeCommodity,
@@ -86,6 +87,7 @@ __all__ = [
     "CommodityHierarchyType",
     "CommodityProcurementCostTier",
     "CommoditySellPriceTier",
+    "DistanceMatrix",
     "Demand",
     "Edge",
     "EdgeCapacity",

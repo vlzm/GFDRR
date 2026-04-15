@@ -160,7 +160,7 @@ class DataLoaderGraph:
         temporal = self._build_temporal()
         entities = self._build_entities()
         behavior = self._build_behavior(entities)
-        edge_data = self._build_edges(entities) if self._config.build_edges else {}
+        distance_data = self._build_distance_matrix(entities) if self._config.build_edges else {}
         resources = self._build_resources(entities)
 
         observations: dict[str, pd.DataFrame | None] = {}
@@ -184,7 +184,7 @@ class DataLoaderGraph:
             **temporal,
             **entities.tables,
             **behavior,
-            **edge_data,
+            **distance_data,
             **node_params,
             **resources,
             **{k: v for k, v in observations.items() if v is not None},
@@ -344,8 +344,8 @@ class DataLoaderGraph:
             "edge_rules": edge_rules,
         }
 
-    def _build_edges(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
-        """All-pairs edges with distance computation and commodity mapping."""
+    def _build_distance_matrix(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
+        """All-pairs pairwise distances and travel durations between facilities."""
         facilities = entities.tables["facilities"]
         latlon = {
             str(r["facility_id"]): (float(r["lat"]), float(r["lon"]))
@@ -354,8 +354,7 @@ class DataLoaderGraph:
         ids = list(facilities["facility_id"].astype(str))
         speed = self._config.default_speed_kmh
 
-        edge_records: list[dict] = []
-        ec_records: list[dict] = []
+        records: list[dict] = []
         for i, a in enumerate(ids):
             la0, lo0 = latlon[a]
             for j, b in enumerate(ids):
@@ -363,28 +362,15 @@ class DataLoaderGraph:
                     continue
                 la1, lo1 = latlon[b]
                 dkm = _pair_distance_km(la0, lo0, la1, lo1, self._config.distance_backend)
-                lt_h = dkm / speed if speed > 0 else 0.0
-                edge_records.append({
+                dur = dkm / speed if speed > 0 else 0.0
+                records.append({
                     "source_id": a,
                     "target_id": b,
-                    "modal_type": ModalType.ROAD.value,
                     "distance": dkm,
-                    "lead_time_hours": max(lt_h, 1e-6),
-                    "reliability": None,
+                    "duration": max(dur, 1e-6),
                 })
-                for cc in COMMODITY_CATEGORIES:
-                    ec_records.append({
-                        "source_id": a,
-                        "target_id": b,
-                        "modal_type": ModalType.ROAD.value,
-                        "commodity_category": cc,
-                        "enabled": True,
-                    })
 
-        return {
-            "edges": pd.DataFrame(edge_records),
-            "edge_commodities": pd.DataFrame(ec_records),
-        }
+        return {"distance_matrix": pd.DataFrame(records)}
 
     def _build_node_parameters(
         self,

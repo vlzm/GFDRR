@@ -126,6 +126,13 @@ Core library `gbp` with data model, build pipeline, bike-sharing loader. All ref
 - Removed `_check_unit_consistency` validation (no longer needed without per-table unit fields).
 - Updated loaders, factory, build pipeline, test fixtures accordingly.
 
+**Edge materialization boundary refactor (2026-04-12):**
+- Moved edge materialization from loader to `build_model()`. Principle: Raw = declaration, Resolved = materialization.
+- `DataLoaderGraph._build_edges()` replaced with `_build_distance_matrix()` — loader now produces `distance_matrix` (source_id, target_id, distance, duration) instead of `edges` + `edge_commodities`.
+- New `DistanceMatrix` Pydantic schema; `distance_matrix` added as optional field to both `RawModelData` and `ResolvedModelData`.
+- `_ensure_edges_and_commodities()` in pipeline now passes `raw.distance_matrix` to `build_edges()` — this was the existing fallback path, now promoted to primary.
+- `edges`/`edge_commodities` remain as optional override fields in Raw (escape hatch for external pre-computed edge data).
+
 ### Environment
 
 Step-by-step simulation engine поверх `ResolvedModelData`. Design doc: `docs/design/environment_design.md`.

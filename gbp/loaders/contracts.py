@@ -23,7 +23,7 @@ class GraphLoaderConfig(BaseModel):
 
     distance_backend: Literal["haversine", "euclidean"] = "haversine"
     default_speed_kmh: float = Field(default=50.0, gt=0)
-    build_edges: bool = True
+    build_edges: bool = True  # compute distance_matrix + generate edge_rules
     build_observations: bool = True
 
 

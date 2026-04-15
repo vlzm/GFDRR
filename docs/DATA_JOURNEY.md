@@ -90,9 +90,9 @@ periods (2 строки):
 
 Каждый facility получает роли (sink, source, storage, transshipment) и операции (receiving, storage, dispatch). Edge rules: все со всеми, road.
 
-### 3.4. `_build_edges()` — рёбра графа
+### 3.4. `_build_distance_matrix()` — матрица расстояний
 
-90 рёбер (10 x 9), каждое с distance (haversine) и lead_time_hours (distance / 50 км/ч). Плюс edge_commodities — working_bike разрешён на каждом ребре.
+90 пар (10 x 9), каждая с distance (haversine) и duration (distance / 50 км/ч). Матрица кладётся в `raw.distance_matrix` — декларативная таблица фактов о расстояниях. Материализация рёбер (`edges`, `edge_commodities`) происходит позже в `build_model()`.
 
 ### 3.5. `_build_node_parameters()` — начальный инвентарь (структурное)
 
@@ -145,11 +145,11 @@ def _build_raw_model(self) -> RawModelData:
     temporal = self._build_temporal()
     entities = self._build_entities()
     behavior = self._build_behavior(entities)
-    edge_data = self._build_edges(entities)
+    distance_data = self._build_distance_matrix(entities)
     flow = self._build_node_parameters(entities)
 
     # Структурные таблицы -> RawModelData
-    raw = RawModelData(**{**temporal, **entities.tables, **behavior, **edge_data, **flow})
+    raw = RawModelData(**{**temporal, **entities.tables, **behavior, **distance_data, **flow})
 
     # Параметрические атрибуты -> registry
     self._register_costs(raw.attributes, temporal)
@@ -314,7 +314,7 @@ DataLoaderGraph                hierarchy / scenario            resolve_lead_time
   |  _build_temporal()         parameter_tables                assemble_spines
   |  _build_entities()           = registry.to_dict()            (registry.specs
   |  _build_behavior()                                            + structural specs)
-  |  _build_edges()            registry.register()                      |
+  |  _build_distance_matrix()   registry.register()                      |
   |  _build_node_parameters()        registry.get(name)                       v
   | параметрические:           registry.get_by_kind(COST)      ResolvedModelData
   |  _register_costs()                                           + resolved registry

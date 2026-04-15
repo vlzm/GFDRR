@@ -42,6 +42,7 @@ from gbp.core.attributes.registry import AttributeRegistry
 from gbp.core.schemas import (
     Commodity,
     CommodityCategory,
+    DistanceMatrix,
     CommodityHierarchyLevel,
     CommodityHierarchyMembership,
     CommodityHierarchyNode,
@@ -370,43 +371,39 @@ class _ModelDataMixin:
 
 
 # ---------------------------------------------------------------------------
-# RawModelData
+# Shared tabular base — 40 fields common to Raw and Resolved
 # ---------------------------------------------------------------------------
 
-@dataclass
-class RawModelData(_ModelDataMixin):
-    """Raw input tables keyed by ``date`` where time-varying (pre-resolution).
+@dataclass(kw_only=True)
+class _TabularModelBase(_ModelDataMixin):
+    """Fields, groups, schemas, and required-set shared by Raw and Resolved.
 
-    Tables are organized into logical groups — see module docstring.
-    Access groups via properties (``entity_tables``, ``temporal_tables``, etc.)
-    or call ``table_summary()`` for a quick overview.
+    Both ``RawModelData`` and ``ResolvedModelData`` hold the same 40 logical
+    tables (facilities, edges, demand, etc.); the only structural difference
+    is that ``ResolvedModelData`` also carries build artifacts (lead-time
+    resolution, transformation, fleet capacity) and assembled spines.
 
-    **Field ordering note:** Fields are grouped by domain rather than by
-    required/optional.  Because Python dataclasses require all fields with
-    defaults to come after those without, some required fields (marked
-    ``# required``) use ``= None`` as a syntactic workaround.  The
-    ``_REQUIRED`` set and ``validate()`` remain the real enforcement — always
-    call ``validate()`` after construction.  All existing code uses keyword
-    arguments, so this reordering does not break any call site.
+    Using ``kw_only=True`` means required fields can be declared alongside
+    their domain group without needing ``= None`` workarounds.
     """
 
     # ── entity: what exists in the network ────────────────────────────
-    facilities: pd.DataFrame                          # required
-    commodity_categories: pd.DataFrame                # required
-    resource_categories: pd.DataFrame                 # required
-    commodities: pd.DataFrame | None = None           # L3 optional
-    resources: pd.DataFrame | None = None             # L3 optional
+    facilities: pd.DataFrame
+    commodity_categories: pd.DataFrame
+    resource_categories: pd.DataFrame
+    commodities: pd.DataFrame | None = None
+    resources: pd.DataFrame | None = None
 
     # ── temporal: planning horizon and period grid ────────────────────
-    planning_horizon: pd.DataFrame = None             # required  # type: ignore[assignment]
-    planning_horizon_segments: pd.DataFrame = None    # required  # type: ignore[assignment]
-    periods: pd.DataFrame = None                      # required  # type: ignore[assignment]
+    planning_horizon: pd.DataFrame
+    planning_horizon_segments: pd.DataFrame
+    periods: pd.DataFrame
 
     # ── behavior: roles, operations, rules ────────────────────────────
-    facility_roles: pd.DataFrame = None               # required  # type: ignore[assignment]
-    facility_operations: pd.DataFrame = None          # required  # type: ignore[assignment]
+    facility_roles: pd.DataFrame
+    facility_operations: pd.DataFrame
     facility_availability: pd.DataFrame | None = None
-    edge_rules: pd.DataFrame = None                   # required  # type: ignore[assignment]
+    edge_rules: pd.DataFrame
 
     # ── edge: identity and attributes ─────────────────────────────────
     edges: pd.DataFrame | None = None
@@ -414,6 +411,7 @@ class RawModelData(_ModelDataMixin):
     edge_capacities: pd.DataFrame | None = None
     edge_commodity_capacities: pd.DataFrame | None = None
     edge_vehicles: pd.DataFrame | None = None
+    distance_matrix: pd.DataFrame | None = None
 
     # ── flow data: demand, supply, inventory ──────────────────────────
     demand: pd.DataFrame | None = None
@@ -421,7 +419,7 @@ class RawModelData(_ModelDataMixin):
     inventory_initial: pd.DataFrame | None = None
     inventory_in_transit: pd.DataFrame | None = None
 
-    # ── observations: historical flow and inventory ──────────────
+    # ── observations: historical flow and inventory ───────────────────
     observed_flow: pd.DataFrame | None = None
     observed_inventory: pd.DataFrame | None = None
 
@@ -473,7 +471,7 @@ class RawModelData(_ModelDataMixin):
         ],
         "edge": [
             "edges", "edge_commodities", "edge_capacities",
-            "edge_commodity_capacities", "edge_vehicles",
+            "edge_commodity_capacities", "edge_vehicles", "distance_matrix",
         ],
         "flow_data": [
             "demand", "supply", "inventory_initial", "inventory_in_transit",
@@ -518,6 +516,7 @@ class RawModelData(_ModelDataMixin):
         "edge_capacities": EdgeCapacity,
         "edge_commodity_capacities": EdgeCommodityCapacity,
         "edge_vehicles": EdgeVehicle,
+        "distance_matrix": DistanceMatrix,
         "demand": Demand,
         "supply": Supply,
         "inventory_initial": InventoryInitial,
@@ -559,83 +558,33 @@ class RawModelData(_ModelDataMixin):
 
 
 # ---------------------------------------------------------------------------
+# RawModelData
+# ---------------------------------------------------------------------------
+
+@dataclass(kw_only=True)
+class RawModelData(_TabularModelBase):
+    """Raw input tables keyed by ``date`` where time-varying (pre-resolution).
+
+    Inherits all 40 tabular fields from ``_TabularModelBase``.  Access groups
+    via properties (``entity_tables``, ``temporal_tables``, etc.) or call
+    ``table_summary()`` for a quick overview.
+    """
+
+
+# ---------------------------------------------------------------------------
 # ResolvedModelData
 # ---------------------------------------------------------------------------
 
-@dataclass
-class ResolvedModelData(_ModelDataMixin):
+@dataclass(kw_only=True)
+class ResolvedModelData(_TabularModelBase):
     """Tables after time resolution (``period_id``) plus generated artifacts.
 
-    Inherits the same logical groups as ``RawModelData`` and adds:
+    Inherits all 40 tabular fields from ``_TabularModelBase`` and adds:
 
     - **generated**: ``edge_lead_time_resolved``, ``transformation_resolved``,
       ``fleet_capacity`` — produced by ``build_model()``
     - **spines**: assembled attribute DataFrames per entity type
-
-    See ``RawModelData`` docstring for field-ordering rationale.
     """
-
-    # ── entity ────────────────────────────────────────────────────────
-    facilities: pd.DataFrame
-    commodity_categories: pd.DataFrame
-    resource_categories: pd.DataFrame
-    commodities: pd.DataFrame | None = None
-    resources: pd.DataFrame | None = None
-
-    # ── temporal ──────────────────────────────────────────────────────
-    planning_horizon: pd.DataFrame = None             # type: ignore[assignment]
-    planning_horizon_segments: pd.DataFrame = None    # type: ignore[assignment]
-    periods: pd.DataFrame = None                      # type: ignore[assignment]
-
-    # ── behavior ──────────────────────────────────────────────────────
-    facility_roles: pd.DataFrame = None               # type: ignore[assignment]
-    facility_operations: pd.DataFrame = None          # type: ignore[assignment]
-    facility_availability: pd.DataFrame | None = None
-    edge_rules: pd.DataFrame = None                   # type: ignore[assignment]
-
-    # ── edge ──────────────────────────────────────────────────────────
-    edges: pd.DataFrame | None = None
-    edge_commodities: pd.DataFrame | None = None
-    edge_capacities: pd.DataFrame | None = None
-    edge_commodity_capacities: pd.DataFrame | None = None
-    edge_vehicles: pd.DataFrame | None = None
-
-    # ── flow data ─────────────────────────────────────────────────────
-    demand: pd.DataFrame | None = None
-    supply: pd.DataFrame | None = None
-    inventory_initial: pd.DataFrame | None = None
-    inventory_in_transit: pd.DataFrame | None = None
-
-    # ── observations ─────────────────────────────────────────────────
-    observed_flow: pd.DataFrame | None = None
-    observed_inventory: pd.DataFrame | None = None
-
-    # ── transformation ────────────────────────────────────────────────
-    transformations: pd.DataFrame | None = None
-    transformation_inputs: pd.DataFrame | None = None
-    transformation_outputs: pd.DataFrame | None = None
-
-    # ── resource ──────────────────────────────────────────────────────
-    resource_commodity_compatibility: pd.DataFrame | None = None
-    resource_modal_compatibility: pd.DataFrame | None = None
-    resource_fleet: pd.DataFrame | None = None
-    resource_availability: pd.DataFrame | None = None
-
-    # ── hierarchy ─────────────────────────────────────────────────────
-    facility_hierarchy_types: pd.DataFrame | None = None
-    facility_hierarchy_levels: pd.DataFrame | None = None
-    facility_hierarchy_nodes: pd.DataFrame | None = None
-    facility_hierarchy_memberships: pd.DataFrame | None = None
-    commodity_hierarchy_types: pd.DataFrame | None = None
-    commodity_hierarchy_levels: pd.DataFrame | None = None
-    commodity_hierarchy_nodes: pd.DataFrame | None = None
-    commodity_hierarchy_memberships: pd.DataFrame | None = None
-
-    # ── scenario ──────────────────────────────────────────────────────
-    scenarios: pd.DataFrame | None = None
-    scenario_edge_rules: pd.DataFrame | None = None
-    scenario_manual_edges: pd.DataFrame | None = None
-    scenario_parameter_overrides: pd.DataFrame | None = None
 
     # ── generated by build_model() ────────────────────────────────────
     edge_lead_time_resolved: pd.DataFrame | None = None
@@ -647,15 +596,10 @@ class ResolvedModelData(_ModelDataMixin):
     edge_spines: dict[str, pd.DataFrame] | None = None
     resource_spines: dict[str, pd.DataFrame] | None = None
 
-    # ── parametric attribute system ───────────────────────────────────
-    attributes: AttributeRegistry = field(default_factory=AttributeRegistry)
-
     # ── class-level metadata ──────────────────────────────────────────
 
-    _NON_TABLE_FIELDS: ClassVar[frozenset[str]] = frozenset({"attributes"})
-
     _GROUPS: ClassVar[dict[str, list[str]]] = {
-        **RawModelData._GROUPS,
+        **_TabularModelBase._GROUPS,
         "generated": [
             "edge_lead_time_resolved", "transformation_resolved",
             "fleet_capacity",
@@ -663,11 +607,9 @@ class ResolvedModelData(_ModelDataMixin):
     }
 
     _SCHEMAS: ClassVar[dict[str, type[BaseModel]]] = {
-        **RawModelData._SCHEMAS,
+        **_TabularModelBase._SCHEMAS,
         "edge_lead_time_resolved": EdgeLeadTimeResolved,
     }
-
-    _REQUIRED: ClassVar[frozenset[str]] = RawModelData._REQUIRED
 
     # ── Resolved-only group access properties ───────────────────────────
 
@@ -758,6 +700,7 @@ class ResolvedModelData(_ModelDataMixin):
                 "edge_commodity_capacities", raw.edge_commodity_capacities,
             ),
             edge_vehicles=raw.edge_vehicles,
+            distance_matrix=raw.distance_matrix,
             edge_lead_time_resolved=edge_lead_time_resolved,
             transformation_resolved=transformation_resolved,
             fleet_capacity=fleet_capacity,
