@@ -4,6 +4,7 @@ from .contracts import GraphLoaderConfig
 from .csv_loader import CsvLoader, load_csv_folder
 from .dataloader_graph import DataLoaderGraph
 from .dataloader_mock import DataLoaderMock
+from .dataloader_mock_minimal import DataLoaderMockMinimal
 from .protocols import (
     BikeShareSourceProtocol,
     GenericSourceProtocol,
@@ -15,6 +16,7 @@ __all__ = [
     "CsvLoader",
     "DataLoaderGraph",
     "DataLoaderMock",
+    "DataLoaderMockMinimal",
     "GenericSourceProtocol",
     "GraphLoaderConfig",
     "GraphLoaderProtocol",

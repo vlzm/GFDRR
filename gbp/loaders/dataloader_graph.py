@@ -23,6 +23,7 @@ from typing import NamedTuple
 import pandas as pd
 import structlog
 
+from gbp.build.defaults import DEFAULT_COMMODITY_CATEGORY_ID
 from gbp.core.attributes.registry import AttributeRegistry
 from gbp.core.enums import AttributeKind, ModalType, PeriodType
 from gbp.core.model import RawModelData
@@ -38,8 +39,27 @@ from .protocols import BikeShareSourceProtocol
 
 log = structlog.get_logger()
 
+# Bike-share canonical commodity categories used by ``DataLoaderMock``.
+# ``DataLoaderGraph`` itself discovers categories from trips via
+# ``_commodity_categories()``; this tuple exists for tests and documentation
+# that reference the canonical bike-share taxonomy.
 COMMODITY_CATEGORIES = ("electric_bike", "classic_bike")
 RESOURCE_CATEGORY = "rebalancing_truck"
+
+
+def _nonempty_df(source: BikeShareSourceProtocol, attr: str) -> pd.DataFrame | None:
+    """Return ``getattr(source, attr)`` if it exists and is a non-empty DataFrame.
+
+    Optional source tables are allowed to be ``None`` *or* missing entirely;
+    empty DataFrames are treated as "no rows" and collapsed to ``None`` so
+    downstream code can use a single ``is None`` check.
+    """
+    val = getattr(source, attr, None)
+    if val is None:
+        return None
+    if isinstance(val, pd.DataFrame) and val.empty:
+        return None
+    return val
 
 
 # ---------------------------------------------------------------------------
@@ -141,11 +161,19 @@ class DataLoaderGraph:
     # ------------------------------------------------------------------
 
     def _validate_source(self) -> None:
+        """Validate source shape — required tables always, optional ones when present."""
         StationsSourceSchema.validate(self._source.df_stations)
-        DepotsSourceSchema.validate(self._source.df_depots)
-        ResourcesSourceSchema.validate(self._source.df_resources)
         if self._config.build_observations:
             TripsSourceSchema.validate(self._source.df_trips)
+
+        depots = _nonempty_df(self._source, "df_depots")
+        if depots is not None:
+            DepotsSourceSchema.validate(depots)
+
+        resources = _nonempty_df(self._source, "df_resources")
+        if resources is not None:
+            ResourcesSourceSchema.validate(resources)
+
         self._log.debug("source_validated")
 
     # ------------------------------------------------------------------
@@ -184,14 +212,13 @@ class DataLoaderGraph:
         )
 
     def _build_temporal(self) -> dict[str, pd.DataFrame]:
-        """Planning horizon + single daily segment covering the source timestamps.
+        """Planning horizon + single daily segment covering the source time range.
 
-        The concrete daily ``periods`` grid is derived by ``build_model`` from
-        these segments, so the loader does not emit it directly.
+        Prefers ``source.timestamps`` when available.  Falls back to the date
+        range of ``df_trips["started_at"]`` for minimal sources that don't carry
+        an explicit timestamp index.
         """
-        ts = self._source.timestamps
-        start_d = pd.Timestamp(ts[0]).normalize().date()
-        end_d = (pd.Timestamp(ts[-1]).normalize() + pd.Timedelta(days=1)).date()
+        start_d, end_d = self._derive_horizon_dates()
 
         return {
             "planning_horizon": pd.DataFrame({
@@ -209,11 +236,38 @@ class DataLoaderGraph:
             }),
         }
 
-    def _build_entities(self) -> _EntityResult:
-        """Facilities, commodity/resource categories, and L3 items from source."""
-        stations = self._source.df_stations
-        depots = self._source.df_depots
+    def _derive_horizon_dates(self) -> tuple:
+        """Return ``(start_date, end_date)`` for the planning horizon.
 
+        Uses ``source.timestamps`` when present.  Otherwise derives the span
+        from ``df_trips["started_at"]``.  Raises when neither is available.
+        """
+        ts = getattr(self._source, "timestamps", None)
+        if ts is not None and len(ts) > 0:
+            start_d = pd.Timestamp(ts[0]).normalize().date()
+            end_d = (pd.Timestamp(ts[-1]).normalize() + pd.Timedelta(days=1)).date()
+            return start_d, end_d
+
+        trips = _nonempty_df(self._source, "df_trips")
+        if trips is not None and "started_at" in trips.columns:
+            started = pd.to_datetime(trips["started_at"])
+            start_d = started.min().normalize().date()
+            end_d = (started.max().normalize() + pd.Timedelta(days=1)).date()
+            return start_d, end_d
+
+        raise ValueError(
+            "Cannot derive planning horizon: source has neither `timestamps` "
+            "nor a non-empty `df_trips` with `started_at`."
+        )
+
+    def _build_entities(self) -> _EntityResult:
+        """Facilities + commodity/resource categories from the source.
+
+        Depots, resource categories, and explicit commodities are all optional.
+        When absent, the loader either emits a default placeholder or leaves
+        the table out entirely for ``build_model`` to derive.
+        """
+        stations = self._source.df_stations
         fac_stations = pd.DataFrame({
             "facility_id": stations["station_id"].astype(str),
             "facility_type": "station",
@@ -221,40 +275,64 @@ class DataLoaderGraph:
             "lat": stations["lat"].astype(float),
             "lon": stations["lon"].astype(float),
         })
-        fac_depots = pd.DataFrame({
-            "facility_id": depots["node_id"].astype(str),
-            "facility_type": "depot",
-            "name": depots["node_id"].astype(str),
-            "lat": depots["lat"].astype(float),
-            "lon": depots["lon"].astype(float),
+
+        depots = _nonempty_df(self._source, "df_depots")
+        if depots is not None:
+            fac_depots = pd.DataFrame({
+                "facility_id": depots["node_id"].astype(str),
+                "facility_type": "depot",
+                "name": depots["node_id"].astype(str),
+                "lat": depots["lat"].astype(float),
+                "lon": depots["lon"].astype(float),
+            })
+            facilities = pd.concat([fac_depots, fac_stations], ignore_index=True)
+            depot_ids = list(fac_depots["facility_id"])
+        else:
+            facilities = fac_stations.reset_index(drop=True)
+            depot_ids = []
+
+        tables: dict[str, pd.DataFrame] = {"facilities": facilities}
+
+        commodity_cats = self._commodity_categories()
+        tables["commodity_categories"] = pd.DataFrame({
+            "commodity_category_id": list(commodity_cats),
+            "name": [cc.replace("_", " ").capitalize() for cc in commodity_cats],
+            "unit": ["unit"] * len(commodity_cats),
         })
-        facilities = pd.concat([fac_depots, fac_stations], ignore_index=True)
+        tables["commodities"] = pd.DataFrame({
+            "commodity_id": list(commodity_cats),
+            "commodity_category": list(commodity_cats),
+            "description": [""] * len(commodity_cats),
+        })
 
-        base_cap = float(self._source.df_resource_capacities["capacity"].max())
-
-        tables: dict[str, pd.DataFrame] = {
-            "facilities": facilities,
-            "commodity_categories": pd.DataFrame({
-                "commodity_category_id": list(COMMODITY_CATEGORIES),
-                "name": ["Electric bike", "Classic bike"],
-                "unit": ["bike", "bike"],
-            }),
-            "resource_categories": pd.DataFrame({
+        res_caps = _nonempty_df(self._source, "df_resource_capacities")
+        if res_caps is not None:
+            tables["resource_categories"] = pd.DataFrame({
                 "resource_category_id": [RESOURCE_CATEGORY],
                 "name": ["Rebalancing truck"],
-                "base_capacity": [base_cap],
-            }),
-            "commodities": pd.DataFrame({
-                "commodity_id": list(COMMODITY_CATEGORIES),
-                "commodity_category": list(COMMODITY_CATEGORIES),
-                "description": ["", ""],
-            }),
-        }
+                "base_capacity": [float(res_caps["capacity"].max())],
+            })
+
         return _EntityResult(
             tables=tables,
             station_ids=list(fac_stations["facility_id"]),
-            depot_ids=list(fac_depots["facility_id"]),
+            depot_ids=depot_ids,
         )
+
+    def _commodity_categories(self) -> tuple[str, ...]:
+        """Discover commodity categories from ``df_trips.rideable_type`` if present.
+
+        Returns a tuple of category ids.  Falls back to a single
+        ``DEFAULT_COMMODITY_CATEGORY_ID`` when trips carry no explicit type.
+        """
+        trips = _nonempty_df(self._source, "df_trips")
+        if trips is not None and "rideable_type" in trips.columns:
+            cats = tuple(
+                sorted({str(v) for v in trips["rideable_type"].dropna().unique()})
+            )
+            if cats:
+                return cats
+        return (DEFAULT_COMMODITY_CATEGORY_ID,)
 
     def _build_behavior(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
         """Facility operations and edge generation rules.
@@ -262,6 +340,9 @@ class DataLoaderGraph:
         Roles are derived by ``build_model`` from ``(facility_type, operations)``
         via :func:`gbp.core.roles.derive_roles`; the loader intentionally does
         not emit a ``facility_roles`` table.
+
+        Edge rules cover ``station↔station`` always; depot pairs are only
+        emitted when the source actually has depots.
         """
         op_rows: list[dict] = []
 
@@ -280,15 +361,17 @@ class DataLoaderGraph:
             ])
 
         if self._config.build_edges:
-            base_pairs = [
-                ("depot", "station"),
-                ("station", "depot"),
-                ("station", "station"),
-                ("depot", "depot"),
-            ]
+            base_pairs = [("station", "station")]
+            if entities.depot_ids:
+                base_pairs.extend([
+                    ("depot", "station"),
+                    ("station", "depot"),
+                    ("depot", "depot"),
+                ])
+            commodity_cats = self._commodity_categories()
             rule_rows: list[dict] = []
             for src_t, tgt_t in base_pairs:
-                for cc in COMMODITY_CATEGORIES:
+                for cc in commodity_cats:
                     rule_rows.append({
                         "source_type": src_t,
                         "target_type": tgt_t,
@@ -344,75 +427,88 @@ class DataLoaderGraph:
         entities: _EntityResult,
         registry: AttributeRegistry,
     ) -> dict[str, pd.DataFrame]:
-        """Initial inventory and storage capacities from source."""
-        all_facility_ids = entities.station_ids + entities.depot_ids
+        """Initial inventory and storage capacities — both optional in minimal mode.
 
-        # ── Initial inventory from MultiIndex df_inventory_ts ────────
-        inv0 = self._source.df_inventory_ts.iloc[0]
-        inv_rows: list[dict] = []
-        for fid in all_facility_ids:
-            for cc in COMMODITY_CATEGORIES:
-                qty = float(inv0.get((fid, cc), 0))
-                inv_rows.append({
-                    "facility_id": fid,
-                    "commodity_category": cc,
-                    "quantity": qty,
-                })
-        inventory_initial = pd.DataFrame(inv_rows)
+        - ``inventory_initial`` is emitted only when the source provides
+          ``df_inventory_ts``.  Otherwise ``build_model`` seeds it from
+          observed flow (or leaves it empty if flow is also absent).
+        - Storage capacity attributes are registered only when the source has
+          station / depot capacities.
+        """
+        commodity_cats = self._commodity_categories()
+        result: dict[str, pd.DataFrame] = {}
 
-        # ── Storage capacities per commodity_category ────────────────
+        inv_ts = _nonempty_df(self._source, "df_inventory_ts")
+        if inv_ts is not None:
+            all_facility_ids = entities.station_ids + entities.depot_ids
+            inv0 = inv_ts.iloc[0]
+            inv_rows: list[dict] = []
+            for fid in all_facility_ids:
+                for cc in commodity_cats:
+                    qty = float(inv0.get((fid, cc), 0))
+                    inv_rows.append({
+                        "facility_id": fid,
+                        "commodity_category": cc,
+                        "quantity": qty,
+                    })
+            result["inventory_initial"] = pd.DataFrame(inv_rows)
+
         cap_rows: list[dict] = []
+        station_caps = _nonempty_df(self._source, "df_station_capacities")
+        if station_caps is not None:
+            for _, r in station_caps.iterrows():
+                cap_rows.append({
+                    "facility_id": str(r["station_id"]),
+                    "operation_type": "storage",
+                    "commodity_category": str(r["commodity_category"]),
+                    "capacity": float(r["capacity"]),
+                })
 
-        station_caps = self._source.df_station_capacities
-        for _, r in station_caps.iterrows():
-            cap_rows.append({
-                "facility_id": str(r["station_id"]),
-                "operation_type": "storage",
-                "commodity_category": str(r["commodity_category"]),
-                "capacity": float(r["capacity"]),
-            })
+        depot_caps = _nonempty_df(self._source, "df_depot_capacities")
+        if depot_caps is not None:
+            for _, r in depot_caps.iterrows():
+                cap_rows.append({
+                    "facility_id": str(r["node_id"]),
+                    "operation_type": "storage",
+                    "commodity_category": str(r["commodity_category"]),
+                    "capacity": float(r["capacity"]),
+                })
 
-        depot_caps = self._source.df_depot_capacities
-        for _, r in depot_caps.iterrows():
-            cap_rows.append({
-                "facility_id": str(r["node_id"]),
-                "operation_type": "storage",
-                "commodity_category": str(r["commodity_category"]),
-                "capacity": float(r["capacity"]),
-            })
+        if cap_rows:
+            registry.register(
+                name="operation_capacity",
+                data=pd.DataFrame(cap_rows),
+                entity_type="facility",
+                kind=AttributeKind.CAPACITY,
+                grain=("facility_id", "operation_type", "commodity_category"),
+                value_column="capacity",
+                aggregation="min",
+            )
 
-        registry.register(
-            name="operation_capacity",
-            data=pd.DataFrame(cap_rows),
-            entity_type="facility",
-            kind=AttributeKind.CAPACITY,
-            grain=("facility_id", "operation_type", "commodity_category"),
-            value_column="capacity",
-            aggregation="min",
-        )
-
-        return {"inventory_initial": inventory_initial}
+        return result
 
     def _register_facility_costs(
         self,
         registry: AttributeRegistry,
         temporal: dict[str, pd.DataFrame],
     ) -> None:
-        """Register facility fixed costs (stations and depots) in the attribute registry."""
-        ts = self._source.timestamps
-        horizon_dates = [
-            d.date()
-            for d in pd.date_range(
-                start=pd.Timestamp(ts[0]).normalize(),
-                end=pd.Timestamp(ts[-1]).normalize(),
-                freq="D",
-            )
-        ]
+        """Register facility fixed costs (stations and depots) in the attribute registry.
+
+        Costs are per-day; the horizon is taken from ``planning_horizon`` so
+        this works even for minimal sources without ``timestamps``.
+        """
+        station_costs = _nonempty_df(self._source, "df_station_costs")
+        depot_costs = _nonempty_df(self._source, "df_depot_costs")
+        if station_costs is None and depot_costs is None:
+            return
+
+        horizon = temporal["planning_horizon"].iloc[0]
+        start = pd.Timestamp(horizon["start_date"])
+        end = pd.Timestamp(horizon["end_date"]) - pd.Timedelta(days=1)
+        horizon_dates = [d.date() for d in pd.date_range(start=start, end=end, freq="D")]
 
         cost_rows: list[dict] = []
-
-        station_costs = self._source.df_station_costs
-        if station_costs is not None and not station_costs.empty:
+        if station_costs is not None:
             for d in horizon_dates:
                 for _, r in station_costs.iterrows():
                     cost_rows.append({
@@ -422,8 +518,7 @@ class DataLoaderGraph:
                         "cost_unit": "USD",
                     })
 
-        depot_costs = self._source.df_depot_costs
-        if depot_costs is not None and not depot_costs.empty:
+        if depot_costs is not None:
             for d in horizon_dates:
                 for _, r in depot_costs.iterrows():
                     cost_rows.append({
@@ -446,22 +541,34 @@ class DataLoaderGraph:
             )
 
     def _build_resources(self, entities: _EntityResult) -> dict[str, pd.DataFrame | None]:
-        """Resource fleet, L3 resources, and compatibility tables."""
+        """Resource fleet and compatibility tables.
+
+        Skipped entirely when the source has no depots (no home for the fleet)
+        or no ``df_resources`` — returns ``{}`` in that case.
+        """
+        if not entities.depot_ids:
+            return {}
+
+        resources_src = _nonempty_df(self._source, "df_resources")
+        res_caps_src = _nonempty_df(self._source, "df_resource_capacities")
+        if resources_src is None or res_caps_src is None:
+            return {}
+
         home_depot = entities.depot_ids[0]
 
         resource_fleet = pd.DataFrame({
             "facility_id": [home_depot],
             "resource_category": [RESOURCE_CATEGORY],
-            "count": [len(self._source.df_resources)],
+            "count": [len(resources_src)],
         })
 
         cap_map = dict(zip(
-            self._source.df_resource_capacities["resource_id"],
-            self._source.df_resource_capacities["capacity"],
+            res_caps_src["resource_id"],
+            res_caps_src["capacity"],
             strict=True,
         ))
         resource_rows = []
-        for _, r in self._source.df_resources.iterrows():
+        for _, r in resources_src.iterrows():
             rid = str(r["resource_id"])
             resource_rows.append({
                 "resource_id": rid,
@@ -471,13 +578,14 @@ class DataLoaderGraph:
                 "description": None,
             })
 
-        n_cc = len(COMMODITY_CATEGORIES)
+        commodity_cats = self._commodity_categories()
+        n_cc = len(commodity_cats)
         return {
             "resource_fleet": resource_fleet,
             "resources": pd.DataFrame(resource_rows),
             "resource_commodity_compatibility": pd.DataFrame({
                 "resource_category": [RESOURCE_CATEGORY] * n_cc,
-                "commodity_category": list(COMMODITY_CATEGORIES),
+                "commodity_category": list(commodity_cats),
                 "enabled": [True] * n_cc,
             }),
             "resource_modal_compatibility": pd.DataFrame({
@@ -493,10 +601,12 @@ class DataLoaderGraph:
         entities: _EntityResult,
     ) -> None:
         """Register per-resource cost attributes (cost_per_km, cost_per_hour, fixed_dispatch)."""
-        home_depot = entities.depot_ids[0]
-        tr = self._source.df_truck_rates
-        if tr is None or tr.empty:
+        if not entities.depot_ids:
             return
+        tr = _nonempty_df(self._source, "df_truck_rates")
+        if tr is None:
+            return
+        home_depot = entities.depot_ids[0]
 
         for cost_attr, col in [
             ("resource_cost_per_km", "cost_per_km"),
@@ -530,22 +640,29 @@ class DataLoaderGraph:
     def _build_observations(
         self, entities: _EntityResult,
     ) -> dict[str, pd.DataFrame | None]:
-        """Map trips → observed_flow and telemetry → observed_inventory."""
+        """Map trips → observed_flow and telemetry → observed_inventory.
+
+        When trips carry no ``rideable_type`` column, the flow is labelled
+        with ``DEFAULT_COMMODITY_CATEGORY_ID`` so it lines up with the default
+        single-category table emitted by ``_build_entities``.
+        """
         known_ids = set(entities.station_ids) | set(entities.depot_ids)
         result: dict[str, pd.DataFrame | None] = {}
 
         # ── trips → observed_flow ────────────────────────────────────
-        df_trips = self._source.df_trips
-        if df_trips is not None and not df_trips.empty:
-            trips = df_trips[[
-                "start_station_id", "end_station_id", "started_at", "rideable_type",
-            ]].copy()
+        df_trips = _nonempty_df(self._source, "df_trips")
+        if df_trips is not None:
+            keep_cols = ["start_station_id", "end_station_id", "started_at"]
+            trips = df_trips[keep_cols].copy()
             trips = trips.rename(columns={
                 "start_station_id": "source_id",
                 "end_station_id": "target_id",
             })
             trips["date"] = pd.to_datetime(trips["started_at"]).dt.date
-            trips["commodity_category"] = trips["rideable_type"]
+            if "rideable_type" in df_trips.columns:
+                trips["commodity_category"] = df_trips["rideable_type"].astype(str).values
+            else:
+                trips["commodity_category"] = DEFAULT_COMMODITY_CATEGORY_ID
             trips["quantity"] = 1.0
             trips["modal_type"] = None
             trips["resource_id"] = None
@@ -568,8 +685,8 @@ class DataLoaderGraph:
             result["observed_flow"] = None
 
         # ── telemetry → observed_inventory (per commodity_category) ──
-        df_tel = self._source.df_telemetry_ts
-        if df_tel is not None and not df_tel.empty:
+        df_tel = _nonempty_df(self._source, "df_telemetry_ts")
+        if df_tel is not None:
             tel_base = df_tel[["station_id", "timestamp", "num_bikes_available",
                                "num_ebikes_available"]].copy()
 

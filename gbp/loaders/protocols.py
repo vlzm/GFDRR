@@ -32,21 +32,30 @@ class GenericSourceProtocol(Protocol):
 # ---------------------------------------------------------------------------
 
 class BikeShareSourceProtocol(Protocol):
-    """Bike-sharing data source — stations, depots, trips, telemetry."""
+    """Bike-sharing data source — stations and trips are required; the rest
+    is optional so a minimal source can be as small as ``df_stations`` +
+    ``df_trips``.
+
+    Optional attributes may be set to ``None`` (or missing entirely — loaders
+    look them up via ``getattr(..., None)``).  When an optional source is
+    absent the loader skips the corresponding build step and lets
+    ``build_model`` derive defaults where possible.
+    """
 
     df_stations: pd.DataFrame
-    df_depots: pd.DataFrame
-    df_resources: pd.DataFrame
-    df_station_capacities: pd.DataFrame
-    df_depot_capacities: pd.DataFrame
-    df_resource_capacities: pd.DataFrame
-    timestamps: pd.DatetimeIndex
-    df_inventory_ts: pd.DataFrame
-    df_telemetry_ts: pd.DataFrame
     df_trips: pd.DataFrame
-    df_station_costs: pd.DataFrame
-    df_depot_costs: pd.DataFrame
-    df_truck_rates: pd.DataFrame
+
+    df_depots: pd.DataFrame | None
+    df_resources: pd.DataFrame | None
+    df_station_capacities: pd.DataFrame | None
+    df_depot_capacities: pd.DataFrame | None
+    df_resource_capacities: pd.DataFrame | None
+    timestamps: pd.DatetimeIndex | None
+    df_inventory_ts: pd.DataFrame | None
+    df_telemetry_ts: pd.DataFrame | None
+    df_station_costs: pd.DataFrame | None
+    df_depot_costs: pd.DataFrame | None
+    df_truck_rates: pd.DataFrame | None
 
     def load_data(self) -> None: ...
 
