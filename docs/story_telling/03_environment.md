@@ -50,11 +50,18 @@ new_state = state.with_inventory(updated_inventory)
 
 Когда ты создаёшь `Environment(resolved, config)`, происходит три вещи:
 
-1. **init_state** — из данных модели собирается начальное состояние. Inventory берётся из `inventory_initial`. In-transit — из `inventory_in_transit` (маппинг дат на period_index). Resources — из `resource_fleet` или `resources` (L3). Если грузовики заданы агрегированно ("3 грузовика на депо d1"), они разворачиваются в отдельные экземпляры: `rebalancing_truck_d1_0`, `rebalancing_truck_d1_1`, `rebalancing_truck_d1_2`. Это векторизованная операция через `index.repeat()` + `cumcount()`.
+1. **init_state** — из данных модели собирается начальное состояние.
+   - **Inventory** берётся из `resolved.inventory_initial` (facility_id x commodity_category x quantity).
+   - **In-transit** формируется из двух источников и объединяется:
+     * `resolved.inventory_in_transit` — явно заданные "предгоризонтные" отправки (маппинг дат на period_index);
+     * `resolved.supply` — "органические возвраты" (в велошеринге — returns клиентов). Каждая строка supply превращается в синтетический shipment с `source_id="EXT"`, `resource_id=None` и совпадающими `departure_period == arrival_period`. Это зеркало того, как `DemandPhase` потребляет `resolved.demand`.
+   - **Resources** — из `resolved.resources` (L3, если заданы) или разворачиваются из `resolved.resource_fleet`. Агрегированные "3 грузовика на depot_1" разворачиваются в отдельные экземпляры `rebalancing_truck_depot_1_0`, `..._1`, `..._2` (формат `{category}_{facility_id}_{cumcount}`). Это векторизованная операция через `index.repeat()` + `cumcount()`.
 
 2. **SimulationLog** — создаётся пустой журнал с пятью разделами.
 
 3. **Periods** — из модели извлекается список всех периодов в виде PeriodRow (NamedTuple).
+
+Если в `resolved` нет ни `demand`, ни `supply`, ни `inventory_initial` — `Environment.__init__` бросает `SimulatorConfigError`: симулятору нечем двигать потоки.
 
 ---
 
@@ -146,15 +153,15 @@ while not is_done:
 
 ## SimulationLog: полная история
 
-Журнал накапливает данные в пяти списках DataFrame (по одному на каждый период/фазу). В конце `to_dataframes()` конкатенирует всё в пять итоговых таблиц:
+Журнал накапливает данные в пяти списках DataFrame (по одному на каждый период/фазу). В конце `to_dataframes()` конкатенирует всё в пять итоговых таблиц (ключи в словаре результата — с префиксом `simulation_`):
 
-| Таблица | Что содержит |
-|---------|-------------|
-| **inventory_log** | Сколько чего лежало на каждой станции в каждом периоде |
-| **flow_log** | Все перемещения: спрос, доставки, отправки (с именем фазы) |
-| **resource_log** | Где был каждый грузовик и в каком статусе |
-| **unmet_demand_log** | Где и когда не хватило велосипедов |
-| **rejected_dispatches_log** | Какие отправки были отклонены и почему |
+| Ключ | Что содержит |
+|------|-------------|
+| **simulation_inventory_log** | Сколько чего лежало на каждой станции в каждом периоде |
+| **simulation_flow_log** | Все перемещения: спрос, доставки, отправки (с именем фазы) |
+| **simulation_resource_log** | Где был каждый грузовик и в каком статусе |
+| **simulation_unmet_demand_log** | Где и когда не хватило велосипедов |
+| **simulation_rejected_dispatches_log** | Какие отправки были отклонены и почему |
 
 Из этих таблиц можно строить любую аналитику: эволюция inventory, эффективность ребалансировки, узкие места в сети, service level.
 

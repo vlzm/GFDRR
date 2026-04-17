@@ -160,17 +160,19 @@ inventory[t] = inventory[t-1] + inflow[t] - outflow[t]
 
 ## Build Pipeline: от сырых данных к готовой модели
 
-Сырые данные (с датами, абсолютными часами) проходят через конвейер:
+Сырые данные (с датами, абсолютными часами) проходят через конвейер в `gbp/build/pipeline.py`:
 
-1. **Validation** — проверка целостности (ссылочная, единицы, покрытие, граф, ресурсы)
-2. **Time Resolution** — date -> period_id, агрегация
-3. **Edge Building** — из правил и ручных пар
-4. **Lead Time Resolution** — часы -> периоды (per edge x period)
-5. **Transformation Resolution** — развёртка N->M
-6. **Fleet Capacity** — count x base_capacity
-7. **Spine Assembly** — attribute DataFrames для потребителей
+1. **Derivation** — `_apply_derivations`: автозаполнение того, что пользователь не задал явно (periods из сегментов, facility_roles по `(type, operations)`, дефолтные `commodity_categories` / `resource_categories`, `demand`/`supply`/`inventory_initial` из `observed_flow` / `observed_inventory`). Записывается в `BuildReport`.
+2. **Validation** — `validate_raw_model`: ссылочная целостность, роли, связность графа, совместимость ресурсов.
+3. **Time Resolution (структурное)** — `resolve_all_time_varying`: `date` -> `period_id` с агрегацией для структурных таблиц (`demand`, `supply`, `edge_capacities`, `observed_*` и др.).
+4. **Time Resolution (параметрическое)** — `resolve_registry_attributes`: то же самое, но для атрибутов из `AttributeRegistry` (стоимости, ёмкости, price tiers). Spec сам говорит, как агрегировать.
+5. **Edge Building** — `_ensure_edges_and_commodities` / `build_edges`: из `edge_rules` + `distance_matrix` + `scenario_manual_edges`, либо `raw.edges` passthrough.
+6. **Lead Time Resolution** — `resolve_lead_times`: часы -> периоды (таблица `edge x period`).
+7. **Transformation Resolution** — `resolve_transformations`: развёртка N->M на уровне facility + operation.
+8. **Fleet Capacity** — `compute_fleet_capacity`: `count x base_capacity` на `facility x resource_category`.
+9. **Spine Assembly** — `assemble_spines`: широкие DataFrame'ы по entity types (`facility_spines`, `edge_spines`, `resource_spines`), сгруппированные по совместимости grain'ов.
 
-На выходе — **ResolvedModelData**. Единый готовый объект для всех потребителей.
+На выходе — **ResolvedModelData** с теми же 40 табличными полями + `edge_lead_time_resolved`, `transformation_resolved`, `fleet_capacity`, spines и `build_report`. Единый готовый объект для всех потребителей.
 
 ---
 
