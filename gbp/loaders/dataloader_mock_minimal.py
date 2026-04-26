@@ -161,3 +161,13 @@ class DataLoaderMockMinimal:
             "end_lng": station_lons[end_idx],
             "member_casual": member_casual,
         }).sort_values("started_at").reset_index(drop=True)
+
+        # Resources — no capacity on the table
+        num_resources = self.config.get("num_resources", 3)
+        resource_cap = self.config.get("resource_capacity", 100)
+        resource_ids = [f"truck_{i + 1}" for i in range(num_resources)]
+        self.df_resources = pd.DataFrame({"resource_id": resource_ids})
+        self.df_resource_capacities = pd.DataFrame({
+            "resource_id": resource_ids,
+            "capacity": [resource_cap] * num_resources,
+        })

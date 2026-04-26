@@ -7,7 +7,11 @@ Public API::
     log = env.run()
 """
 
-from gbp.consumers.simulator.built_in_phases import ArrivalsPhase, DemandPhase
+from gbp.consumers.simulator.built_in_phases import (
+    ArrivalsPhase,
+    DemandPhase,
+    OrganicFlowPhase,
+)
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.dispatch_phase import DispatchPhase
 from gbp.consumers.simulator.engine import Environment
@@ -24,6 +28,7 @@ __all__ = [
     "Environment",
     "EnvironmentConfig",
     "init_state",
+    "OrganicFlowPhase",
     "Phase",
     "PhaseResult",
     "PeriodRow",

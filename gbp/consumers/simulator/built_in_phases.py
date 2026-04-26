@@ -105,6 +105,100 @@ class DemandPhase:
         )
 
 
+class OrganicFlowPhase:
+    """Replay ``resolved.observed_flow`` as flow events, instant transfer.
+
+    For each period, filters ``observed_flow`` by ``period_id``, applies a
+    net inventory delta (subtract at ``source_id``, add at ``target_id``),
+    and emits each row as a single flow event with both ``source_id`` and
+    ``target_id`` set.  Use this in place of :class:`DemandPhase` when the
+    target side of every organic movement is known (e.g. bike-share trips
+    where each demand event has a known destination station).
+
+    The transfer is treated as instantaneous (no in_transit step), which
+    makes ``simulation_flow_log`` equal to ``observed_flow`` (plus the
+    ``period_index`` / ``phase_name`` columns added by the log writer).
+    Inventory is clipped at zero — rows that would drive a facility
+    negative are silently capped, no unmet demand is logged.
+    """
+
+    name: str = "ORGANIC_FLOW"
+
+    _FLOW_EVENT_COLUMNS: tuple[str, ...] = (
+        "source_id",
+        "target_id",
+        "commodity_category",
+        "modal_type",
+        "quantity",
+        "resource_id",
+    )
+
+    def __init__(self, schedule: Schedule | None = None) -> None:
+        """Initialise with an optional schedule (default: every period)."""
+        self._schedule = schedule or Schedule.every()
+
+    def should_run(self, period: PeriodRow) -> bool:
+        """Delegate to schedule."""
+        return self._schedule.should_run(period)
+
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+    ) -> PhaseResult:
+        """Replay observed_flow for the current period."""
+        if resolved.observed_flow is None or resolved.observed_flow.empty:
+            return PhaseResult.empty(state)
+
+        flows = resolved.observed_flow[
+            resolved.observed_flow["period_id"] == period.period_id
+        ]
+        if flows.empty:
+            return PhaseResult.empty(state)
+
+        # Net inventory delta: -quantity at source, +quantity at target.
+        outflow = (
+            flows.groupby(["source_id", "commodity_category"], as_index=False)["quantity"]
+            .sum()
+            .rename(columns={"source_id": "facility_id"})
+        )
+        outflow["quantity"] = -outflow["quantity"]
+        inflow = (
+            flows.groupby(["target_id", "commodity_category"], as_index=False)["quantity"]
+            .sum()
+            .rename(columns={"target_id": "facility_id"})
+        )
+        delta = (
+            pd.concat([outflow, inflow], ignore_index=True)
+            .groupby(["facility_id", "commodity_category"], as_index=False)["quantity"]
+            .sum()
+            .rename(columns={"quantity": "delta"})
+        )
+
+        new_inv = state.inventory.merge(
+            delta, on=["facility_id", "commodity_category"], how="left",
+        )
+        new_inv["delta"] = new_inv["delta"].fillna(0.0)
+        new_inv["quantity"] = (new_inv["quantity"] + new_inv["delta"]).clip(lower=0.0)
+        new_inv = new_inv[INVENTORY_COLUMNS].copy()
+
+        flow_events = pd.DataFrame({
+            col: (
+                flows[col].values if col in flows.columns
+                else [None] * len(flows)
+            )
+            for col in self._FLOW_EVENT_COLUMNS
+        })
+
+        return PhaseResult(
+            state=state.with_inventory(new_inv),
+            flow_events=flow_events,
+            unmet_demand=pd.DataFrame(),
+            rejected_dispatches=pd.DataFrame(),
+        )
+
+
 class ArrivalsPhase:
     """Process shipments arriving at their destination in the current period.
 
