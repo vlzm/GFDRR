@@ -27,6 +27,13 @@ class DataLoaderMock:
         - df_truck_rates          [resource_id, cost_per_km, cost_per_hour, fixed_dispatch_cost]
     """
 
+    _GROUPS: dict[str, list[str]] = {
+        "stations": ["df_stations", "df_station_capacities", "df_station_costs"],
+        "depots": ["df_depots", "df_depot_capacities", "df_depot_costs"],
+        "resources": ["df_resources", "df_resource_capacities", "df_truck_rates"],
+        "observations": ["df_inventory_ts", "df_telemetry_ts", "df_trips"],
+    }
+
     def __init__(self, config: dict):
         self.config = config
         self._rng = np.random.default_rng(seed=self.config.get("seed", 42))
@@ -109,6 +116,111 @@ class DataLoaderMock:
             df_stations=self.df_stations,
             df_depots=self.df_depots,
             df_resource_capacities=self.df_resource_capacities,
+        )
+
+    # ── display ───────────────────────────────────────────────────────
+
+    def _is_loaded(self) -> bool:
+        return getattr(self, "df_stations", None) is not None
+
+    @staticmethod
+    def _format_columns(df: pd.DataFrame, max_cols: int = 6) -> str:
+        if isinstance(df.columns, pd.MultiIndex):
+            cols = [str(tuple(c)) for c in df.columns[:max_cols]]
+        else:
+            cols = [str(c) for c in df.columns[:max_cols]]
+        out = ", ".join(cols)
+        if len(df.columns) > max_cols:
+            out += f", ... (+{len(df.columns) - max_cols})"
+        return out
+
+    def __repr__(self) -> str:
+        """Compact one-line-per-group summary of generated DataFrames."""
+        cls_name = type(self).__name__
+        if not self._is_loaded():
+            return f"{cls_name}(not loaded — call load_data())"
+
+        table_count = 0
+        total_rows = 0
+        detail_parts: list[str] = []
+        for group_name, field_names in self._GROUPS.items():
+            items: list[str] = []
+            for fname in field_names:
+                df = getattr(self, fname, None)
+                if isinstance(df, pd.DataFrame):
+                    table_count += 1
+                    total_rows += len(df)
+                    items.append(f"{fname}={len(df)}")
+            if items:
+                detail_parts.append(f"  {group_name}: {', '.join(items)}")
+
+        ts = getattr(self, "timestamps", None)
+        if ts is not None and len(ts):
+            detail_parts.append(
+                f"  temporal: timestamps={len(ts)} "
+                f"({ts[0]}..{ts[-1]}, freq={ts.freq})"
+            )
+
+        header = f"{cls_name}(tables={table_count}, total_rows={total_rows})"
+        return header + "\n" + "\n".join(detail_parts) if detail_parts else header
+
+    def _repr_html_(self) -> str:
+        cls_name = type(self).__name__
+        if not self._is_loaded():
+            return (
+                f"<div><strong>{cls_name}</strong> "
+                f"<em>not loaded — call load_data()</em></div>"
+            )
+
+        rows_html: list[str] = []
+        for group_name, field_names in self._GROUPS.items():
+            present = [
+                f for f in field_names
+                if isinstance(getattr(self, f, None), pd.DataFrame)
+            ]
+            first_in_group = True
+            for fname in present:
+                df = getattr(self, fname)
+                cols = self._format_columns(df)
+                group_cell = (
+                    f'<td rowspan="{len(present)}" '
+                    f'style="vertical-align:top;font-weight:bold;background:#f0f0f0">'
+                    f"{group_name}</td>"
+                    if first_in_group else ""
+                )
+                rows_html.append(
+                    f"<tr>{group_cell}"
+                    f"<td>{fname}</td>"
+                    f"<td style='text-align:right'>{len(df)}</td>"
+                    f"<td><code style='font-size:0.85em'>{cols}</code></td>"
+                    f"</tr>"
+                )
+                first_in_group = False
+
+        ts = getattr(self, "timestamps", None)
+        if ts is not None and len(ts):
+            rows_html.append(
+                f"<tr><td style='font-weight:bold;background:#f0f0f0'>temporal</td>"
+                f"<td>timestamps</td>"
+                f"<td style='text-align:right'>{len(ts)}</td>"
+                f"<td><code style='font-size:0.85em'>"
+                f"{ts[0]}..{ts[-1]}, freq={ts.freq}"
+                f"</code></td></tr>"
+            )
+
+        total_tables = sum(
+            1 for g in self._GROUPS.values() for f in g
+            if isinstance(getattr(self, f, None), pd.DataFrame)
+        )
+
+        return (
+            f"<div><strong>{cls_name}</strong> "
+            f"<span style='color:#666'>({total_tables} tables)</span>"
+            f"<table style='margin-top:4px;border-collapse:collapse;font-size:0.9em'>"
+            f"<tr style='border-bottom:1px solid #ccc'>"
+            f"<th>Group</th><th>Table</th><th>Rows</th><th>Columns</th></tr>"
+            + "\n".join(rows_html)
+            + "</table></div>"
         )
 
     # ------------------------------------------------------------------
