@@ -19,7 +19,7 @@ class DataLoaderMock:
         - df_depot_capacities     [node_id, commodity_category, capacity]
         - df_resource_capacities  [resource_id, capacity]
         - timestamps              DatetimeIndex
-        - df_inventory_ts         MultiIndex columns (facility_id, commodity_category)
+        - inventory_initial       [facility_id, commodity_category, quantity]
         - df_telemetry_ts         station telemetry (GBFS-like)
         - df_trips                trip records with rideable_type as commodity
         - df_station_costs        [station_id, fixed_cost_station]
@@ -31,7 +31,7 @@ class DataLoaderMock:
         "stations": ["df_stations", "df_station_capacities", "df_station_costs"],
         "depots": ["df_depots", "df_depot_capacities", "df_depot_costs"],
         "resources": ["df_resources", "df_resource_capacities", "df_truck_rates"],
-        "observations": ["df_inventory_ts", "df_telemetry_ts", "df_trips"],
+        "observations": ["inventory_initial", "df_telemetry_ts", "df_trips"],
     }
 
     def __init__(self, config: dict):
@@ -101,8 +101,8 @@ class DataLoaderMock:
 
         self.timestamps = pd.date_range(start=start_date, periods=n_timestamps, freq=freq)
 
-        self.df_inventory_ts, self.df_telemetry_ts, self.df_trips = (
-            self._generate_inventory_telemetry_trips(
+        self.inventory_initial, self.df_telemetry_ts, self.df_trips = (
+            self._generate_initial_telemetry_trips(
                 df_stations=full_stations,
                 df_depots=self.df_depots,
                 timestamps=self.timestamps,
@@ -265,7 +265,7 @@ class DataLoaderMock:
             "lon": self._rng.uniform(-74.03, -73.90, size=n),
         })
 
-    def _generate_inventory_telemetry_trips(
+    def _generate_initial_telemetry_trips(
         self,
         df_stations: pd.DataFrame,
         df_depots: pd.DataFrame,
@@ -274,40 +274,42 @@ class DataLoaderMock:
         depot_ebike_cap: int,
         depot_classic_cap: int,
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Generate trips first, then derive hourly inventory deterministically.
+        """Pick a random initial inventory, then generate trips constrained by it.
+
+        Returns ``(inventory_initial, df_telemetry_ts, df_trips)``.  The full
+        hourly inventory matrix is kept as a local numpy array — it is only
+        used to drive the constrained trip generation and to seed the
+        GBFS-like telemetry — and is never exposed publicly.
 
         Contract with the downstream simulator (Demand + Arrivals only):
 
         1. Every trip is strictly intra-day: both ``started_at`` and ``ended_at``
            fall within the same calendar day.
         2. No trip event lands in the *first* hour of any day.  This keeps
-           ``inv_ts[first_hour_of_day]`` equal to the "true start of day" state
-           (nothing applied yet).  In particular ``inv_ts[0]`` is the clean
-           ``inventory_initial`` that the simulator consumes at init time.
-        3. Trip deltas are applied via cumulative broadcast
-           (``inv[start_hour:, start_idx] -= 1`` and
-           ``inv[end_hour:, end_idx] += 1``).  Combined with (1) and (2) this
-           guarantees, for every day ``D``::
+           the hour-zero inventory equal to the "true start of day" state
+           (nothing applied yet) — ``inventory_initial`` is exactly that
+           state, which the simulator consumes at init time.
+        3. Trip deltas are applied via cumulative broadcast on the local
+           numpy matrix (``inv[start_hour:, start_idx] -= 1`` and
+           ``inv[end_hour:, end_idx] += 1``).  Combined with (1) and (2)
+           this guarantees, for every day ``D``::
 
-               inv_ts[last_hour_of_D] ==
-                   inv_ts[first_hour_of_D]
+               inv[last_hour_of_D] ==
+                   inv[first_hour_of_D]
                    + arrivals_on_D(by ended_at date)
                    - departures_on_D(by started_at date)
 
-        4. Capacity is enforced per commodity per station at the exact hour of
-           departure/arrival, so the hourly trajectory stays in
+        4. Capacity is enforced per commodity per station at the exact hour
+           of departure/arrival, so the hourly trajectory stays in
            ``[0, per_commodity_capacity]``.
 
-        Because of (1)–(3), a simulator run with only ``DemandPhase`` (fed
-        departures-per-day) and ``ArrivalsPhase`` (fed returns-per-day via
-        ``resolved.supply`` seeded into ``state.in_transit``) reproduces
-        ``observed_inventory`` exactly at daily grain.
+        Depot inventory is constant in the mock — set to its per-commodity
+        capacity for both ``inventory_initial`` and the telemetry seed.
         """
         total_capacities = df_stations["inventory_capacity"].to_numpy(dtype=int)
         station_ids = df_stations["station_id"].to_numpy()
         depot_ids = df_depots["node_id"].to_numpy()
         n_stations = len(station_ids)
-        n_depots = len(depot_ids)
         n_steps = len(timestamps)
 
         # Per-commodity station capacities (match df_station_capacities split).
@@ -423,30 +425,31 @@ class DataLoaderMock:
                     "member_casual": member_casual,
                 })
 
-        # ── Build df_inventory_ts with MultiIndex columns ────────────
-        facility_ids = list(station_ids) + list(depot_ids)
-        col_tuples = [
-            (fid, cc) for fid in facility_ids for cc in COMMODITY_CATEGORIES
-        ]
-        columns = pd.MultiIndex.from_tuples(
-            col_tuples, names=["facility_id", "commodity_category"],
-        )
-
-        n_cols = len(col_tuples)
-        data = np.zeros((n_steps, n_cols), dtype=int)
-
+        # ── Build inventory_initial (long format: one row per facility×commodity) ─
+        inv_initial_rows: list[dict] = []
         for i, sid in enumerate(station_ids):
-            col_e = i * 2
-            col_c = i * 2 + 1
-            data[:, col_e] = inv_electric[:, i]
-            data[:, col_c] = inv_classic[:, i]
-
-        base = n_stations * 2
-        for i in range(n_depots):
-            data[:, base + i * 2] = depot_ebike_cap
-            data[:, base + i * 2 + 1] = depot_classic_cap
-
-        df_inventory_ts = pd.DataFrame(data, index=timestamps, columns=columns)
+            inv_initial_rows.append({
+                "facility_id": sid,
+                "commodity_category": "electric_bike",
+                "quantity": int(init_electric[i]),
+            })
+            inv_initial_rows.append({
+                "facility_id": sid,
+                "commodity_category": "classic_bike",
+                "quantity": int(init_classic[i]),
+            })
+        for did in depot_ids:
+            inv_initial_rows.append({
+                "facility_id": did,
+                "commodity_category": "electric_bike",
+                "quantity": depot_ebike_cap,
+            })
+            inv_initial_rows.append({
+                "facility_id": did,
+                "commodity_category": "classic_bike",
+                "quantity": depot_classic_cap,
+            })
+        df_inventory_initial = pd.DataFrame(inv_initial_rows)
 
         # ── Telemetry (station-only, GBFS-like) ─────────────────────
         telemetry_records: list[dict] = []
@@ -503,7 +506,7 @@ class DataLoaderMock:
         else:
             df_trips = df_trips.sort_values("started_at").reset_index(drop=True)
 
-        return df_inventory_ts, df_telemetry_ts, df_trips
+        return df_inventory_initial, df_telemetry_ts, df_trips
 
     def _generate_costs(
         self,

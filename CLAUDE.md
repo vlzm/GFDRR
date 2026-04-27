@@ -117,6 +117,15 @@ gbp/
 - **After completing a task**, check if `PROJECT_STATE.md` should be updated (e.g. marking items as done, adding new findings). Update it if relevant.
 - **Verification notebook:** after completing a code task, create or update a notebook in `notebooks/verify/` that lets the user interactively test what changed. Keep cells minimal and focused — one cell per behavior. Name pattern: `NN_short_description.ipynb`. The user runs these by hand to build intuition. Notebooks must be in English (markdown cells, comments, print messages) — same rule as code.
 - **Language:** code, comments, docstrings — English only. Communication with the user — Russian.
+- **Plain-language explanations.** When explaining things to the user (in Russian), write in simple, easy-to-read language:
+  - No abbreviations: write "то есть" instead of "т.е.", "потому что" instead of "т.к.", "например" instead of "напр.".
+  - No unexplained jargon: on first mention, expand acronyms and technical terms ("GBFS" → "публичный API формата Citi Bike", "ground truth" → "точное правильное значение", "fixture" → "тестовые данные").
+  - Prefer 2–3 short paragraphs over dense tables, ASCII diagrams, or symbol-heavy formatting unless the user explicitly asks for a comparison table.
+  - Avoid English shorthand inside Russian text ("snapshot", "feed", "fallback") — translate or paraphrase.
+  - Goal: the user should understand the answer on the first read, without decoding shortcuts.
+- **Verify direction of derivation against code, not memory.** Any phrase like "X is derived from Y", "X comes from Y", "X is computed from Y" is a concrete claim about specific lines of code. Before writing it — re-open the function and check the actual generation order. The risk is highest in summary tables and minimalist diagrams, where 3-step dependency chains get silently compressed into 2-step ones and lose correctness. If you have not just looked at the code, say so explicitly ("по памяти, надо проверить") rather than asserting confidently.
+- **Compactness must not cost correctness.** When the user asks for a minimalist or short answer, fewer rows/columns is fine — but each remaining cell must be exact. If precision cannot fit in the requested format, flag the conflict ("в таком формате точно не получится, вот более полная версия") instead of silently dropping fidelity.
+- **Cite code for derivation claims.** When asserting that one entity is derived from another, include the `file:line` where the derivation happens. This forces verification before the claim is written and gives the user a place to check.
 
 ## Key Reference Documents
 

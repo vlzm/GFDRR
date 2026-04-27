@@ -91,22 +91,22 @@ class TestResolvedModel:
 
 
 # =============================================================================
-# Inventory time series
+# Inventory initial (mock-side shape)
 # =============================================================================
 
 
-class TestSourceInventoryWide:
-    def test_inventory_multiindex_shape(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        ts = loaded_graph_loader.source.df_inventory_ts
-        assert ts.shape == (48, N_TOTAL * N_CATEGORIES)
-        assert ts.columns.names == ["facility_id", "commodity_category"]
+class TestSourceInventoryInitial:
+    def test_inventory_initial_columns(self, loaded_graph_loader: DataLoaderGraph) -> None:
+        inv = loaded_graph_loader.source.inventory_initial
+        assert set(inv.columns) == {"facility_id", "commodity_category", "quantity"}
 
-    def test_different_timestamps_may_differ(self, loaded_graph_loader: DataLoaderGraph) -> None:
-        ts = loaded_graph_loader.source.df_inventory_ts
-        a = ts.iloc[0].sum()
-        b = ts.iloc[-1].sum()
-        assert a >= 0
-        assert b >= 0
+    def test_inventory_initial_covers_all_facilities(
+        self, loaded_graph_loader: DataLoaderGraph,
+    ) -> None:
+        inv = loaded_graph_loader.source.inventory_initial
+        assert len(inv) == N_TOTAL * N_CATEGORIES
+        assert set(inv["commodity_category"]) == set(COMMODITY_CATEGORIES)
+        assert (inv["quantity"] >= 0).all()
 
 
 class TestModelValidation:
@@ -345,8 +345,11 @@ class TestCoreTableAccess:
         inv = raw.inventory_initial
         assert inv is not None
         assert len(inv) == N_TOTAL * N_CATEGORIES
-        ts0 = loaded_graph_loader.source.df_inventory_ts.iloc[0]
-        for _, row in inv.iterrows():
-            fid = str(row["facility_id"])
-            cc = str(row["commodity_category"])
-            assert int(row["quantity"]) == int(ts0[(fid, cc)])
+        src_inv = loaded_graph_loader.source.inventory_initial
+        merged = inv.merge(
+            src_inv,
+            on=["facility_id", "commodity_category"],
+            suffixes=("_raw", "_src"),
+        )
+        assert len(merged) == len(inv)
+        assert (merged["quantity_raw"].astype(int) == merged["quantity_src"].astype(int)).all()

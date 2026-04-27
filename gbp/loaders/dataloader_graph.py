@@ -193,7 +193,7 @@ class DataLoaderGraph:
             observations = self._build_observations(entities)
 
         registry = AttributeRegistry()
-        node_params = self._build_node_parameters(entities, registry)
+        node_params = self._build_node_parameters(registry)
         self._register_facility_costs(registry, temporal)
         self._register_resource_costs(registry, entities)
 
@@ -424,34 +424,21 @@ class DataLoaderGraph:
 
     def _build_node_parameters(
         self,
-        entities: _EntityResult,
         registry: AttributeRegistry,
     ) -> dict[str, pd.DataFrame]:
         """Initial inventory and storage capacities — both optional in minimal mode.
 
-        - ``inventory_initial`` is emitted only when the source provides
-          ``df_inventory_ts``.  Otherwise ``build_model`` seeds it from
-          observed flow (or leaves it empty if flow is also absent).
+        - ``inventory_initial`` is taken directly from the source when present.
+          Otherwise ``build_model`` seeds it from observed flow (or leaves it
+          empty if flow is also absent).
         - Storage capacity attributes are registered only when the source has
           station / depot capacities.
         """
-        commodity_cats = self._commodity_categories()
         result: dict[str, pd.DataFrame] = {}
 
-        inv_ts = _nonempty_df(self._source, "df_inventory_ts")
-        if inv_ts is not None:
-            all_facility_ids = entities.station_ids + entities.depot_ids
-            inv0 = inv_ts.iloc[0]
-            inv_rows: list[dict] = []
-            for fid in all_facility_ids:
-                for cc in commodity_cats:
-                    qty = float(inv0.get((fid, cc), 0))
-                    inv_rows.append({
-                        "facility_id": fid,
-                        "commodity_category": cc,
-                        "quantity": qty,
-                    })
-            result["inventory_initial"] = pd.DataFrame(inv_rows)
+        inv_initial = _nonempty_df(self._source, "inventory_initial")
+        if inv_initial is not None:
+            result["inventory_initial"] = inv_initial.copy()
 
         cap_rows: list[dict] = []
         station_caps = _nonempty_df(self._source, "df_station_capacities")

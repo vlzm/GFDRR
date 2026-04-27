@@ -91,7 +91,7 @@ class DataLoaderMockMinimal:
         self.df_depot_capacities: pd.DataFrame | None = None
         self.df_resource_capacities: pd.DataFrame | None = None
         self.timestamps: pd.DatetimeIndex | None = None
-        self.df_inventory_ts: pd.DataFrame | None = None
+        self.inventory_initial: pd.DataFrame | None = None
         self.df_telemetry_ts: pd.DataFrame | None = None
         self.df_station_costs: pd.DataFrame | None = None
         self.df_depot_costs: pd.DataFrame | None = None

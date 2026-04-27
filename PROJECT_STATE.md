@@ -133,6 +133,13 @@ Core library `gbp` with data model, build pipeline, bike-sharing loader. All ref
 - `_ensure_edges_and_commodities()` in pipeline now passes `raw.distance_matrix` to `build_edges()` — this was the existing fallback path, now promoted to primary.
 - `edges`/`edge_commodities` remain as optional override fields in Raw (escape hatch for external pre-computed edge data).
 
+**Mock surface cleanup — `df_inventory_ts` removal (2026-04-26):**
+- Removed `df_inventory_ts` (the hourly MultiIndex ground-truth matrix) from `BikeShareSourceProtocol` and from both mocks. It was a mock-only fixture with no real-world counterpart in GBFS feeds.
+- `DataLoaderMock` now exposes `inventory_initial` (long-format DataFrame: `facility_id, commodity_category, quantity`) directly, covering stations and depots. The hourly inventory matrix is still computed internally but only to seed the GBFS-like telemetry.
+- `DataLoaderGraph._build_node_parameters()` now reads `source.inventory_initial` directly instead of slicing `df_inventory_ts.iloc[0]`.
+- `gbp/rebalancer/dataloader.py` was the only consumer of the hourly matrix beyond `inventory_initial` seeding. It is now broken (`AttributeError` at `load_data`) and `tests/test_rebalancer.py` was deleted. The rebalancer was already marked as early prototype awaiting Task rewrite — this just makes the deprecation honest.
+- Verification notebook: `notebooks/verify/07_inventory_initial_refactor.ipynb`.
+
 ### Environment
 
 Step-by-step simulation engine поверх `ResolvedModelData`. Design doc: `docs/design/environment_design.md`.

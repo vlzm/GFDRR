@@ -51,7 +51,7 @@ class BikeShareSourceProtocol(Protocol):
     df_depot_capacities: pd.DataFrame | None
     df_resource_capacities: pd.DataFrame | None
     timestamps: pd.DatetimeIndex | None
-    df_inventory_ts: pd.DataFrame | None
+    inventory_initial: pd.DataFrame | None
     df_telemetry_ts: pd.DataFrame | None
     df_station_costs: pd.DataFrame | None
     df_depot_costs: pd.DataFrame | None
