@@ -148,14 +148,14 @@ Step-by-step simulation engine поверх `ResolvedModelData`. Design doc: `do
 - `gbp/consumers/simulator/state.py` — `SimulationState` (frozen dataclass), `PeriodRow`, `init_state()`, vectorized resource generation from fleet
 - `gbp/consumers/simulator/phases.py` — `Phase` Protocol, `PhaseResult`, `Schedule` (every, every_n, custom)
 - `gbp/consumers/simulator/log.py` — `SimulationLog` (5 log tables), `RejectReason` enum
-- `gbp/consumers/simulator/built_in_phases.py` — `DemandPhase` (demand → inventory consumption + unmet demand), `ArrivalsPhase` (in-transit → inventory + resource release)
+- `gbp/consumers/simulator/built_in_phases.py` — `DemandPhase` (demand → inventory consumption + unmet demand), `ArrivalsPhase` (in-transit → inventory + resource release), `OrganicDeparturePhase` + `OrganicArrivalPhase` (atomic split of `OrganicFlowPhase`: departure subtracts from source, arrival adds to target with clip; enables inserting rebalancer between them)
 - `gbp/consumers/simulator/task.py` — `Task` Protocol, `DISPATCH_COLUMNS`
 - `gbp/consumers/simulator/dispatch_phase.py` — `DispatchPhase` (auto-assign resources, 5-step validation, apply dispatches)
 - `gbp/consumers/simulator/engine.py` — `Environment` class (run, step, step_phase)
 - `gbp/consumers/simulator/config.py` — `EnvironmentConfig`
 - `gbp/consumers/simulator/tasks/noop.py` — `NoopTask`
 - Tests: unit (state, phases, log, built-in phases, dispatch, engine) + integration (full pipeline)
-- Verification notebook: `notebooks/verify/02_environment_skeleton.ipynb`
+- Verification notebooks: `notebooks/verify/02_environment_skeleton.ipynb`, `notebooks/verify/08_organic_phase_split.ipynb`
 
 **Key design decisions:**
 - Immutable state via `with_*` methods

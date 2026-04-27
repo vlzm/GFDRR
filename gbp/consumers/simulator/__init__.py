@@ -10,6 +10,8 @@ Public API::
 from gbp.consumers.simulator.built_in_phases import (
     ArrivalsPhase,
     DemandPhase,
+    OrganicArrivalPhase,
+    OrganicDeparturePhase,
     OrganicFlowPhase,
 )
 from gbp.consumers.simulator.config import EnvironmentConfig
@@ -28,6 +30,8 @@ __all__ = [
     "Environment",
     "EnvironmentConfig",
     "init_state",
+    "OrganicArrivalPhase",
+    "OrganicDeparturePhase",
     "OrganicFlowPhase",
     "Phase",
     "PhaseResult",

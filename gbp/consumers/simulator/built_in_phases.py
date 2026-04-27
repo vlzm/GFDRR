@@ -105,33 +105,45 @@ class DemandPhase:
         )
 
 
-class OrganicFlowPhase:
-    """Replay ``resolved.observed_flow`` as flow events, instant transfer.
+_FLOW_EVENT_COLUMNS: tuple[str, ...] = (
+    "source_id",
+    "target_id",
+    "commodity_category",
+    "modal_type",
+    "quantity",
+    "resource_id",
+)
 
-    For each period, filters ``observed_flow`` by ``period_id``, applies a
-    net inventory delta (subtract at ``source_id``, add at ``target_id``),
-    and emits each row as a single flow event with both ``source_id`` and
-    ``target_id`` set.  Use this in place of :class:`DemandPhase` when the
-    target side of every organic movement is known (e.g. bike-share trips
-    where each demand event has a known destination station).
 
-    The transfer is treated as instantaneous (no in_transit step), which
-    makes ``simulation_flow_log`` equal to ``observed_flow`` (plus the
-    ``period_index`` / ``phase_name`` columns added by the log writer).
-    Inventory is clipped at zero — rows that would drive a facility
-    negative are silently capped, no unmet demand is logged.
+def _period_flows(
+    resolved: ResolvedModelData,
+    period: PeriodRow,
+) -> pd.DataFrame | None:
+    """Return observed_flow rows for *period*, or ``None`` if empty."""
+    if resolved.observed_flow is None or resolved.observed_flow.empty:
+        return None
+    flows = resolved.observed_flow[
+        resolved.observed_flow["period_id"] == period.period_id
+    ]
+    if flows.empty:
+        return None
+    return flows
+
+
+class OrganicDeparturePhase:
+    """Subtract outflow from source facility inventory.
+
+    For each ``observed_flow`` row matching the current period, subtracts the
+    trip quantity from the source facility's inventory.  Emits flow events
+    (one per observed row, with both ``source_id`` and ``target_id``).
+
+    Inventory is **not** clipped at zero — a facility may go transiently
+    negative within a period.  The corresponding :class:`OrganicArrivalPhase`
+    adds inflow and clips the result, restoring exact parity with the
+    original :class:`OrganicFlowPhase`.
     """
 
-    name: str = "ORGANIC_FLOW"
-
-    _FLOW_EVENT_COLUMNS: tuple[str, ...] = (
-        "source_id",
-        "target_id",
-        "commodity_category",
-        "modal_type",
-        "quantity",
-        "resource_id",
-    )
+    name: str = "ORGANIC_DEPARTURE"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
         """Initialise with an optional schedule (default: every period)."""
@@ -147,40 +159,22 @@ class OrganicFlowPhase:
         resolved: ResolvedModelData,
         period: PeriodRow,
     ) -> PhaseResult:
-        """Replay observed_flow for the current period."""
-        if resolved.observed_flow is None or resolved.observed_flow.empty:
+        """Subtract outflow and emit flow events for the current period."""
+        flows = _period_flows(resolved, period)
+        if flows is None:
             return PhaseResult.empty(state)
 
-        flows = resolved.observed_flow[
-            resolved.observed_flow["period_id"] == period.period_id
-        ]
-        if flows.empty:
-            return PhaseResult.empty(state)
-
-        # Net inventory delta: -quantity at source, +quantity at target.
         outflow = (
             flows.groupby(["source_id", "commodity_category"], as_index=False)["quantity"]
             .sum()
-            .rename(columns={"source_id": "facility_id"})
-        )
-        outflow["quantity"] = -outflow["quantity"]
-        inflow = (
-            flows.groupby(["target_id", "commodity_category"], as_index=False)["quantity"]
-            .sum()
-            .rename(columns={"target_id": "facility_id"})
-        )
-        delta = (
-            pd.concat([outflow, inflow], ignore_index=True)
-            .groupby(["facility_id", "commodity_category"], as_index=False)["quantity"]
-            .sum()
-            .rename(columns={"quantity": "delta"})
+            .rename(columns={"source_id": "facility_id", "quantity": "outflow"})
         )
 
         new_inv = state.inventory.merge(
-            delta, on=["facility_id", "commodity_category"], how="left",
+            outflow, on=["facility_id", "commodity_category"], how="left",
         )
-        new_inv["delta"] = new_inv["delta"].fillna(0.0)
-        new_inv["quantity"] = (new_inv["quantity"] + new_inv["delta"]).clip(lower=0.0)
+        new_inv["outflow"] = new_inv["outflow"].fillna(0.0)
+        new_inv["quantity"] = new_inv["quantity"] - new_inv["outflow"]
         new_inv = new_inv[INVENTORY_COLUMNS].copy()
 
         flow_events = pd.DataFrame({
@@ -188,12 +182,108 @@ class OrganicFlowPhase:
                 flows[col].values if col in flows.columns
                 else [None] * len(flows)
             )
-            for col in self._FLOW_EVENT_COLUMNS
+            for col in _FLOW_EVENT_COLUMNS
         })
 
         return PhaseResult(
             state=state.with_inventory(new_inv),
             flow_events=flow_events,
+            unmet_demand=pd.DataFrame(),
+            rejected_dispatches=pd.DataFrame(),
+        )
+
+
+class OrganicArrivalPhase:
+    """Add inflow to target facility inventory and clip at zero.
+
+    For each ``observed_flow`` row matching the current period, adds the
+    trip quantity to the target facility's inventory and clips the result
+    at zero.  No flow events are emitted — they are already produced by
+    :class:`OrganicDeparturePhase`.
+
+    Together, ``[OrganicDeparturePhase, OrganicArrivalPhase]`` produce the
+    same final inventory as the original :class:`OrganicFlowPhase`.
+    """
+
+    name: str = "ORGANIC_ARRIVAL"
+
+    def __init__(self, schedule: Schedule | None = None) -> None:
+        """Initialise with an optional schedule (default: every period)."""
+        self._schedule = schedule or Schedule.every()
+
+    def should_run(self, period: PeriodRow) -> bool:
+        """Delegate to schedule."""
+        return self._schedule.should_run(period)
+
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+    ) -> PhaseResult:
+        """Add inflow and clip inventory for the current period."""
+        flows = _period_flows(resolved, period)
+        if flows is None:
+            return PhaseResult.empty(state)
+
+        inflow = (
+            flows.groupby(["target_id", "commodity_category"], as_index=False)["quantity"]
+            .sum()
+            .rename(columns={"target_id": "facility_id", "quantity": "inflow"})
+        )
+
+        new_inv = state.inventory.merge(
+            inflow, on=["facility_id", "commodity_category"], how="left",
+        )
+        new_inv["inflow"] = new_inv["inflow"].fillna(0.0)
+        new_inv["quantity"] = (new_inv["quantity"] + new_inv["inflow"]).clip(lower=0.0)
+        new_inv = new_inv[INVENTORY_COLUMNS].copy()
+
+        return PhaseResult(
+            state=state.with_inventory(new_inv),
+            flow_events=pd.DataFrame(),
+            unmet_demand=pd.DataFrame(),
+            rejected_dispatches=pd.DataFrame(),
+        )
+
+
+class OrganicFlowPhase:
+    """Replay ``resolved.observed_flow`` as flow events, instant transfer.
+
+    Convenience wrapper that runs :class:`OrganicDeparturePhase` followed by
+    :class:`OrganicArrivalPhase` in a single phase call.  Produces identical
+    results to using the two phases separately.
+
+    Use this in place of :class:`DemandPhase` when the target side of every
+    organic movement is known (e.g. bike-share trips where each demand event
+    has a known destination station).
+    """
+
+    name: str = "ORGANIC_FLOW"
+
+    def __init__(self, schedule: Schedule | None = None) -> None:
+        """Initialise with an optional schedule (default: every period)."""
+        self._schedule = schedule or Schedule.every()
+        self._departure = OrganicDeparturePhase(self._schedule)
+        self._arrival = OrganicArrivalPhase(self._schedule)
+
+    def should_run(self, period: PeriodRow) -> bool:
+        """Delegate to schedule."""
+        return self._schedule.should_run(period)
+
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+    ) -> PhaseResult:
+        """Replay observed_flow for the current period."""
+        dep_result = self._departure.execute(state, resolved, period)
+        arr_result = self._arrival.execute(dep_result.state, resolved, period)
+
+        return PhaseResult(
+            state=arr_result.state,
+            flow_events=dep_result.flow_events,
             unmet_demand=pd.DataFrame(),
             rejected_dispatches=pd.DataFrame(),
         )
