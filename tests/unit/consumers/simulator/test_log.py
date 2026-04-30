@@ -8,8 +8,11 @@ from datetime import date
 import pandas as pd
 
 from gbp.consumers.simulator.log import (
+    DOCK_BLOCKING_LOG_COLUMNS,
     FLOW_LOG_COLUMNS,
     INVENTORY_LOG_COLUMNS,
+    LATENT_DEMAND_LOG_COLUMNS,
+    LOST_DEMAND_LOG_COLUMNS,
     RESOURCE_LOG_COLUMNS,
     RejectReason,
     SimulationLog,
@@ -48,6 +51,9 @@ class TestEmptyLog:
             "simulation_resource_log",
             "simulation_unmet_demand_log",
             "simulation_rejected_dispatches_log",
+            "simulation_latent_demand_log",
+            "simulation_lost_demand_log",
+            "simulation_dock_blocking_log",
         }
 
     def test_empty_columns(self) -> None:
@@ -57,6 +63,13 @@ class TestEmptyLog:
         assert list(dfs["simulation_inventory_log"].columns) == INVENTORY_LOG_COLUMNS
         assert list(dfs["simulation_flow_log"].columns) == FLOW_LOG_COLUMNS
         assert list(dfs["simulation_resource_log"].columns) == RESOURCE_LOG_COLUMNS
+        assert (
+            list(dfs["simulation_latent_demand_log"].columns) == LATENT_DEMAND_LOG_COLUMNS
+        )
+        assert list(dfs["simulation_lost_demand_log"].columns) == LOST_DEMAND_LOG_COLUMNS
+        assert (
+            list(dfs["simulation_dock_blocking_log"].columns) == DOCK_BLOCKING_LOG_COLUMNS
+        )
         for df in dfs.values():
             assert len(df) == 0
 
@@ -141,3 +154,67 @@ class TestRejectReason:
         assert RejectReason.INSUFFICIENT_INVENTORY == "insufficient_inventory"
         assert RejectReason.NO_AVAILABLE_RESOURCE == "no_available_resource"
         assert RejectReason.OVER_CAPACITY == "over_capacity"
+
+
+class TestNewLogTables:
+    """latent_demand / lost_demand / dock_blocking are routed to their tables."""
+
+    def test_latent_demand_recorded(self, resolved_model: ResolvedModelData) -> None:
+        state = init_state(resolved_model)
+        log = SimulationLog()
+        latent = pd.DataFrame(
+            {
+                "facility_id": ["s1"],
+                "commodity_category": ["working_bike"],
+                "latent_departures": [12.0],
+                "latent_arrivals": [8.0],
+            }
+        )
+        result = PhaseResult(state=state, latent_demand=latent)
+
+        log.record_events(result, "LATENT_DEMAND", _make_period())
+
+        df = log.to_dataframes()["simulation_latent_demand_log"]
+        assert len(df) == 1
+        assert df.iloc[0]["phase_name"] == "LATENT_DEMAND"
+        assert df.iloc[0]["latent_departures"] == 12.0
+
+    def test_lost_demand_recorded(self, resolved_model: ResolvedModelData) -> None:
+        state = init_state(resolved_model)
+        log = SimulationLog()
+        lost = pd.DataFrame(
+            {
+                "facility_id": ["s1"],
+                "commodity_category": ["working_bike"],
+                "latent": [12.0],
+                "realized": [7.0],
+                "lost": [5.0],
+            }
+        )
+        result = PhaseResult(state=state, lost_demand=lost)
+
+        log.record_events(result, "DEPARTURE_PHYSICS", _make_period())
+
+        df = log.to_dataframes()["simulation_lost_demand_log"]
+        assert len(df) == 1
+        assert df.iloc[0]["lost"] == 5.0
+
+    def test_dock_blocking_recorded(self, resolved_model: ResolvedModelData) -> None:
+        state = init_state(resolved_model)
+        log = SimulationLog()
+        blocked = pd.DataFrame(
+            {
+                "facility_id": ["s2"],
+                "commodity_category": ["working_bike"],
+                "incoming": [15.0],
+                "accepted": [8.0],
+                "blocked": [7.0],
+            }
+        )
+        result = PhaseResult(state=state, dock_blocking=blocked)
+
+        log.record_events(result, "DOCK_CAPACITY", _make_period())
+
+        df = log.to_dataframes()["simulation_dock_blocking_log"]
+        assert len(df) == 1
+        assert df.iloc[0]["blocked"] == 7.0

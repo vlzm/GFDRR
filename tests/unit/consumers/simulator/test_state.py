@@ -78,6 +78,35 @@ class TestSimulationStateImmutability:
         assert advanced.inventory is state.inventory
 
 
+class TestIntermediates:
+    """``intermediates`` is a per-period scratch space cleared on advance."""
+
+    def test_default_is_empty(self, resolved_model: ResolvedModelData) -> None:
+        state = init_state(resolved_model)
+        assert state.intermediates == {}
+
+    def test_with_intermediates_merges(
+        self, resolved_model: ResolvedModelData
+    ) -> None:
+        state = init_state(resolved_model)
+        first = state.with_intermediates(latent_demand=pd.DataFrame({"x": [1]}))
+        second = first.with_intermediates(od_probabilities=pd.DataFrame({"y": [2]}))
+
+        assert set(second.intermediates.keys()) == {"latent_demand", "od_probabilities"}
+        assert set(first.intermediates.keys()) == {"latent_demand"}
+        assert state.intermediates == {}
+
+    def test_advance_period_clears_intermediates(
+        self, resolved_model: ResolvedModelData
+    ) -> None:
+        state = init_state(resolved_model).with_intermediates(latent_demand="anything")
+        advanced = state.advance_period(next_period_index=1, next_period_id="p1")
+
+        assert advanced.intermediates == {}
+        # Original state is untouched.
+        assert state.intermediates == {"latent_demand": "anything"}
+
+
 class TestInitState:
     """init_state must produce correctly shaped DataFrames from resolved data."""
 

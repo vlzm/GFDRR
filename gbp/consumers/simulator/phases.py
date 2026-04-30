@@ -31,16 +31,27 @@ class PhaseResult:
 
     Attributes:
         state: Updated simulation state after the phase.
-        flow_events: Commodity movements produced by this phase (-> flow_log).
-        unmet_demand: Demand that could not be fulfilled (-> unmet_demand_log).
+        flow_events: Commodity movements produced by this phase
+            (-> simulation_flow_log).
+        unmet_demand: Demand that could not be fulfilled by inventory
+            (-> simulation_unmet_demand_log).
         rejected_dispatches: Dispatches rejected during validation
-            (-> rejected_dispatches_log).
+            (-> simulation_rejected_dispatches_log).
+        latent_demand: Predicted/observed origin/destination marginals before
+            physics is applied (-> simulation_latent_demand_log).
+        lost_demand: Gap between latent departures and realised departures
+            after the inventory constraint (-> simulation_lost_demand_log).
+        dock_blocking: Arrivals refused because target capacity is exceeded
+            (-> simulation_dock_blocking_log).
     """
 
     state: SimulationState
     flow_events: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
     unmet_demand: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
     rejected_dispatches: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
+    latent_demand: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
+    lost_demand: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
+    dock_blocking: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
 
     @classmethod
     def empty(cls, state: SimulationState) -> PhaseResult:

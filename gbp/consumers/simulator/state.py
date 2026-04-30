@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import date
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pandas as pd
 
@@ -84,6 +84,10 @@ class SimulationState:
         resources: Instance-level resource positions and statuses
             (columns: resource_id, resource_category, home_facility_id,
             current_facility_id, status, available_at_period).
+        intermediates: Transient per-period cache used to pass intermediate
+            tables (e.g. latent demand marginals, OD probabilities) between
+            phases within a single period.  Wiped automatically by
+            ``advance_period`` so data cannot leak across periods.
     """
 
     period_index: int
@@ -91,6 +95,7 @@ class SimulationState:
     inventory: pd.DataFrame
     in_transit: pd.DataFrame
     resources: pd.DataFrame
+    intermediates: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     # -- Immutable update helpers ----------------------------------------------
 
@@ -106,16 +111,28 @@ class SimulationState:
         """Return a new state with replaced resource table."""
         return dataclasses.replace(self, resources=new_resources)
 
+    def with_intermediates(self, **updates: Any) -> SimulationState:
+        """Return a new state with *updates* merged into ``intermediates``.
+
+        Existing keys are overwritten by *updates*; other keys are preserved.
+        """
+        merged = {**self.intermediates, **updates}
+        return dataclasses.replace(self, intermediates=merged)
+
     def advance_period(
         self,
         next_period_index: int,
         next_period_id: str,
     ) -> SimulationState:
-        """Return a new state positioned at the next period."""
+        """Return a new state positioned at the next period.
+
+        ``intermediates`` is wiped — it is scoped to a single period.
+        """
         return dataclasses.replace(
             self,
             period_index=next_period_index,
             period_id=next_period_id,
+            intermediates={},
         )
 
 

@@ -85,6 +85,38 @@ REJECTED_DISPATCHES_LOG_COLUMNS: list[str] = [
     "reason",
 ]
 
+LATENT_DEMAND_LOG_COLUMNS: list[str] = [
+    "period_index",
+    "period_id",
+    "phase_name",
+    "facility_id",
+    "commodity_category",
+    "latent_departures",
+    "latent_arrivals",
+]
+
+LOST_DEMAND_LOG_COLUMNS: list[str] = [
+    "period_index",
+    "period_id",
+    "phase_name",
+    "facility_id",
+    "commodity_category",
+    "latent",
+    "realized",
+    "lost",
+]
+
+DOCK_BLOCKING_LOG_COLUMNS: list[str] = [
+    "period_index",
+    "period_id",
+    "phase_name",
+    "facility_id",
+    "commodity_category",
+    "incoming",
+    "accepted",
+    "blocked",
+]
+
 
 # -- SimulationLog -------------------------------------------------------------
 
@@ -104,6 +136,9 @@ class SimulationLog:
         self._resource: list[pd.DataFrame] = []
         self._unmet_demand: list[pd.DataFrame] = []
         self._rejected_dispatches: list[pd.DataFrame] = []
+        self._latent_demand: list[pd.DataFrame] = []
+        self._lost_demand: list[pd.DataFrame] = []
+        self._dock_blocking: list[pd.DataFrame] = []
 
     # -- Recording helpers -----------------------------------------------------
 
@@ -149,16 +184,39 @@ class SimulationLog:
             df["phase_name"] = phase_name
             self._rejected_dispatches.append(df)
 
+        if not result.latent_demand.empty:
+            df = result.latent_demand.copy()
+            df["period_index"] = period.period_index
+            df["period_id"] = period.period_id
+            df["phase_name"] = phase_name
+            self._latent_demand.append(df)
+
+        if not result.lost_demand.empty:
+            df = result.lost_demand.copy()
+            df["period_index"] = period.period_index
+            df["period_id"] = period.period_id
+            df["phase_name"] = phase_name
+            self._lost_demand.append(df)
+
+        if not result.dock_blocking.empty:
+            df = result.dock_blocking.copy()
+            df["period_index"] = period.period_index
+            df["period_id"] = period.period_id
+            df["phase_name"] = phase_name
+            self._dock_blocking.append(df)
+
     # -- Finalisation ----------------------------------------------------------
 
     def to_dataframes(self) -> dict[str, pd.DataFrame]:
         """Concatenate all per-period logs into final DataFrames.
 
         Returns:
-            Dictionary with five keys:
+            Dictionary with eight keys:
             ``simulation_inventory_log``, ``simulation_flow_log``,
             ``simulation_resource_log``, ``simulation_unmet_demand_log``,
-            ``simulation_rejected_dispatches_log``.
+            ``simulation_rejected_dispatches_log``,
+            ``simulation_latent_demand_log``, ``simulation_lost_demand_log``,
+            ``simulation_dock_blocking_log``.
         """
         return {
             "simulation_inventory_log": _concat_or_empty(
@@ -175,6 +233,15 @@ class SimulationLog:
             ),
             "simulation_rejected_dispatches_log": _concat_or_empty(
                 self._rejected_dispatches, REJECTED_DISPATCHES_LOG_COLUMNS
+            ),
+            "simulation_latent_demand_log": _concat_or_empty(
+                self._latent_demand, LATENT_DEMAND_LOG_COLUMNS
+            ),
+            "simulation_lost_demand_log": _concat_or_empty(
+                self._lost_demand, LOST_DEMAND_LOG_COLUMNS
+            ),
+            "simulation_dock_blocking_log": _concat_or_empty(
+                self._dock_blocking, DOCK_BLOCKING_LOG_COLUMNS
             ),
         }
 

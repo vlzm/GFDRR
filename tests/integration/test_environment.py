@@ -51,6 +51,9 @@ class TestEnvironmentEmptyPhasesIntegration:
             "simulation_resource_log",
             "simulation_unmet_demand_log",
             "simulation_rejected_dispatches_log",
+            "simulation_latent_demand_log",
+            "simulation_lost_demand_log",
+            "simulation_dock_blocking_log",
         }
 
         # Inventory: 3 periods x 3 facilities
