@@ -1,7 +1,11 @@
-"""DispatchPhase: delegates to a Task, validates and applies dispatches.
+"""DispatchPhase: simulation-loop adapter for the dispatch lifecycle.
 
-This is the bridge between domain-specific Tasks (which produce dispatches)
-and the simulation state (which tracks inventory, in-transit, resources).
+The phase produces a Task's dispatches, hands them to
+:func:`gbp.consumers.simulator.dispatch_lifecycle.run_dispatch_lifecycle`,
+and packages the outcome as a :class:`PhaseResult`.  All domain logic
+(assignment, validation, application) lives behind the lifecycle's
+interface; the phase is just glue between the simulation loop and that
+deep module.
 """
 
 from __future__ import annotations
@@ -10,149 +14,17 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from gbp.consumers.simulator.log import RejectReason
+from gbp.consumers.simulator.dispatch_lifecycle import run_dispatch_lifecycle
 from gbp.consumers.simulator.phases import PhaseResult, Schedule
-from gbp.consumers.simulator.state import INVENTORY_COLUMNS
 from gbp.consumers.simulator.task import Task
-from gbp.core.enums import ResourceStatus
 
 if TYPE_CHECKING:
     from gbp.consumers.simulator.state import PeriodRow, SimulationState
     from gbp.core.model import ResolvedModelData
 
 
-# ---------------------------------------------------------------------------
-# Individual dispatch validators
-# ---------------------------------------------------------------------------
-
-def _reject_invalid_arrival(
-    dispatches: pd.DataFrame, period: PeriodRow,
-) -> None:
-    """Mark dispatches whose arrival_period is before the current period."""
-    bad = dispatches["arrival_period"] < period.period_index
-    dispatches.loc[bad & dispatches["_reject_reason"].isna(), "_reject_reason"] = (
-        RejectReason.INVALID_ARRIVAL.value
-    )
-
-
-def _reject_invalid_edge(
-    dispatches: pd.DataFrame, resolved: ResolvedModelData,
-) -> None:
-    """Mark dispatches referencing non-existent edges."""
-    if resolved.edges is None:
-        return
-    has_modal = dispatches["modal_type"].notna() & dispatches["_reject_reason"].isna()
-    if not has_modal.any():
-        return
-    edge_keys = set(
-        zip(
-            resolved.edges["source_id"],
-            resolved.edges["target_id"],
-            resolved.edges["modal_type"],
-            strict=False,
-        )
-    )
-    sub = dispatches.loc[has_modal]
-    bad_edge = pd.Series(
-        [
-            (s, t, m) not in edge_keys
-            for s, t, m in zip(sub["source_id"], sub["target_id"], sub["modal_type"], strict=False)
-        ],
-        index=sub.index,
-    )
-    dispatches.loc[bad_edge[bad_edge].index, "_reject_reason"] = (
-        RejectReason.INVALID_EDGE.value
-    )
-
-
-def _reject_unavailable_resource(
-    dispatches: pd.DataFrame, state: SimulationState,
-) -> None:
-    """Mark dispatches whose resource is not available at the source facility."""
-    has_resource = dispatches["resource_id"].notna() & dispatches["_reject_reason"].isna()
-    if not has_resource.any():
-        return
-    avail = state.resources[state.resources["status"] == ResourceStatus.AVAILABLE.value]
-    avail_at_source = set(
-        zip(avail["resource_id"], avail["current_facility_id"], strict=False)
-    )
-    sub = dispatches.loc[has_resource]
-    bad_res = pd.Series(
-        [(r, s) not in avail_at_source for r, s in zip(sub["resource_id"], sub["source_id"], strict=False)],
-        index=sub.index,
-    )
-    dispatches.loc[bad_res[bad_res].index, "_reject_reason"] = (
-        RejectReason.NO_AVAILABLE_RESOURCE.value
-    )
-
-
-def _reject_over_capacity(
-    dispatches: pd.DataFrame, state: SimulationState, resolved: ResolvedModelData,
-) -> None:
-    """Mark dispatches that exceed a resource's base capacity."""
-    has_resource_valid = (
-        dispatches["resource_id"].notna() & dispatches["_reject_reason"].isna()
-    )
-    if not has_resource_valid.any() or resolved.resource_categories is None:
-        return
-    cap_map = resolved.resource_categories.set_index("resource_category_id")["base_capacity"]
-    res_cat = state.resources.set_index("resource_id")["resource_category"]
-
-    sub = dispatches[has_resource_valid].copy()
-    sub["_res_cat"] = sub["resource_id"].map(res_cat)
-    sub["_cap"] = sub["_res_cat"].map(cap_map)
-    used = sub.groupby("resource_id")["quantity"].transform("sum")
-    over = used > sub["_cap"]
-    if over.any():
-        over_idx = sub.index[over]
-        not_yet = dispatches.loc[over_idx, "_reject_reason"].isna()
-        dispatches.loc[not_yet[not_yet].index, "_reject_reason"] = (
-            RejectReason.OVER_CAPACITY.value
-        )
-
-
-def _reject_insufficient_inventory(
-    dispatches: pd.DataFrame, state: SimulationState,
-) -> None:
-    """Reject dispatches that would overdraw facility inventory.
-
-    Uses sequential allocation: dispatches are processed in row order.
-    Earlier dispatches consume available inventory; later ones may be
-    rejected if the remaining stock is insufficient.
-    """
-    pending_mask = dispatches["_reject_reason"].isna()
-    if not pending_mask.any():
-        return
-
-    # Build a mutable copy of available inventory keyed by (facility, commodity)
-    remaining: dict[tuple[str, str], float] = {}
-    for _, row in state.inventory.iterrows():
-        key = (str(row["facility_id"]), str(row["commodity_category"]))
-        remaining[key] = float(row["quantity"])
-
-    for idx in dispatches.index[pending_mask]:
-        row = dispatches.loc[idx]
-        key = (str(row["source_id"]), str(row["commodity_category"]))
-        avail = remaining.get(key, 0.0)
-        qty = float(row["quantity"])
-        if qty > avail:
-            dispatches.at[idx, "_reject_reason"] = RejectReason.INSUFFICIENT_INVENTORY.value
-        else:
-            remaining[key] = avail - qty
-
-
-# ---------------------------------------------------------------------------
-# DispatchPhase
-# ---------------------------------------------------------------------------
-
-
 class DispatchPhase:
-    """Phase that delegates to a Task and applies dispatches to state.
-
-    Orchestration flow:
-    1. ``Task.run()`` produces dispatches DataFrame.
-    2. ``_validate_dispatches`` splits into valid + rejected.
-    3. ``_apply_dispatches`` updates inventory, in_transit, resources.
+    """Phase that runs a Task and feeds its output to the dispatch lifecycle.
 
     Attributes:
         name: Phase name, auto-derived as ``DISPATCH_{task.name}``.
@@ -178,223 +50,13 @@ class DispatchPhase:
         resolved: ResolvedModelData,
         period: PeriodRow,
     ) -> PhaseResult:
-        """Run the task, validate dispatches, apply to state."""
+        """Run the task and apply the resulting dispatches via the lifecycle."""
         dispatches = self._task.run(state, resolved, period)
+        outcome = run_dispatch_lifecycle(dispatches, state, resolved, period)
 
-        if dispatches.empty:
-            return PhaseResult.empty(state)
-
-        # Auto-assign resources where resource_id is null
-        dispatches = self._auto_assign_resources(dispatches, state, resolved)
-
-        valid, rejected = self._validate_dispatches(
-            dispatches, state, resolved, period
-        )
-
-        if valid.empty:
-            return PhaseResult(
-                state=state,
-                flow_events=pd.DataFrame(),
-                unmet_demand=pd.DataFrame(),
-                rejected_dispatches=rejected,
-            )
-
-        new_state, flow_events = self._apply_dispatches(state, valid, period)
-        return PhaseResult(
-            state=new_state,
-            flow_events=flow_events,
-            unmet_demand=pd.DataFrame(),
-            rejected_dispatches=rejected,
-        )
-
-    # -- Validation ------------------------------------------------------------
-
-    def _validate_dispatches(
-        self,
-        dispatches: pd.DataFrame,
-        state: SimulationState,
-        resolved: ResolvedModelData,
-        period: PeriodRow,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Validate dispatches against current state and model.
-
-        Checks run in order; the first failing check sets the reject reason.
-
-        Returns (valid_dispatches, rejected_dispatches).
-        """
-        dispatches = dispatches.copy()
-        dispatches["_reject_reason"] = None
-
-        _reject_invalid_arrival(dispatches, period)
-        _reject_invalid_edge(dispatches, resolved)
-        _reject_unavailable_resource(dispatches, state)
-        _reject_over_capacity(dispatches, state, resolved)
-        _reject_insufficient_inventory(dispatches, state)
-
-        # Split
-        rejected_mask = dispatches["_reject_reason"].notna()
-        rejected = dispatches[rejected_mask].rename(
-            columns={"_reject_reason": "reason"}
-        )
-        valid = dispatches[~rejected_mask].drop(columns=["_reject_reason"])
-
-        return valid, rejected
-
-    # -- Application -----------------------------------------------------------
-
-    def _apply_dispatches(
-        self,
-        state: SimulationState,
-        dispatches: pd.DataFrame,
-        period: PeriodRow,
-    ) -> tuple[SimulationState, pd.DataFrame]:
-        """Apply valid dispatches to state.  Returns (new_state, flow_events)."""
-        dispatches = dispatches.copy()
-
-        # 1. Generate shipment IDs
-        dispatches["shipment_id"] = [
-            f"shp_{period.period_index}_{i}" for i in range(len(dispatches))
-        ]
-        dispatches["departure_period"] = period.period_index
-
-        # 2. Decrement source inventory
-        dec = (
-            dispatches
-            .groupby(["source_id", "commodity_category"], as_index=False)["quantity"]
-            .sum()
-            .rename(columns={"source_id": "facility_id", "quantity": "dec_qty"})
-        )
-        new_inv = state.inventory.merge(
-            dec,
-            on=["facility_id", "commodity_category"],
-            how="left",
-        )
-        new_inv["dec_qty"] = new_inv["dec_qty"].fillna(0.0)
-        new_inv["quantity"] = new_inv["quantity"] - new_inv["dec_qty"]
-        new_inv = new_inv[INVENTORY_COLUMNS].copy()
-
-        # 3. Append to in_transit
-        new_shipments = dispatches[
-            [
-                "shipment_id", "source_id", "target_id", "commodity_category",
-                "quantity", "resource_id", "departure_period", "arrival_period",
-            ]
-        ].copy()
-        frames = [state.in_transit, new_shipments]
-        frames = [f for f in frames if not f.empty]
-        new_transit = pd.concat(frames, ignore_index=True) if frames else state.in_transit.copy()
-
-        # 4. Update resources for dispatched ones
-        resources = state.resources.copy()
-        dispatched_res = dispatches[dispatches["resource_id"].notna()]
-        if not dispatched_res.empty:
-            # Build maps: resource_id -> target_id, resource_id -> arrival_period
-            target_map = dispatched_res.drop_duplicates(
-                subset=["resource_id"]
-            ).set_index("resource_id")["target_id"]
-            arrival_map = dispatched_res.drop_duplicates(
-                subset=["resource_id"]
-            ).set_index("resource_id")["arrival_period"]
-
-            mask = resources["resource_id"].isin(target_map.index)
-            resources.loc[mask, "status"] = ResourceStatus.IN_TRANSIT.value
-            resources.loc[mask, "current_facility_id"] = (
-                resources.loc[mask, "resource_id"].map(target_map)
-            )
-            resources.loc[mask, "available_at_period"] = (
-                resources.loc[mask, "resource_id"].map(arrival_map)
-            )
-
-        # 5. Build flow events
-        flow_events = pd.DataFrame({
-            "source_id": dispatches["source_id"].values,
-            "target_id": dispatches["target_id"].values,
-            "commodity_category": dispatches["commodity_category"].values,
-            "modal_type": dispatches["modal_type"].values,
-            "quantity": dispatches["quantity"].values,
-            "resource_id": dispatches["resource_id"].values,
-        })
-
-        new_state = (
-            state
-            .with_inventory(new_inv)
-            .with_in_transit(new_transit)
-            .with_resources(resources)
-        )
-        return new_state, flow_events
-
-    # -- Auto-assign -----------------------------------------------------------
-
-    def _auto_assign_resources(
-        self,
-        dispatches: pd.DataFrame,
-        state: SimulationState,
-        resolved: ResolvedModelData,
-    ) -> pd.DataFrame:
-        """Assign available resources to dispatches with null resource_id.
-
-        Sequential assignment: each assigned resource is removed from the
-        available pool for subsequent dispatches.
-        """
-        dispatches = dispatches.copy()
-        needs_resource = dispatches["resource_id"].isna()
-
-        if not needs_resource.any():
-            return dispatches
-
-        # Build pool of available resources
-        available = state.resources[
-            state.resources["status"] == ResourceStatus.AVAILABLE.value
-        ].copy()
-
-        # Compatibility filters
-        compat_commodity: set[tuple[str, str]] | None = None
-        if (
-            resolved.resource_commodity_compatibility is not None
-            and not resolved.resource_commodity_compatibility.empty
-        ):
-            rcc = resolved.resource_commodity_compatibility
-            compat_commodity = set(
-                zip(rcc["resource_category"], rcc["commodity_category"], strict=False)
-            )
-
-        compat_modal: set[tuple[str, str]] | None = None
-        if (
-            resolved.resource_modal_compatibility is not None
-            and not resolved.resource_modal_compatibility.empty
-        ):
-            rmc = resolved.resource_modal_compatibility
-            compat_modal = set(
-                zip(rmc["resource_category"], rmc["modal_type"], strict=False)
-            )
-
-        assigned: set[str] = set()
-
-        for idx in dispatches.index[needs_resource]:
-            row = dispatches.loc[idx]
-            candidates = available[
-                (available["current_facility_id"] == row["source_id"])
-                & (~available["resource_id"].isin(assigned))
-            ]
-
-            if compat_commodity is not None:
-                candidates = candidates[
-                    candidates["resource_category"].apply(
-                        lambda rc, cc=row["commodity_category"]: (rc, cc)
-                        in compat_commodity
-                    )
-                ]
-
-            if compat_modal is not None and pd.notna(row.get("modal_type")):
-                candidates = candidates[
-                    candidates["resource_category"].apply(
-                        lambda rc, mt=row["modal_type"]: (rc, mt) in compat_modal
-                    )
-                ]
-
-            if not candidates.empty:
-                chosen = candidates.iloc[0]["resource_id"]
-                dispatches.at[idx, "resource_id"] = chosen
-                assigned.add(chosen)
-
-        return dispatches
+        events: dict[str, pd.DataFrame] = {}
+        if not outcome.rejected.empty:
+            events["rejected_dispatches"] = outcome.rejected
+        if not outcome.flow_events.empty:
+            events["flow_events"] = outcome.flow_events
+        return PhaseResult(state=outcome.state, events=events)

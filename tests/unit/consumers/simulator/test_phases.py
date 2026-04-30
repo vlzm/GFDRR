@@ -64,9 +64,11 @@ class TestPhaseResult:
         result = PhaseResult.empty(state)
 
         assert result.state is state
-        assert result.flow_events.empty
-        assert result.unmet_demand.empty
-        assert result.rejected_dispatches.empty
+        assert result.events == {}
+        # Convenience accessor returns an empty DataFrame for unknown keys.
+        assert result.event("flow_events").empty
+        assert result.event("unmet_demand").empty
+        assert result.event("rejected_dispatches").empty
 
 
 class TestPhaseProtocol:

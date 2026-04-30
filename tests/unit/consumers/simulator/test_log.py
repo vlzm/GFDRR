@@ -135,7 +135,7 @@ class TestRecordEvents:
                 "resource_id": [None],
             }
         )
-        result = PhaseResult(state=state, flow_events=flow)
+        result = PhaseResult(state=state, events={"flow_events": flow})
         period = _make_period()
 
         log.record_events(result, "DEMAND", period)
@@ -170,7 +170,7 @@ class TestNewLogTables:
                 "latent_arrivals": [8.0],
             }
         )
-        result = PhaseResult(state=state, latent_demand=latent)
+        result = PhaseResult(state=state, events={"latent_demand": latent})
 
         log.record_events(result, "LATENT_DEMAND", _make_period())
 
@@ -191,7 +191,7 @@ class TestNewLogTables:
                 "lost": [5.0],
             }
         )
-        result = PhaseResult(state=state, lost_demand=lost)
+        result = PhaseResult(state=state, events={"lost_demand": lost})
 
         log.record_events(result, "DEPARTURE_PHYSICS", _make_period())
 
@@ -211,7 +211,7 @@ class TestNewLogTables:
                 "blocked": [7.0],
             }
         )
-        result = PhaseResult(state=state, dock_blocking=blocked)
+        result = PhaseResult(state=state, events={"dock_blocking": blocked})
 
         log.record_events(result, "DOCK_CAPACITY", _make_period())
 

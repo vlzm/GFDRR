@@ -12,8 +12,12 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 import pandas as pd
 
+from gbp.consumers.simulator.inventory import (
+    apply_delta,
+    merge_with_inventory,
+    to_inventory_delta,
+)
 from gbp.consumers.simulator.phases import PhaseResult, Schedule
-from gbp.consumers.simulator.state import INVENTORY_COLUMNS
 from gbp.core.enums import ResourceStatus
 
 if TYPE_CHECKING:
@@ -46,9 +50,6 @@ class DemandPhase:
     ) -> PhaseResult:
         """Apply demand for the current period to inventory."""
         # 1. Filter demand for this period
-        if resolved.demand is None:
-            return PhaseResult.empty(state)
-
         period_demand = resolved.demand[
             resolved.demand["period_id"] == period.period_id
         ].copy()
@@ -56,18 +57,15 @@ class DemandPhase:
         if period_demand.empty:
             return PhaseResult.empty(state)
 
-        # Rename demand quantity to avoid collision with inventory quantity
+        # 2. Left-merge demand onto inventory; demand_qty = 0 where absent.
         period_demand = period_demand.rename(columns={"quantity": "demand_qty"})
-
-        # 2. Left-merge: keep all inventory, attach demand where it exists
-        merged = state.inventory.merge(
+        merged = merge_with_inventory(
+            state.inventory,
             period_demand[["facility_id", "commodity_category", "demand_qty"]],
-            on=["facility_id", "commodity_category"],
-            how="left",
+            value_col="demand_qty",
         )
-        merged["demand_qty"] = merged["demand_qty"].fillna(0.0)
 
-        # 3. Vectorized fulfilled / deficit
+        # 3. Vectorized fulfilled / deficit (consumption clipped at stock).
         merged["fulfilled"] = np.minimum(merged["quantity"], merged["demand_qty"])
         merged["deficit"] = merged["demand_qty"] - merged["fulfilled"]
 
@@ -97,12 +95,12 @@ class DemandPhase:
         })
 
         # 7. Return result
-        return PhaseResult(
-            state=state.with_inventory(new_inv),
-            flow_events=flow_events,
-            unmet_demand=unmet_demand,
-            rejected_dispatches=pd.DataFrame(),
-        )
+        events: dict[str, pd.DataFrame] = {}
+        if not flow_events.empty:
+            events["flow_events"] = flow_events
+        if not unmet_demand.empty:
+            events["unmet_demand"] = unmet_demand
+        return PhaseResult(state=state.with_inventory(new_inv), events=events)
 
 
 _FLOW_EVENT_COLUMNS: tuple[str, ...] = (
@@ -120,7 +118,7 @@ def _period_flows(
     period: PeriodRow,
 ) -> pd.DataFrame | None:
     """Return observed_flow rows for *period*, or ``None`` if empty."""
-    if resolved.observed_flow is None or resolved.observed_flow.empty:
+    if resolved.observed_flow.empty:
         return None
     flows = resolved.observed_flow[
         resolved.observed_flow["period_id"] == period.period_id
@@ -164,18 +162,8 @@ class OrganicDeparturePhase:
         if flows is None:
             return PhaseResult.empty(state)
 
-        outflow = (
-            flows.groupby(["source_id", "commodity_category"], as_index=False)["quantity"]
-            .sum()
-            .rename(columns={"source_id": "facility_id", "quantity": "outflow"})
-        )
-
-        new_inv = state.inventory.merge(
-            outflow, on=["facility_id", "commodity_category"], how="left",
-        )
-        new_inv["outflow"] = new_inv["outflow"].fillna(0.0)
-        new_inv["quantity"] = new_inv["quantity"] - new_inv["outflow"]
-        new_inv = new_inv[INVENTORY_COLUMNS].copy()
+        outflow = to_inventory_delta(flows, facility_col="source_id")
+        new_inv = apply_delta(state.inventory, outflow, op="subtract")
 
         flow_events = pd.DataFrame({
             col: (
@@ -187,9 +175,7 @@ class OrganicDeparturePhase:
 
         return PhaseResult(
             state=state.with_inventory(new_inv),
-            flow_events=flow_events,
-            unmet_demand=pd.DataFrame(),
-            rejected_dispatches=pd.DataFrame(),
+            events={"flow_events": flow_events} if not flow_events.empty else {},
         )
 
 
@@ -226,25 +212,10 @@ class OrganicArrivalPhase:
         if flows is None:
             return PhaseResult.empty(state)
 
-        inflow = (
-            flows.groupby(["target_id", "commodity_category"], as_index=False)["quantity"]
-            .sum()
-            .rename(columns={"target_id": "facility_id", "quantity": "inflow"})
-        )
+        inflow = to_inventory_delta(flows, facility_col="target_id")
+        new_inv = apply_delta(state.inventory, inflow, op="add_clip_zero")
 
-        new_inv = state.inventory.merge(
-            inflow, on=["facility_id", "commodity_category"], how="left",
-        )
-        new_inv["inflow"] = new_inv["inflow"].fillna(0.0)
-        new_inv["quantity"] = (new_inv["quantity"] + new_inv["inflow"]).clip(lower=0.0)
-        new_inv = new_inv[INVENTORY_COLUMNS].copy()
-
-        return PhaseResult(
-            state=state.with_inventory(new_inv),
-            flow_events=pd.DataFrame(),
-            unmet_demand=pd.DataFrame(),
-            rejected_dispatches=pd.DataFrame(),
-        )
+        return PhaseResult(state=state.with_inventory(new_inv))
 
 
 class OrganicFlowPhase:
@@ -283,9 +254,7 @@ class OrganicFlowPhase:
 
         return PhaseResult(
             state=arr_result.state,
-            flow_events=dep_result.flow_events,
-            unmet_demand=pd.DataFrame(),
-            rejected_dispatches=pd.DataFrame(),
+            events={**dep_result.events, **arr_result.events},
         )
 
 
@@ -357,7 +326,7 @@ class HistoricalLatentDemandPhase:
 
         return PhaseResult(
             state=state.with_intermediates(latent_demand=latent),
-            latent_demand=latent.copy(),
+            events={"latent_demand": latent.copy()},
         )
 
 
@@ -503,10 +472,9 @@ class DeparturePhysicsPhase:
         if dep.empty:
             return PhaseResult.empty(state)
 
-        merged = state.inventory.merge(
-            dep, on=["facility_id", "commodity_category"], how="left",
+        merged = merge_with_inventory(
+            state.inventory, dep, value_col="latent_departures",
         )
-        merged["latent_departures"] = merged["latent_departures"].fillna(0.0)
 
         if self._mode == "permissive":
             merged["realized"] = merged["latent_departures"]
@@ -542,7 +510,8 @@ class DeparturePhysicsPhase:
             .with_inventory(new_inv)
             .with_intermediates(realized_departures=realized_dep)
         )
-        return PhaseResult(state=new_state, lost_demand=lost_log)
+        events = {"lost_demand": lost_log} if not lost_log.empty else {}
+        return PhaseResult(state=new_state, events=events)
 
 
 class HistoricalTripSamplingPhase:
@@ -657,23 +626,9 @@ class ArrivalsPhase:
         if arriving.empty:
             return PhaseResult.empty(state)
 
-        # 2. Group arriving quantities by (target_id, commodity_category)
-        arrival_totals = (
-            arriving
-            .groupby(["target_id", "commodity_category"], as_index=False)["quantity"]
-            .sum()
-            .rename(columns={"target_id": "facility_id", "quantity": "arrived_qty"})
-        )
-
-        # 3. Merge into inventory and add arrived quantities
-        new_inv = state.inventory.merge(
-            arrival_totals,
-            on=["facility_id", "commodity_category"],
-            how="left",
-        )
-        new_inv["arrived_qty"] = new_inv["arrived_qty"].fillna(0.0)
-        new_inv["quantity"] = new_inv["quantity"] + new_inv["arrived_qty"]
-        new_inv = new_inv[INVENTORY_COLUMNS].copy()
+        # 2. Aggregate arriving quantities and add to target inventory.
+        arrival_totals = to_inventory_delta(arriving, facility_col="target_id")
+        new_inv = apply_delta(state.inventory, arrival_totals, op="add")
 
         # 4. Update resources for arriving shipments
         resources = state.resources.copy()
@@ -709,12 +664,8 @@ class ArrivalsPhase:
             .with_in_transit(remaining)
             .with_resources(resources)
         )
-        return PhaseResult(
-            state=new_state,
-            flow_events=flow_events,
-            unmet_demand=pd.DataFrame(),
-            rejected_dispatches=pd.DataFrame(),
-        )
+        events = {"flow_events": flow_events} if not flow_events.empty else {}
+        return PhaseResult(state=new_state, events=events)
 
 
 class DockCapacityPhase:
@@ -766,10 +717,7 @@ class DockCapacityPhase:
         period: PeriodRow,
     ) -> PhaseResult:
         """Clip inventory to storage capacity; log overflow as dock blocking."""
-        if (
-            resolved.attributes is None
-            or "operation_capacity" not in resolved.attributes
-        ):
+        if "operation_capacity" not in resolved.attributes:
             return PhaseResult.empty(state)
 
         cap_data = resolved.attributes.get("operation_capacity").data
@@ -802,7 +750,5 @@ class DockCapacityPhase:
             "blocked": overflow["blocked"].values,
         })
 
-        return PhaseResult(
-            state=state.with_inventory(new_inv),
-            dock_blocking=dock_log,
-        )
+        events = {"dock_blocking": dock_log} if not dock_log.empty else {}
+        return PhaseResult(state=state.with_inventory(new_inv), events=events)

@@ -169,3 +169,69 @@ def test_resolved_model_data_edge_lead_time_optional() -> None:
         edge_lead_time_resolved=None,
     )
     resolved.validate()
+
+
+def test_resolved_consumer_tables_normalized_to_empty() -> None:
+    """``ResolvedModelData.__post_init__`` substitutes None with empty frames.
+
+    Consumer-facing tables (demand, supply, observed_flow, edges, …) become
+    column-aware empty DataFrames so the simulator can use a single
+    ``.empty`` check instead of guarding with ``is None or .empty``.
+    """
+    d = _minimal_raw_frames()
+    # Only pass the dataclass-required fields; everything else should default
+    # to ``None`` and be normalized by ``__post_init__``.
+    resolved = ResolvedModelData(
+        facilities=d["facilities"],
+        planning_horizon=d["planning_horizon"],
+        planning_horizon_segments=d["planning_horizon_segments"],
+        facility_operations=d["facility_operations"],
+        edge_rules=d["edge_rules"],
+    )
+
+    for name in ResolvedModelData._CONSUMER_NORMALIZED_TABLES:
+        df = getattr(resolved, name)
+        assert df is not None, f"{name} should be normalized to a DataFrame, got None"
+        assert isinstance(df, pd.DataFrame)
+        assert df.empty
+        expected_cols = ResolvedModelData._consumer_table_columns(name)
+        assert list(df.columns) == expected_cols, (
+            f"{name} columns drift from schema: "
+            f"got {list(df.columns)}, expected {expected_cols}"
+        )
+
+    # Time-resolved tables substitute ``date`` with ``period_id``.
+    assert "period_id" in resolved.demand.columns
+    assert "date" not in resolved.demand.columns
+    assert "period_id" in resolved.observed_flow.columns
+
+    # Build-only fields (e.g. spines, generated artifacts) are left untouched.
+    assert resolved.edge_lead_time_resolved is None
+    assert resolved.facility_spines is None
+
+
+def test_resolved_normalization_preserves_user_provided_data() -> None:
+    """Non-empty consumer tables passed by the user must not be replaced."""
+    d = _minimal_raw_frames()
+    user_demand = pd.DataFrame(
+        {
+            "facility_id": ["s1"],
+            "commodity_category": ["working_bike"],
+            "period_id": ["p0"],
+            "quantity": [3.0],
+        }
+    )
+    resolved = ResolvedModelData(
+        facilities=d["facilities"],
+        commodity_categories=d["commodity_categories"],
+        resource_categories=d["resource_categories"],
+        planning_horizon=d["planning_horizon"],
+        planning_horizon_segments=d["planning_horizon_segments"],
+        periods=d["periods"],
+        facility_roles=d["facility_roles"],
+        facility_operations=d["facility_operations"],
+        edge_rules=d["edge_rules"],
+        demand=user_demand,
+    )
+    assert len(resolved.demand) == 1
+    assert resolved.demand.iloc[0]["quantity"] == 3.0

@@ -12,18 +12,11 @@ Three levels of granularity:
 
 from __future__ import annotations
 
-import pandas as pd
-
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.exceptions import SimulatorConfigError
 from gbp.consumers.simulator.log import SimulationLog
 from gbp.consumers.simulator.state import PeriodRow, SimulationState, init_state
 from gbp.core.model import ResolvedModelData
-
-
-def _is_nonempty(df: pd.DataFrame | None) -> bool:
-    """Return ``True`` when a DataFrame is present and has at least one row."""
-    return df is not None and not df.empty
 
 
 class Environment:
@@ -47,9 +40,9 @@ class Environment:
                 to drive the flow.
         """
         has_any_flow_input = (
-            _is_nonempty(resolved.demand)
-            or _is_nonempty(resolved.supply)
-            or _is_nonempty(resolved.inventory_initial)
+            not resolved.demand.empty
+            or not resolved.supply.empty
+            or not resolved.inventory_initial.empty
         )
         if not has_any_flow_input:
             raise SimulatorConfigError(

@@ -106,8 +106,9 @@ class TestDemandPhaseExecute:
         phase = DemandPhase()
         result = phase.execute(state, resolved_model, _make_period(0, "p0"))
 
-        assert not result.unmet_demand.empty
-        assert result.unmet_demand.iloc[0]["deficit"] > 0
+        unmet = result.event("unmet_demand")
+        assert not unmet.empty
+        assert unmet.iloc[0]["deficit"] > 0
 
     def test_no_demand_returns_empty(
         self, resolved_model: ResolvedModelData
@@ -235,9 +236,10 @@ class TestOrganicDeparturePhaseExecute:
         result = phase.execute(
             state, resolved_model_with_obs, _make_period(0, "p0"),
         )
-        assert not result.flow_events.empty
-        assert "source_id" in result.flow_events.columns
-        assert "target_id" in result.flow_events.columns
+        flow = result.event("flow_events")
+        assert not flow.empty
+        assert "source_id" in flow.columns
+        assert "target_id" in flow.columns
 
     def test_no_observed_flow_returns_empty(
         self, resolved_model: ResolvedModelData,
@@ -275,7 +277,7 @@ class TestOrganicArrivalPhaseExecute:
         result = phase.execute(
             state, resolved_model_with_obs, _make_period(0, "p0"),
         )
-        assert result.flow_events.empty
+        assert result.event("flow_events").empty
 
 
 class TestOrganicPhaseParity:
@@ -309,8 +311,8 @@ class TestOrganicPhaseParity:
 
         # Flow events must match exactly
         assert_frame_equal(
-            combined_result.flow_events.reset_index(drop=True),
-            dep_result.flow_events.reset_index(drop=True),
+            combined_result.event("flow_events").reset_index(drop=True),
+            dep_result.event("flow_events").reset_index(drop=True),
         )
 
     def test_full_run_parity(
@@ -450,8 +452,9 @@ class TestHistoricalLatentDemandPhaseExecute:
 
         result = phase.execute(state, resolved_model_with_obs, period)
 
-        assert not result.latent_demand.empty
-        assert set(result.latent_demand.columns) >= {
+        latent = result.event("latent_demand")
+        assert not latent.empty
+        assert set(latent.columns) >= {
             "facility_id",
             "commodity_category",
             "latent_departures",
@@ -469,7 +472,7 @@ class TestHistoricalLatentDemandPhaseExecute:
         result = phase.execute(state, resolved_model, period)
 
         assert result.state.intermediates == {}
-        assert result.latent_demand.empty
+        assert result.event("latent_demand").empty
         assert_frame_equal(result.state.inventory, state.inventory)
 
     def test_output_is_stably_sorted(
@@ -603,12 +606,7 @@ class TestHistoricalODStructurePhaseExecute:
             state, resolved_model_with_obs, _make_period(0, "p0"),
         )
 
-        assert result.flow_events.empty
-        assert result.unmet_demand.empty
-        assert result.rejected_dispatches.empty
-        assert result.latent_demand.empty
-        assert result.lost_demand.empty
-        assert result.dock_blocking.empty
+        assert result.events == {}
 
 
 class TestDeparturePhysicsPhaseContract:
@@ -676,7 +674,7 @@ class TestDeparturePhysicsPhaseExecute:
         )
 
         assert_frame_equal(result.state.inventory, state.inventory)
-        assert result.lost_demand.empty
+        assert result.event("lost_demand").empty
 
     def test_permissive_matches_organic_departure(
         self, resolved_model_with_obs: ResolvedModelData
@@ -722,7 +720,7 @@ class TestDeparturePhysicsPhaseExecute:
             latent_result.state, resolved_model_with_obs, period,
         )
 
-        assert result.lost_demand.empty
+        assert result.event("lost_demand").empty
 
     def test_strict_clips_at_inventory_and_logs_loss(self) -> None:
         """inventory=3, latent=10 → realized=3, lost=7."""
@@ -733,8 +731,9 @@ class TestDeparturePhysicsPhaseExecute:
         )
 
         assert result.state.inventory.iloc[0]["quantity"] == 0.0
-        assert len(result.lost_demand) == 1
-        row = result.lost_demand.iloc[0]
+        lost = result.event("lost_demand")
+        assert len(lost) == 1
+        row = lost.iloc[0]
         assert row["latent"] == 10.0
         assert row["realized"] == 3.0
         assert row["lost"] == 7.0
@@ -747,7 +746,7 @@ class TestDeparturePhysicsPhaseExecute:
         )
 
         assert result.state.inventory.iloc[0]["quantity"] == 7.0
-        assert result.lost_demand.empty
+        assert result.event("lost_demand").empty
 
     def test_strict_treats_negative_inventory_as_zero(self) -> None:
         """Defensive: pre-existing negative quantity ⇒ realized=0, lost=latent."""
@@ -759,7 +758,7 @@ class TestDeparturePhysicsPhaseExecute:
 
         # Inventory unchanged when realized=0 (quantity - 0 = -2).
         assert result.state.inventory.iloc[0]["quantity"] == -2.0
-        row = result.lost_demand.iloc[0]
+        row = result.event("lost_demand").iloc[0]
         assert row["realized"] == 0.0
         assert row["lost"] == 5.0
 
@@ -922,12 +921,7 @@ class TestHistoricalTripSamplingPhaseExecute:
             state, resolved_model_with_obs, _make_period(0, "p0"),
         )
 
-        assert result.flow_events.empty
-        assert result.unmet_demand.empty
-        assert result.rejected_dispatches.empty
-        assert result.latent_demand.empty
-        assert result.lost_demand.empty
-        assert result.dock_blocking.empty
+        assert result.events == {}
 
 
 class TestDockCapacityPhaseContract:
@@ -995,7 +989,7 @@ class TestDockCapacityPhaseExecute:
         )
 
         assert_frame_equal(result.state.inventory, state.inventory)
-        assert result.dock_blocking.empty
+        assert result.event("dock_blocking").empty
 
     def test_inventory_below_capacity_no_clip(
         self, resolved_model_with_obs: ResolvedModelData
@@ -1012,7 +1006,7 @@ class TestDockCapacityPhaseExecute:
         )
 
         assert_frame_equal(result.state.inventory, state.inventory)
-        assert result.dock_blocking.empty
+        assert result.event("dock_blocking").empty
 
     def test_inventory_above_capacity_clipped_and_logged(
         self, resolved_model_with_obs: ResolvedModelData
@@ -1033,7 +1027,8 @@ class TestDockCapacityPhaseExecute:
         ].iloc[0]
         assert s1_after == 20.0
 
-        s1_log = result.dock_blocking[result.dock_blocking["facility_id"] == "s1"]
+        dock_log = result.event("dock_blocking")
+        s1_log = dock_log[dock_log["facility_id"] == "s1"]
         assert len(s1_log) == 1
         assert s1_log.iloc[0]["incoming"] == 100.0
         assert s1_log.iloc[0]["accepted"] == 20.0
@@ -1058,7 +1053,8 @@ class TestDockCapacityPhaseExecute:
             result.state.inventory["facility_id"] == "d1", "quantity"
         ].iloc[0]
         assert d1_after == 999_999.0
-        assert not (result.dock_blocking["facility_id"] == "d1").any()
+        dock_log = result.event("dock_blocking")
+        assert not (dock_log["facility_id"] == "d1").any() if not dock_log.empty else True
 
     def test_no_storage_rows_is_noop(
         self, resolved_model_with_obs: ResolvedModelData
@@ -1098,21 +1094,4 @@ class TestDockCapacityPhaseExecute:
         )
 
         assert_frame_equal(result.state.inventory, state.inventory)
-        assert result.dock_blocking.empty
-
-    def test_attributes_none_returns_empty(
-        self, resolved_model_with_obs: ResolvedModelData
-    ) -> None:
-        """Defensive: if resolved.attributes is None entirely, no-op."""
-        phase = DockCapacityPhase()
-        state = init_state(resolved_model_with_obs)
-
-        class _ResolvedNoAttrs:
-            attributes = None
-
-        result = phase.execute(
-            state, _ResolvedNoAttrs(), _make_period(0, "p0"),  # type: ignore[arg-type]
-        )
-
-        assert_frame_equal(result.state.inventory, state.inventory)
-        assert result.dock_blocking.empty
+        assert result.event("dock_blocking").empty

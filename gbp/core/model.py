@@ -354,7 +354,14 @@ class _ModelDataMixin:
     # ── validation ────────────────────────────────────────────────────
 
     def validate(self) -> None:
-        """Check required tables exist and columns match row schemas."""
+        """Check required tables exist and columns match row schemas.
+
+        Empty optional DataFrames are not validated against the schema's
+        required columns: they carry no rows to check, and ``ResolvedModelData``
+        normalizes absent consumer-facing tables to empty frames whose columns
+        intentionally diverge from the raw schema (e.g. ``period_id`` replaces
+        the raw ``date``).
+        """
         cls_name = type(self).__name__
         errors: list[str] = []
         for f in fields(self):
@@ -366,7 +373,7 @@ class _ModelDataMixin:
                     errors.append(f"{f.name} is required but is None")
                     continue
                 errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
-            elif df is not None:
+            elif df is not None and not df.empty:
                 errors.extend(_validate_dataframe_columns(f.name, df, self._SCHEMAS[f.name]))
 
         if errors:
@@ -616,6 +623,73 @@ class ResolvedModelData(_TabularModelBase):
     _NON_TABLE_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {"attributes", "build_report"}
     )
+
+    # Tables consumers (Environment, Optimizer, Analytics) read directly.
+    # Normalized in ``__post_init__`` from ``None`` to an empty DataFrame so
+    # call sites can use a single ``.empty`` check instead of
+    # ``is None or .empty``.  Build-time-only fields (e.g. spines, generated
+    # artifacts) stay outside this set: there ``None`` carries the meaningful
+    # "not produced" signal.
+    _CONSUMER_NORMALIZED_TABLES: ClassVar[frozenset[str]] = frozenset({
+        "demand",
+        "supply",
+        "observed_flow",
+        "observed_inventory",
+        "inventory_initial",
+        "inventory_in_transit",
+        "resources",
+        "resource_fleet",
+        "resource_categories",
+        "resource_commodity_compatibility",
+        "resource_modal_compatibility",
+        "edges",
+        "edge_commodities",
+    })
+
+    # Subset of consumer tables whose ``date`` column is replaced with
+    # ``period_id`` after time resolution.  Empty placeholders use the
+    # post-resolution column set so consumer code can access ``period_id``
+    # uniformly (data present or absent).
+    _TIME_RESOLVED_TABLES: ClassVar[frozenset[str]] = frozenset({
+        "demand",
+        "supply",
+        "observed_flow",
+        "observed_inventory",
+    })
+
+    def __post_init__(self) -> None:
+        """Replace ``None``/empty consumer-facing tables with column-aware empties.
+
+        Build-time tables (where ``None`` drives derivation) are not touched —
+        this only normalizes the output side of the build pipeline so that
+        consumers can rely on every listed table being a real DataFrame with
+        the right columns.
+
+        Empty DataFrames are also re-normalized: round-trips through
+        ``dict_io`` / parquet collapse empty tables to a frame with no columns,
+        which would surprise consumers that expect ``period_id``/``source_id``
+        to be addressable even on empty data.
+        """
+        for name in self._CONSUMER_NORMALIZED_TABLES:
+            df = getattr(self, name)
+            if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+                cols = self._consumer_table_columns(name)
+                setattr(self, name, pd.DataFrame(columns=cols))
+
+    @classmethod
+    def _consumer_table_columns(cls, name: str) -> list[str]:
+        """Return the column list for an empty consumer-facing table.
+
+        Pulled from the row schema so the placeholder tracks schema changes;
+        ``date`` is rewritten to ``period_id`` for time-resolved tables.
+        """
+        schema = cls._SCHEMAS.get(name)
+        if schema is None:
+            return []
+        cols = list(schema.model_fields.keys())
+        if name in cls._TIME_RESOLVED_TABLES:
+            cols = ["period_id" if c == "date" else c for c in cols]
+        return cols
 
     # ── Resolved-only group access properties ───────────────────────────
 

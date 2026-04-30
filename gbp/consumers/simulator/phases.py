@@ -5,8 +5,9 @@ DISPATCH).  Phases implement a ``Protocol`` so that both built-in and custom
 phases share the same contract.
 
 ``Schedule`` controls *when* a phase fires (every period, every Nth, custom
-predicate).  ``PhaseResult`` bundles the updated state with event DataFrames
-for logging.
+predicate).  ``PhaseResult`` bundles the updated state with a dict of named
+event DataFrames.  Each key routes to a specific log table via the registry
+in :mod:`gbp.consumers.simulator.log`.
 """
 
 from __future__ import annotations
@@ -31,32 +32,36 @@ class PhaseResult:
 
     Attributes:
         state: Updated simulation state after the phase.
-        flow_events: Commodity movements produced by this phase
-            (-> simulation_flow_log).
-        unmet_demand: Demand that could not be fulfilled by inventory
-            (-> simulation_unmet_demand_log).
-        rejected_dispatches: Dispatches rejected during validation
-            (-> simulation_rejected_dispatches_log).
-        latent_demand: Predicted/observed origin/destination marginals before
-            physics is applied (-> simulation_latent_demand_log).
-        lost_demand: Gap between latent departures and realised departures
-            after the inventory constraint (-> simulation_lost_demand_log).
-        dock_blocking: Arrivals refused because target capacity is exceeded
-            (-> simulation_dock_blocking_log).
+        events: Mapping of event-table short name to the rows produced by this
+            phase.  Each key must match a registered log table (see
+            ``gbp.consumers.simulator.log.LOG_TABLES``).  Empty or missing
+            entries are skipped by ``SimulationLog.record_events``.
+
+    Common keys:
+        - ``"flow_events"``        — commodity movements (-> simulation_flow_log)
+        - ``"unmet_demand"``       — demand not fulfilled by inventory
+        - ``"rejected_dispatches"`` — dispatches rejected during validation
+        - ``"latent_demand"``      — origin/destination marginals
+        - ``"lost_demand"``        — gap between latent and realised departures
+        - ``"dock_blocking"``      — arrivals refused over storage capacity
     """
 
     state: SimulationState
-    flow_events: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
-    unmet_demand: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
-    rejected_dispatches: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
-    latent_demand: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
-    lost_demand: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
-    dock_blocking: pd.DataFrame = field(default_factory=lambda: pd.DataFrame())
+    events: dict[str, pd.DataFrame] = field(default_factory=dict)
 
     @classmethod
     def empty(cls, state: SimulationState) -> PhaseResult:
         """Create a no-op result that passes the state through unchanged."""
         return cls(state=state)
+
+    def event(self, name: str) -> pd.DataFrame:
+        """Return the event DataFrame for *name*, or an empty DataFrame.
+
+        Convenience for callers and tests that want a single-line check.
+        Does not enforce schema; the log layer validates against the registry.
+        """
+        df = self.events.get(name)
+        return df if df is not None else pd.DataFrame()
 
 
 # -- Schedule ------------------------------------------------------------------

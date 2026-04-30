@@ -19,9 +19,11 @@ def test_raises_when_all_flow_inputs_empty() -> None:
     resolved = build_model(raw)
 
     # Strip any flow inputs that might have been derived or carried in raw.
-    resolved.demand = None
-    resolved.supply = None
-    resolved.inventory_initial = None
+    # ``dataclasses.replace`` re-runs ``__post_init__`` which normalizes
+    # ``None`` to a properly-shaped empty DataFrame.
+    resolved = dataclasses.replace(
+        resolved, demand=None, supply=None, inventory_initial=None,
+    )
 
     with pytest.raises(SimulatorConfigError, match="demand, supply, or inventory_initial"):
         Environment(resolved, EnvironmentConfig(phases=[]))
@@ -43,8 +45,7 @@ def test_accepts_only_inventory_initial() -> None:
         ),
     )
     resolved = build_model(raw)
-    resolved.demand = None
-    resolved.supply = None
+    resolved = dataclasses.replace(resolved, demand=None, supply=None)
 
     env = Environment(resolved, EnvironmentConfig(phases=[]))
     assert env.state is not None
@@ -54,8 +55,7 @@ def test_accepts_only_demand() -> None:
     """Demand alone is enough — simulator can still run (stockouts are valid)."""
     raw = minimal_raw_model(with_demand=True, with_supply=False)
     resolved = build_model(raw)
-    resolved.supply = None
-    resolved.inventory_initial = None
+    resolved = dataclasses.replace(resolved, supply=None, inventory_initial=None)
 
     env = Environment(resolved, EnvironmentConfig(phases=[]))
     assert env.state is not None

@@ -150,19 +150,12 @@ def init_state(resolved: ResolvedModelData) -> SimulationState:
         in-transit, and resource DataFrames initialised from *resolved*.
     """
     # Inventory
-    if resolved.inventory_initial is not None:
-        inventory = resolved.inventory_initial[
-            ["facility_id", "commodity_category", "quantity"]
-        ].copy()
-    else:
-        inventory = pd.DataFrame(columns=INVENTORY_COLUMNS)
+    inventory = resolved.inventory_initial[
+        ["facility_id", "commodity_category", "quantity"]
+    ].copy()
 
     # In-transit: declared pre-horizon shipments + organic returns from supply
-    if resolved.inventory_in_transit is not None:
-        declared_transit = _init_in_transit(resolved.inventory_in_transit, resolved)
-    else:
-        declared_transit = pd.DataFrame(columns=IN_TRANSIT_COLUMNS)
-
+    declared_transit = _init_in_transit(resolved.inventory_in_transit, resolved)
     organic_transit = _init_in_transit_from_supply(resolved)
 
     transit_frames = [df for df in (declared_transit, organic_transit) if not df.empty]
@@ -215,14 +208,14 @@ def _init_in_transit_from_supply(resolved: ResolvedModelData) -> pd.DataFrame:
     ``ArrivalsPhase`` treats them as organic (non-resource-backed) flow.
 
     Args:
-        resolved: Fully resolved model.  ``resolved.supply`` may be ``None``
-            or empty, in which case an empty frame is returned.
+        resolved: Fully resolved model.  ``resolved.supply`` may be empty,
+            in which case an empty frame is returned.
 
     Returns:
         DataFrame with columns matching ``IN_TRANSIT_COLUMNS``.  Empty when
         no supply is present.
     """
-    if resolved.supply is None or resolved.supply.empty:
+    if resolved.supply.empty:
         return pd.DataFrame(columns=IN_TRANSIT_COLUMNS)
 
     period_map = dict(
@@ -266,7 +259,7 @@ def _init_resources(resolved: ResolvedModelData) -> pd.DataFrame:
     Returns:
         DataFrame with columns defined by ``RESOURCE_COLUMNS``.
     """
-    if resolved.resources is not None:
+    if not resolved.resources.empty:
         # L3 resources are explicitly provided
         resources = resolved.resources[
             ["resource_id", "resource_category", "home_facility_id"]
@@ -276,7 +269,7 @@ def _init_resources(resolved: ResolvedModelData) -> pd.DataFrame:
         resources["available_at_period"] = None
         return resources[RESOURCE_COLUMNS]
 
-    if resolved.resource_fleet is not None:
+    if not resolved.resource_fleet.empty:
         return _generate_resources_from_fleet(resolved.resource_fleet)
 
     # No resources at all — empty frame
