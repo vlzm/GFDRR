@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find /e/Documents/vlzm/GFDRR -maxdepth 2 -type f \\\\\\(-name Makefile -o -name *.sh -o -name *.yml -o -name *.yaml \\\\\\))"
+      "Bash(find /e/Documents/vlzm/GFDRR -maxdepth 2 -type f \\\\\\(-name Makefile -o -name *.sh -o -name *.yml -o -name *.yaml \\\\\\))",
+      "mcp__plugin_oh-my-claudecode_t__state_write",
+      "Bash(python -m pytest tests/unit/consumers/simulator/test_latent_demand_inflator.py -v)",
+      "Bash(uv run *)",
+      "Bash(.venv/Scripts/pytest.exe tests/unit/consumers/simulator/test_latent_demand_inflator.py tests/unit/consumers/simulator/test_dispatch_lifecycle.py -v --no-cov)",
+      "PowerShell(& .\\\\.venv\\\\Scripts\\\\pytest.exe tests/unit/consumers/simulator/test_latent_demand_inflator.py tests/unit/consumers/simulator/test_dispatch_lifecycle.py -v --no-cov 2>&1 | Select-Object -Last 80)"
     ]
   }
 }

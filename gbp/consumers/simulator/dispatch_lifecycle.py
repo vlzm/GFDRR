@@ -258,28 +258,47 @@ def _reject_invalid_edge(
     )
 
 
+# Single-row dispatches use the per-row (resource_id, source_id) availability check.
+# Multi-row dispatches sharing a non-null resource_id are treated as one logical route
+# (e.g. a multi-stop PDP route emitted by ``RebalancerTask``).  Pickup-delivery rows
+# in a route do NOT form a physical traversal chain — a row's ``source_id`` is a
+# pickup station, not the previous row's target — so the validator only checks that
+# the resource itself is available.  Tasks emitting routes are responsible for
+# pre-assigning ``resource_id`` and respecting truck capacity.
 def _reject_unavailable_resource(
     dispatches: pd.DataFrame, state: SimulationState,
 ) -> None:
-    """Mark dispatches whose resource is not available at the source facility."""
+    """Mark dispatches whose resource is not available."""
     has_resource = dispatches["resource_id"].notna() & dispatches["_reject_reason"].isna()
     if not has_resource.any():
         return
     avail = state.resources[state.resources["status"] == ResourceStatus.AVAILABLE.value]
+    avail_resource_ids = set(avail["resource_id"])
     avail_at_source = set(
         zip(avail["resource_id"], avail["current_facility_id"], strict=False)
     )
     sub = dispatches.loc[has_resource]
-    bad_res = pd.Series(
-        [
-            (r, s) not in avail_at_source
-            for r, s in zip(sub["resource_id"], sub["source_id"], strict=False)
-        ],
-        index=sub.index,
-    )
-    dispatches.loc[bad_res[bad_res].index, "_reject_reason"] = (
-        RejectReason.NO_AVAILABLE_RESOURCE.value
-    )
+
+    bad_indices: list[object] = []
+    for resource_id, group in sub.groupby("resource_id", sort=False):
+        if len(group) == 1:
+            # Single-row: per-row source availability check.
+            idx = group.index[0]
+            source = group["source_id"].iloc[0]
+            if (resource_id, source) not in avail_at_source:
+                bad_indices.append(idx)
+            continue
+
+        # Multi-row route: accept all rows iff the resource is available
+        # somewhere; otherwise reject all.  Source positions are not validated
+        # because pickup-delivery rows do not form a physical chain.
+        if resource_id not in avail_resource_ids:
+            bad_indices.extend(group.index)
+
+    if bad_indices:
+        dispatches.loc[bad_indices, "_reject_reason"] = (
+            RejectReason.NO_AVAILABLE_RESOURCE.value
+        )
 
 
 def _reject_over_capacity(

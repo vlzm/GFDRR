@@ -668,6 +668,91 @@ class ArrivalsPhase:
         return PhaseResult(state=new_state, events=events)
 
 
+class LatentDemandInflatorPhase:
+    """Scale ``state.intermediates["latent_demand"]`` by a multiplier.
+
+    Pipeline placement: insert **after** :class:`HistoricalLatentDemandPhase`
+    and **before** :class:`DeparturePhysicsPhase` (mode ``"strict"``).  The
+    inflated marginals then cause ``DeparturePhysicsPhase`` to record
+    ``lost_demand > 0`` even when historical inventory would normally satisfy
+    the baseline, making the rebalancing benefit measurable.
+
+    Semantic: multiplies the historical latent demand to create artificial
+    demand pressure for experiments.  Both ``latent_departures`` and
+    ``latent_arrivals`` are scaled to maintain supply/demand symmetry within
+    each period.
+
+    Warning: with ``multiplier=1.0`` (the default) this phase is a pure
+    identity operation — intermediates are unchanged and no events are emitted.
+    That is intentional: it makes the phase safe to insert unconditionally
+    into a pipeline without changing existing behaviour.
+
+    Args:
+        multiplier: Either a scalar ``float`` applied to every facility row,
+            or a ``dict[str, float]`` mapping ``facility_id`` to a per-facility
+            factor.  Facilities absent from the dict receive an implicit
+            multiplier of ``1.0``.
+        schedule: Optional :class:`~gbp.consumers.simulator.phases.Schedule`
+            (default: every period).
+    """
+
+    name: str = "LATENT_DEMAND_INFLATOR"
+
+    def __init__(
+        self,
+        multiplier: float | dict[str, float] = 1.0,
+        schedule: Schedule | None = None,
+    ) -> None:
+        """Initialise with an optional multiplier and schedule.
+
+        Args:
+            multiplier: Scalar float or per-facility dict.  Defaults to
+                ``1.0`` (identity).
+            schedule: Optional schedule (default: every period).
+        """
+        self._multiplier = multiplier
+        self._schedule = schedule or Schedule.every()
+
+    def should_run(self, period: PeriodRow) -> bool:
+        """Delegate to schedule."""
+        return self._schedule.should_run(period)
+
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+    ) -> PhaseResult:
+        """Scale ``latent_demand`` in intermediates by the configured multiplier.
+
+        Args:
+            state: Current simulation state.
+            resolved: Resolved model data (unused; required by the Phase protocol).
+            period: Current period descriptor (unused; required by the Phase protocol).
+
+        Returns:
+            A :class:`~gbp.consumers.simulator.phases.PhaseResult` with the
+            updated state.  No events are emitted — this phase only mutates
+            intermediate state.
+        """
+        latent = state.intermediates.get("latent_demand")
+        if latent is None or latent.empty:
+            return PhaseResult.empty(state)
+
+        latent = latent.copy()
+
+        if isinstance(self._multiplier, dict):
+            factors = latent["facility_id"].map(self._multiplier).fillna(1.0)
+            latent["latent_departures"] = latent["latent_departures"] * factors
+            latent["latent_arrivals"] = latent["latent_arrivals"] * factors
+        else:
+            latent["latent_departures"] = latent["latent_departures"] * self._multiplier
+            latent["latent_arrivals"] = latent["latent_arrivals"] * self._multiplier
+
+        new_state = state.with_intermediates(latent_demand=latent)
+        return PhaseResult(state=new_state, events={})
+
+
 class DockCapacityPhase:
     """Enforce facility storage capacity after arrivals.
 

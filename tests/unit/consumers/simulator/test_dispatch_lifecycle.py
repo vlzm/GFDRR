@@ -14,6 +14,7 @@ import pandas as pd
 
 from gbp.consumers.simulator.dispatch_lifecycle import (
     DispatchOutcome,
+    _reject_unavailable_resource,
     run_dispatch_lifecycle,
 )
 from gbp.consumers.simulator.log import RejectReason
@@ -220,3 +221,139 @@ class TestRejectionOrdering:
             outcome.rejected.iloc[0]["reason"]
             == RejectReason.INVALID_ARRIVAL.value
         )
+
+
+def _multi_dispatch(
+    *,
+    sources: list[str],
+    targets: list[str],
+    resource_id: object,
+    period_index: int = 0,
+) -> pd.DataFrame:
+    """Multi-row dispatch frame sharing a resource_id, in DISPATCH_COLUMNS order."""
+    n = len(sources)
+    assert len(targets) == n
+    return pd.DataFrame(
+        {
+            "source_id": sources,
+            "target_id": targets,
+            "commodity_category": ["working_bike"] * n,
+            "quantity": [1.0] * n,
+            "resource_id": [resource_id] * n,
+            "modal_type": ["road"] * n,
+            "arrival_period": [period_index + 1] * n,
+        }
+    )
+
+
+class TestRejectUnavailableResourceRouteValidation:
+    """Tests for the route-aware ``_reject_unavailable_resource`` validator.
+
+    Single-row dispatches keep the strict ``(resource_id, source_id)`` per-row
+    check.  Multi-row dispatches sharing the same non-null ``resource_id`` are
+    treated as one logical route (e.g. a multi-stop PDP route emitted by
+    ``RebalancerTask``).  Pickup-delivery rows do not form a physical
+    traversal chain — a row's ``source_id`` is a pickup station, not the
+    previous row's target — so the validator only checks that the resource
+    itself is in the AVAILABLE pool, not the per-row source.
+    """
+
+    def test_route_with_truck_at_first_source_passes(
+        self, resolved_model: ResolvedModelData,
+    ) -> None:
+        """Route whose first source is the truck location is accepted."""
+        state = init_state(resolved_model)
+        truck = "rebalancing_truck_d1_0"
+        dispatches = _multi_dispatch(
+            sources=["d1", "s1", "s2"],
+            targets=["s1", "s2", "d1"],
+            resource_id=truck,
+        )
+        dispatches["_reject_reason"] = None
+
+        _reject_unavailable_resource(dispatches, state)
+
+        assert dispatches["_reject_reason"].isna().all()
+
+    def test_route_with_remote_pickups_passes(
+        self, resolved_model: ResolvedModelData,
+    ) -> None:
+        """A pickup-delivery route is accepted even when no row's source equals the truck location.
+
+        Pickup-delivery rows describe logical movements of bikes between
+        stations (source = pickup, target = delivery).  They do not form a
+        physical traversal chain rooted at the truck's location, so
+        availability is the only check that applies.
+        """
+        state = init_state(resolved_model)
+        truck = "rebalancing_truck_d1_0"  # truck is at d1
+        dispatches = _multi_dispatch(
+            sources=["s1", "s2"],
+            targets=["s2", "d1"],
+            resource_id=truck,
+        )
+        dispatches["_reject_reason"] = None
+
+        _reject_unavailable_resource(dispatches, state)
+
+        # Truck is available, so the whole route is accepted regardless of
+        # individual source positions.
+        assert dispatches["_reject_reason"].isna().all()
+
+    def test_route_rejected_when_resource_id_unknown(
+        self, resolved_model: ResolvedModelData,
+    ) -> None:
+        """Multi-row group whose resource_id is not in the AVAILABLE pool is fully rejected."""
+        state = init_state(resolved_model)
+        dispatches = _multi_dispatch(
+            sources=["d1", "s1"],
+            targets=["s1", "d1"],
+            resource_id="ghost_truck_does_not_exist",
+        )
+        dispatches["_reject_reason"] = None
+
+        _reject_unavailable_resource(dispatches, state)
+
+        assert (
+            dispatches["_reject_reason"]
+            == RejectReason.NO_AVAILABLE_RESOURCE.value
+        ).all()
+
+    def test_single_row_unavailable_still_rejects(
+        self, resolved_model: ResolvedModelData,
+    ) -> None:
+        """Single-row dispatches keep the strict per-row availability check."""
+        state = init_state(resolved_model)
+        truck = "rebalancing_truck_d1_0"  # truck is at d1, not s1
+        dispatches = _multi_dispatch(
+            sources=["s1"],
+            targets=["s2"],
+            resource_id=truck,
+        )
+        dispatches["_reject_reason"] = None
+
+        _reject_unavailable_resource(dispatches, state)
+
+        assert (
+            dispatches["_reject_reason"].iloc[0]
+            == RejectReason.NO_AVAILABLE_RESOURCE.value
+        )
+
+    def test_null_resource_id_skipped(
+        self, resolved_model: ResolvedModelData,
+    ) -> None:
+        """Rows with null resource_id are not handled by this validator.
+
+        Auto-assignment runs upstream in ``_assign_resources``.
+        """
+        state = init_state(resolved_model)
+        dispatches = _multi_dispatch(
+            sources=["s1", "s2"],
+            targets=["s2", "d1"],
+            resource_id=None,
+        )
+        dispatches["_reject_reason"] = None
+
+        _reject_unavailable_resource(dispatches, state)
+
+        assert dispatches["_reject_reason"].isna().all()

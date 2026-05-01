@@ -19,8 +19,14 @@ def mock_config() -> dict:
 
 @pytest.fixture()
 def loaded_graph_loader(mock_config: dict) -> DataLoaderGraph:
-    """DataLoaderGraph with the raw model assembled (no build yet)."""
-    mock = DataLoaderMock(mock_config)
+    """DataLoaderGraph with the raw model assembled (no build yet).
+
+    Trucks are explicitly enabled (n_trucks=3) to preserve the historical
+    fixture shape: legacy tests assert ``RESOURCE_CATEGORY`` is present in
+    ``raw.resource_categories``. New tests that need a truck-free fixture
+    instantiate ``DataLoaderMock`` directly with ``n_trucks=0``.
+    """
+    mock = DataLoaderMock(mock_config, n_trucks=3)
     loader = DataLoaderGraph(mock, GraphLoaderConfig(distance_backend="haversine"))
     loader.load()
     return loader

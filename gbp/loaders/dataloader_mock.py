@@ -34,8 +34,26 @@ class DataLoaderMock:
         "observations": ["inventory_initial", "df_telemetry_ts", "df_trips"],
     }
 
-    def __init__(self, config: dict):
+    def __init__(
+        self,
+        config: dict,
+        n_trucks: int = 0,
+        truck_capacity_bikes: int = 30,
+    ) -> None:
+        """Initialise mock loader with optional truck fleet configuration.
+
+        Args:
+            config: Simulation parameters (n_stations, n_depots, n_timestamps, etc.).
+            n_trucks: Number of rebalancing trucks to emit.  Defaults to 0
+                (no trucks), which preserves the pre-truck behaviour of
+                existing tests.  Set to a positive integer to include trucks
+                in the mock fleet.
+            truck_capacity_bikes: Per-truck bike capacity recorded in
+                ``df_resource_capacities``.  Only used when ``n_trucks > 0``.
+        """
         self.config = config
+        self.n_trucks = n_trucks
+        self.truck_capacity_bikes = truck_capacity_bikes
         self._rng = np.random.default_rng(seed=self.config.get("seed", 42))
 
     def load_data(self) -> None:
@@ -89,14 +107,12 @@ class DataLoaderMock:
             })
         self.df_depot_capacities = pd.DataFrame(depot_cap_rows)
 
-        # Resources — no capacity on the table
-        num_resources = self.config.get("num_resources", 3)
-        resource_cap = self.config.get("resource_capacity", 100)
-        resource_ids = [f"truck_{i + 1}" for i in range(num_resources)]
+        # Resources — scaled by n_trucks; empty when n_trucks == 0
+        resource_ids = [f"truck_{i + 1}" for i in range(self.n_trucks)]
         self.df_resources = pd.DataFrame({"resource_id": resource_ids})
         self.df_resource_capacities = pd.DataFrame({
             "resource_id": resource_ids,
-            "capacity": [resource_cap] * num_resources,
+            "capacity": [self.truck_capacity_bikes] * self.n_trucks,
         })
 
         self.timestamps = pd.date_range(start=start_date, periods=n_timestamps, freq=freq)
