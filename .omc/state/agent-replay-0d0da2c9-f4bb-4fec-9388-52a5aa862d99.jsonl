@@ -32,3 +32,4 @@
 {"t":0,"agent":"a672a98","agent_type":"executor","event":"agent_start","parent_mode":"none"}
 {"t":0,"agent":"a672a98","agent_type":"executor","event":"agent_stop","success":true,"duration_ms":241476}
 {"t":0,"agent":"a0c2efb","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"a36406a","agent_type":"unknown","event":"agent_stop","success":true}

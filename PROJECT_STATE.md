@@ -22,8 +22,8 @@
 
 1. ~~**Foundation** — модель данных, build pipeline, loader~~ ✓
 2. ~~**Environment** — step-by-step engine, state management~~ ✓
-3. **Rebalancer** — первая задача внутри Environment (VRP) ← СЛЕДУЮЩАЯ ФАЗА
-4. **Trip Generator** — синтетический поток поездок для симуляции
+3. ~~**Rebalancer** — первая задача внутри Environment (multi-stop PDP)~~ ✓
+4. **Trip Generator** — синтетический поток поездок для симуляции ← СЛЕДУЮЩАЯ ФАЗА
 5. **UI** — визуализация Environment (Streamlit)
 6. **Strategic Optimizer** — LP/MILP на горизонт (отдельный потребитель)
 7. **Infrastructure** — DB, API, Docker, CI/CD
@@ -33,11 +33,9 @@
 
 ---
 
-## Current Phase: Rebalancer (not started)
+## Current Phase: Trip Generator (not started)
 
-Следующий шаг — первая реальная Task внутри Environment. Начинается с design doc.
-
-See `gbp/rebalancer/` for early VRP prototype (will be redesigned as a Task).
+Следующий шаг — синтетический поток поездок поверх существующего историзма (`HistoricalLatentDemandPhase`/`HistoricalODStructurePhase`). Начинается с design doc.
 
 ---
 
@@ -164,6 +162,26 @@ Step-by-step simulation engine поверх `ResolvedModelData`. Design doc: `do
 - Instance-level resource tracking (position, status, available_at_period)
 - Reject + log (no dispatch queue)
 - MVP: current period only
+
+### Rebalancer (multi-stop PDP Task)
+
+Multi-stop pickup-and-delivery rebalancer wired into Environment via the existing `DispatchPhase(task)` adapter. Spec produced via `/deep-interview`, plan produced via ralplan consensus (3 iterations to APPROVE), executed via autopilot.
+
+**What was built:**
+- `gbp/consumers/simulator/tasks/rebalancer.py` — `RebalancerTask`, OR-Tools PDP solver, salvaged from the deprecated `gbp/rebalancer/` prototype.
+- `gbp/consumers/simulator/built_in_phases.py::LatentDemandInflatorPhase` — multiplicative demand inflation between `HistoricalLatentDemandPhase` and `DeparturePhysicsPhase` for controlled-shortage experiments.
+- `gbp/loaders/dataloader_mock.py` — added `n_trucks` and `truck_capacity_bikes` constructor parameters (default `n_trucks=0`, opt-in trucks).
+- `gbp/consumers/simulator/dispatch_lifecycle.py::_reject_unavailable_resource` — extended to support multi-row route dispatches via **loose route validation**: a multi-row group sharing a non-null `resource_id` is accepted iff the resource is in the AVAILABLE pool. Single-row dispatches keep the strict per-row check.
+- Tests: 4 mock-truck tests, 8 inflator tests, 5 lifecycle route-validation tests, 7 RebalancerTask tests, plus a fixture fix for `tests/conftest.py::loaded_graph_loader` (now passes `n_trucks=3` so legacy graph-loader tests still see truck rows).
+- Verification notebook: `notebooks/verify/10_rebalancer_experiment.ipynb` — baseline vs treatment comparison with five tables (trips per date, trips per source station, lost demand, total distance / revenue proxy, combined summary).
+- Removed: `gbp/rebalancer/` package (broken since the `df_inventory_ts` cleanup), `notebooks/03_test_rebalancer.ipynb`, `tests/test_rebalancer.py`.
+
+**Key design decisions:**
+- One DISPATCH_COLUMNS row per pickup-delivery pair; all rows for one truck share `arrival_period = current + ceil(total_route_time_hours / period_duration_hours)`.
+- Schedule: `Schedule.every_n(N)` (default N=12 at hourly periods).
+- Pickup-delivery rows do NOT form a physical traversal chain — a row's `source_id` is a pickup station, not the previous row's target. The validator therefore uses **loose route validation** (`resource_id ∈ AVAILABLE`) rather than chain-rooted validation. Documented in `.omc/plans/rebalancer-pdp-task.md` §11 (Iteration 4 pivot).
+- Belt-and-braces in `RebalancerTask` asserts every emitted `resource_id` is non-null and known in the available truck pool.
+- `pdp_random_seed` (default 42) is forwarded to OR-Tools `RoutingSearchParameters.random_seed` for deterministic baseline-vs-treatment comparisons.
 
 ---
 

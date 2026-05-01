@@ -75,12 +75,11 @@ gbp/
 │       ├── task.py           # Task Protocol, DISPATCH_COLUMNS
 │       ├── engine.py         # Environment class (run, step, step_phase)
 │       ├── config.py         # EnvironmentConfig
-│       └── tasks/            # Task implementations (noop.py, future: rebalancer)
-├── io/                # Serialization (raw_to_dict / dict_to_raw, parquet)
-└── rebalancer/        # EARLY PROTOTYPE — PDP solver using OR-Tools (will be redesigned as Task)
+│       └── tasks/            # Task implementations (noop.py, rebalancer.py)
+└── io/                # Serialization (raw_to_dict / dict_to_raw, parquet)
 ```
 
-**Test structure** mirrors source: `tests/unit/core/`, `tests/unit/build/`, `tests/unit/consumers/simulator/`, `tests/unit/test_io/`, `tests/integration/`, plus top-level `tests/test_graph_loader.py` and `tests/test_rebalancer.py`.
+**Test structure** mirrors source: `tests/unit/core/`, `tests/unit/build/`, `tests/unit/consumers/simulator/`, `tests/unit/test_io/`, `tests/integration/`, plus top-level `tests/test_graph_loader.py`.
 
 ## Data Model Invariants (NEVER VIOLATE)
 
