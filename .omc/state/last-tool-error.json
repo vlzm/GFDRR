@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"ls E:\\\\Documents\\\\vlzm\\\\GFDRR\\\\tests\\\\unit\\\\consumers\\\\simulator\\\\tasks 2>$null; echo \\\"---\\\"; ls E:\\\\Documents\\\\vlzm\\\\GFDRR\\\\tests\\\\unit\\\\consumers\\\\simulator\",\"description\":\"List tasks d...",
-  "error": "Exit code 2\n/usr/bin/bash: line 1: $null: ambiguous redirect\n---\nls: cannot access 'E:DocumentsvlzmGFDRRtestsunitconsumerssimulator': No such file or directory",
-  "timestamp": "2026-05-01T17:18:52.330Z",
-  "retry_count": 1
-}

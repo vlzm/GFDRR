@@ -1,0 +1,208 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1777750543567,
+  "projectRoot": "e:\\Documents\\vlzm\\GFDRR",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "fastapi",
+        "version": null,
+        "category": "backend"
+      },
+      {
+        "name": "pytest",
+        "version": null,
+        "category": "testing"
+      }
+    ],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "pytest",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "tests"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 0,
+      "lastAccessed": 1777750543550,
+      "keyFiles": []
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 7,
+      "lastAccessed": 1777750543551,
+      "keyFiles": [
+        "architecture_diagrams.md",
+        "ARCHITECTURE_MAP.md",
+        "build_docs.sh",
+        "conf.py",
+        "DATA_JOURNEY.md"
+      ]
+    },
+    "gbp": {
+      "path": "gbp",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1777750543551,
+      "keyFiles": [
+        "__init__.py"
+      ]
+    },
+    "notebooks": {
+      "path": "notebooks",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1777750543551,
+      "keyFiles": [
+        "01_test_graph_api.ipynb",
+        "02_test_graph_loader.ipynb",
+        "04_graph_model_playground.ipynb",
+        "05_pipeline_walkthrough.ipynb",
+        "mvp_flat.ipynb"
+      ]
+    },
+    "reference": {
+      "path": "reference",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1777750543552,
+      "keyFiles": [
+        "costs.md",
+        "current_graph_model.py",
+        "data_optimizer.md",
+        "data_raw.md"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 3,
+      "lastAccessed": 1777750543552,
+      "keyFiles": [
+        "conftest.py",
+        "test_graph_loader.py",
+        "__init__.py"
+      ]
+    },
+    "gbp\\build": {
+      "path": "gbp\\build",
+      "purpose": "Build output",
+      "fileCount": 12,
+      "lastAccessed": 1777750543553,
+      "keyFiles": [
+        "defaults.py",
+        "edge_builder.py",
+        "fleet_capacity.py"
+      ]
+    },
+    "notebooks\\utils": {
+      "path": "notebooks\\utils",
+      "purpose": "Utility functions",
+      "fileCount": 2,
+      "lastAccessed": 1777750543553,
+      "keyFiles": [
+        "download_gbfs.ipynb",
+        "load_trips_data.ipynb"
+      ]
+    },
+    "tests\\fixtures": {
+      "path": "tests\\fixtures",
+      "purpose": "Test fixtures",
+      "fileCount": 1,
+      "lastAccessed": 1777750543554,
+      "keyFiles": [
+        "__init__.py"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "gbp\\consumers\\simulator\\tasks\\rebalancer.py",
+      "accessCount": 3,
+      "lastAccessed": 1777750985067,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\dispatch_lifecycle.py",
+      "accessCount": 2,
+      "lastAccessed": 1777661379209,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\task.py",
+      "accessCount": 1,
+      "lastAccessed": 1777658510220,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\tasks\\noop.py",
+      "accessCount": 1,
+      "lastAccessed": 1777658514826,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\engine.py",
+      "accessCount": 1,
+      "lastAccessed": 1777661368754,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\built_in_phases.py",
+      "accessCount": 1,
+      "lastAccessed": 1777661372378,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\dispatch_phase.py",
+      "accessCount": 1,
+      "lastAccessed": 1777661376457,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\phases.py",
+      "accessCount": 1,
+      "lastAccessed": 1777661387736,
+      "type": "file"
+    },
+    {
+      "path": "notebooks\\verify\\10_rebalancer_experiment_unrolled.py",
+      "accessCount": 1,
+      "lastAccessed": 1777661678385,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
