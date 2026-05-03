@@ -56,13 +56,21 @@ class FacilityType(str, Enum):
 
 
 class OperationType(str, Enum):
-    """Operations a facility may support (L3 default for bike-sharing)."""
+    """Operations a facility may support.
+
+    Operations describe both physical actions inside the network
+    (RECEIVING / STORAGE / DISPATCH / HANDLING / REPAIR) and the interaction
+    with the network boundary (CONSUMPTION destroys flow that exits the
+    network; PRODUCTION creates flow that enters the network from outside).
+    """
 
     RECEIVING = "receiving"
     STORAGE = "storage"
     DISPATCH = "dispatch"
     HANDLING = "handling"
     REPAIR = "repair"
+    CONSUMPTION = "consumption"
+    PRODUCTION = "production"
 
 
 class ResourceStatus(str, Enum):

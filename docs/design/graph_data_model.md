@@ -100,13 +100,17 @@ class FacilityType(Enum):
 
 ```python
 class OperationType(Enum):
-    """L3 default в gbp/core — велошеринг."""
+    """L3 default в gbp/core — велошеринг плюс универсальные операции границы сети."""
     RECEIVING = "receiving"      # приём commodity
     STORAGE = "storage"          # хранение
     DISPATCH = "dispatch"        # отправка (выдача / отгрузка)
     HANDLING = "handling"        # погрузка/разгрузка
     REPAIR = "repair"            # трансформация BROKEN_BIKE → WORKING_BIKE (Maintenance Hub)
+    CONSUMPTION = "consumption"  # узел уничтожает поток (выход за пределы сети)
+    PRODUCTION = "production"    # узел рождает поток (вход в сеть из внешнего мира)
 ```
+
+Первые пять операций описывают физические действия *внутри* сети. `CONSUMPTION` и `PRODUCTION` описывают взаимодействие с границей сети и используются в L2-доменах, где потребитель или производитель сам является узлом графа (газовый клиент, скважина). В велошеринге эти две операции не используются — спрос обрабатывается фазой `DemandPhase` без явной операции на узле.
 
 Маппинг типов на операции (велошеринг, как в `gbp/core`):
 
@@ -182,8 +186,23 @@ class Facility:
                 and OperationType.DISPATCH in self.operations):
             roles.add(FacilityRole.TRANSSHIPMENT)
 
+        if OperationType.CONSUMPTION in self.operations:
+            roles.add(FacilityRole.SINK)
+
+        if OperationType.PRODUCTION in self.operations:
+            roles.add(FacilityRole.SOURCE)
+
         return roles
 ```
+
+Все четыре роли выводятся симметрично:
+
+- `STORAGE` — снимается, если у узла нет операции `storage`.
+- `TRANSSHIPMENT` — добавляется, когда есть `receiving` + `dispatch` (сквозной узел).
+- `SINK` — добавляется операцией `consumption` (узел уничтожает поток на выходе из сети).
+- `SOURCE` — добавляется операцией `production` (узел рождает поток на входе в сеть).
+
+`DEFAULT_ROLES` несут L3-домен велошеринга: для `station` / `depot` / `maintenance_hub` роли назначаются по типу, потому что в велошеринге клиент не моделируется как `Facility` — спрос обрабатывается фазой симулятора. В L2-доменах, где конечный потребитель сам является узлом графа (например, газовая доставка: депо → клиент → потребление газа), роль `SINK` достигается явной операцией `consumption` на узле-клиенте, без вмешательства в `DEFAULT_ROLES`. Симметрично производитель (скважина, завод) описывается операцией `production`.
 
 ### 2.5. Зачем нужны роли при наличии type и operations
 

@@ -59,3 +59,42 @@ def test_derive_roles_override_wins() -> None:
         role_overrides=override,
     )
     assert roles == override
+
+
+def test_derive_roles_consumption_adds_sink() -> None:
+    """CONSUMPTION on an unknown type adds SINK without adding SOURCE."""
+    roles = derive_roles("customer", {OperationType.CONSUMPTION.value})
+    assert FacilityRole.SINK in roles
+    assert FacilityRole.SOURCE not in roles
+
+
+def test_derive_roles_production_adds_source() -> None:
+    """PRODUCTION on an unknown type adds SOURCE without adding SINK."""
+    roles = derive_roles("producer", {OperationType.PRODUCTION.value})
+    assert FacilityRole.SOURCE in roles
+    assert FacilityRole.SINK not in roles
+
+
+def test_derive_roles_consumption_and_production_unknown_type() -> None:
+    """Both operations together add both SINK and SOURCE on an unknown type."""
+    ops = {
+        OperationType.CONSUMPTION.value,
+        OperationType.PRODUCTION.value,
+    }
+    roles = derive_roles("hybrid", ops)
+    assert FacilityRole.SINK in roles
+    assert FacilityRole.SOURCE in roles
+
+
+def test_derive_roles_overrides_still_win_over_consumption() -> None:
+    """role_overrides bypass even when consumption/production are enabled."""
+    override = {FacilityRole.STORAGE}
+    roles = derive_roles(
+        "customer",
+        {
+            OperationType.CONSUMPTION.value,
+            OperationType.PRODUCTION.value,
+        },
+        role_overrides=override,
+    )
+    assert roles == override

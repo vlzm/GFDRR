@@ -1,4 +1,22 @@
-"""Default facility roles and role derivation (bike-sharing domain)."""
+"""Default facility roles and role derivation.
+
+Role derivation is symmetric across all four roles:
+
+- ``STORAGE`` is dropped from the type-default set when the ``storage``
+  operation is missing.
+- ``TRANSSHIPMENT`` is added when both ``receiving`` and ``dispatch`` are
+  enabled (pass-through node).
+- ``SINK`` is added when ``consumption`` is enabled (the node destroys
+  flow exiting the network).
+- ``SOURCE`` is added when ``production`` is enabled (the node creates
+  flow entering the network from outside).
+
+The ``DEFAULT_ROLES`` mapping below carries L3 bike-sharing defaults so
+that stations and depots get sensible roles without needing the new
+``consumption`` / ``production`` operations.  Other domains (e.g. gas
+delivery) can describe consumer / producer nodes purely through the
+operation set.
+"""
 
 from __future__ import annotations
 
@@ -50,5 +68,11 @@ def derive_roles(
         and OperationType.DISPATCH.value in operations
     ):
         roles.add(FacilityRole.TRANSSHIPMENT)
+
+    if OperationType.CONSUMPTION.value in operations:
+        roles.add(FacilityRole.SINK)
+
+    if OperationType.PRODUCTION.value in operations:
+        roles.add(FacilityRole.SOURCE)
 
     return roles

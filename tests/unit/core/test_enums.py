@@ -33,7 +33,15 @@ from gbp.core.enums import (
         (FacilityType, {"station", "depot", "maintenance_hub"}),
         (
             OperationType,
-            {"receiving", "storage", "dispatch", "handling", "repair"},
+            {
+                "receiving",
+                "storage",
+                "dispatch",
+                "handling",
+                "repair",
+                "consumption",
+                "production",
+            },
         ),
     ],
 )

@@ -1,0 +1,7 @@
+{
+  "tool_name": "PowerShell",
+  "tool_input_preview": "{\"command\":\".venv\\\\Scripts\\\\python.exe -m pytest --no-cov -q -x 2>&1 | Select-Object -Last 30\",\"timeout\":300000,\"description\":\"Run full pytest suite synchronously, fail-fast\"}",
+  "error": "Exit code 1\nargs = (AttributeRegistry(1 attributes),   period_id planning_horizon_id  ...  start_date    end_date\r\n0        p0            ...    h1  ...  2025-01-02  2025-01-03\r\n2        p2                  h1  ...  2025-01-03  2025-01-04\r\n\r\n[3 rows x 7 columns])\r\nkwargs = {}\r\n\r\n    def _step(name: str, fn: object, *args: object, **kwargs: object) -> object:\r\n        try:\r\n            return fn(*args, **kwargs)  # type: ignore[operator]\r\n        except Exception as exc:\r\n>           raise BuildE...",
+  "timestamp": "2026-05-03T20:27:52.798Z",
+  "retry_count": 1
+}
