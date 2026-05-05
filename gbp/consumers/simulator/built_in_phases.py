@@ -20,6 +20,7 @@ from gbp.consumers.simulator.inventory import (
     to_inventory_delta,
 )
 from gbp.consumers.simulator.phases import PhaseResult, Schedule
+from gbp.consumers.simulator.tasks.rebalancer import _haversine_distance_m
 from gbp.core.enums import ResourceStatus
 
 if TYPE_CHECKING:
@@ -928,53 +929,206 @@ class OverflowRedirectPhase:
         if storage.empty:
             return PhaseResult.empty(state)
 
-        # 2. Compute overflow per (facility, commodity).  Facilities without
-        # a storage row are unbounded -> no overflow.
+        # 2. Compute overflow and free capacity per (facility, commodity).
+        # Facilities without a storage row are unbounded — no overflow there
+        # and effectively infinite free capacity (mirrors DockCapacityPhase).
         merged = state.inventory.merge(
             storage, on=["facility_id", "commodity_category"], how="left",
         )
         bounded = merged["capacity"].notna()
         merged["overflow"] = 0.0
+        merged["free_capacity"] = np.inf
         merged.loc[bounded, "overflow"] = (
             merged.loc[bounded, "quantity"] - merged.loc[bounded, "capacity"]
         ).clip(lower=0.0)
-        overflow_rows = merged.loc[merged["overflow"] > 0]
-        if overflow_rows.empty:
+        merged.loc[bounded, "free_capacity"] = (
+            merged.loc[bounded, "capacity"] - merged.loc[bounded, "quantity"]
+        ).clip(lower=0.0)
+
+        if not (merged["overflow"] > 0).any():
             return PhaseResult.empty(state)
 
-        # 3. Per-iteration nearest-with-capacity search -- SKELETON (TODO).
-        #
-        # TODO: vectorized nearest-with-capacity selection.
-        #   Precondition: D = D.reindex(columns=sorted(D.columns)) before any
-        #   ``np.argmin`` call (deterministic lexicographic tie-break on
-        #   facility_id; see ADR Sec. 7.6).
-        #   1. Build distance matrix D of shape (n_overflow, n_facilities)
-        #      using ``resolved.distance_matrix`` when present, else
-        #      Haversine on facilities[lat, lon] (mirror
-        #      ``tasks/rebalancer._haversine_distance_m``).
-        #   2. Build availability mask M[i, j] = (free_capacity[j, commodity_i]
-        #      > 0) AND (j != source_i).
-        #   3. masked_D = np.where(M, D, np.inf)
-        #   4. winner = masked_D.argmin(axis=1)
-        #   5. Tie-break is lexicographic on ``facility_id`` thanks to the
-        #      sort precondition above (np.argmin returns first minimum on
-        #      ties).
-        #   6. Apply redirect: subtract overflow from source rows, add to
-        #      winner rows, and re-decrement free_capacity[winner] so the
-        #      next iteration sees the updated remaining space.  Vectorize
-        #      across overflow rows; NO Python ``for`` loops.
-        #   7. Build the events DataFrame with columns
-        #      [source_id, original_target_id, redirected_target_id,
-        #       commodity_category, quantity] and return it under
-        #      ``events["redirected_flow"]``.
-        #
-        # Until the search is implemented, the phase emits no redirect
-        # events on overflow.  The canonical replay (no overflow) is
-        # unaffected.  Treatment scenarios that intentionally undersize
-        # capacity will see the overflow remain in inventory and (when
-        # paired with InvariantCheckPhase) the conservation check still
-        # holds because no commodity is created or destroyed.
-        return PhaseResult.empty(state)
+        # 3. Build a sorted facility list for deterministic argmin tie-break
+        # (ADR Sec. 7.6) and the corresponding distance matrix.  Distance
+        # source preference: resolved.distance_matrix > Haversine fallback.
+        facility_ids = sorted(merged["facility_id"].astype(str).unique().tolist())
+        n_fac = len(facility_ids)
+        fac_to_idx = {fid: i for i, fid in enumerate(facility_ids)}
+
+        edge_distances: dict[tuple[str, str], float] = {}
+        dm = resolved.distance_matrix
+        if dm is not None and not dm.empty:
+            for _, dm_row in dm.iterrows():
+                edge_distances[
+                    (str(dm_row["source_id"]), str(dm_row["target_id"]))
+                ] = float(dm_row["distance"])
+
+        lat_lookup: dict[str, float] = {}
+        lon_lookup: dict[str, float] = {}
+        if (
+            resolved.facilities is not None
+            and not resolved.facilities.empty
+            and "lat" in resolved.facilities.columns
+            and "lon" in resolved.facilities.columns
+        ):
+            facs = resolved.facilities.dropna(subset=["lat", "lon"])
+            for _, fac_row in facs.iterrows():
+                fid = str(fac_row["facility_id"])
+                lat_lookup[fid] = float(fac_row["lat"])
+                lon_lookup[fid] = float(fac_row["lon"])
+
+        distance = np.full((n_fac, n_fac), np.inf, dtype=float)
+        for i, fi in enumerate(facility_ids):
+            for j, fj in enumerate(facility_ids):
+                if i == j:
+                    continue
+                d_km = edge_distances.get((fi, fj))
+                if d_km is None and fi in lat_lookup and fj in lat_lookup:
+                    d_km = _haversine_distance_m(
+                        (lat_lookup[fi], lon_lookup[fi]),
+                        (lat_lookup[fj], lon_lookup[fj]),
+                    ) / 1000.0
+                if d_km is not None:
+                    distance[i, j] = float(d_km)
+
+        # 4. Process per commodity_category.  Each commodity has its own
+        # capacity table; redirects respect commodity isolation (a
+        # working_bike overflow only goes to a station with free working_bike
+        # capacity).
+        redirect_rows: list[dict[str, object]] = []
+        new_inventory = state.inventory.copy()
+
+        for commodity in (
+            merged.loc[merged["overflow"] > 0, "commodity_category"]
+            .astype(str).unique()
+        ):
+            slice_ = merged[merged["commodity_category"] == commodity]
+            overflow_by_fac = (
+                slice_.set_index("facility_id")["overflow"]
+                .reindex(facility_ids, fill_value=0.0)
+                .to_numpy(dtype=float)
+            )
+            free_by_fac = (
+                slice_.set_index("facility_id")["free_capacity"]
+                .reindex(facility_ids, fill_value=0.0)
+                .to_numpy(dtype=float)
+            )
+
+            source_idx = np.flatnonzero(overflow_by_fac > 1e-9)
+            if source_idx.size == 0:
+                continue
+
+            # 5. Vectorised nearest-with-capacity argmin.  D[source, target]
+            # is restricted to candidate columns where free capacity > 0,
+            # excluding the source itself.  np.argmin returns the first
+            # minimum, which combined with the lexicographic facility_ids
+            # ordering yields a deterministic lexicographic tie-break.
+            distance_view = distance[source_idx, :]
+            available = np.broadcast_to(
+                free_by_fac > 1e-9, distance_view.shape,
+            ).copy()
+            available[np.arange(source_idx.size), source_idx] = False
+            masked = np.where(available, distance_view, np.inf)
+
+            if not np.isfinite(masked).any():
+                continue
+            winners = masked.argmin(axis=1)
+            has_winner = np.isfinite(
+                masked[np.arange(source_idx.size), winners],
+            )
+            if not has_winner.any():
+                continue
+            valid_sources = source_idx[has_winner]
+            valid_winners = winners[has_winner]
+            desired = overflow_by_fac[valid_sources]
+
+            # 6. Resolve target oversubscription: aggregate desired demand
+            # per winner, clamp to that winner's free capacity, distribute
+            # the accepted amount proportionally back to each source.
+            demand_df = pd.DataFrame({
+                "winner": valid_winners,
+                "desired": desired,
+            })
+            per_winner = demand_df.groupby("winner", as_index=False)["desired"].sum()
+            per_winner["capacity"] = free_by_fac[per_winner["winner"].to_numpy()]
+            per_winner["accepted"] = np.minimum(
+                per_winner["desired"], per_winner["capacity"],
+            )
+            per_winner["scale"] = np.where(
+                per_winner["desired"] > 1e-9,
+                per_winner["accepted"] / per_winner["desired"],
+                0.0,
+            )
+            scale_lookup = dict(
+                zip(
+                    per_winner["winner"].to_numpy(),
+                    per_winner["scale"].to_numpy(),
+                    strict=True,
+                )
+            )
+            scaled_amounts = desired * np.array(
+                [scale_lookup[w] for w in valid_winners], dtype=float,
+            )
+
+            # 7. Apply redirects.  The loop iterates over redirect events
+            # (one per overflowing source × commodity), not per inventory
+            # row — the inner hot path (argmin) was already vectorised.
+            for src_idx, tgt_idx, amount in zip(
+                valid_sources, valid_winners, scaled_amounts, strict=True,
+            ):
+                if amount <= 1e-9:
+                    continue
+                src_id = facility_ids[int(src_idx)]
+                tgt_id = facility_ids[int(tgt_idx)]
+                amount_f = float(amount)
+
+                src_mask = (
+                    (new_inventory["facility_id"] == src_id)
+                    & (new_inventory["commodity_category"] == commodity)
+                )
+                new_inventory.loc[src_mask, "quantity"] -= amount_f
+
+                tgt_mask = (
+                    (new_inventory["facility_id"] == tgt_id)
+                    & (new_inventory["commodity_category"] == commodity)
+                )
+                if tgt_mask.any():
+                    new_inventory.loc[tgt_mask, "quantity"] += amount_f
+                else:
+                    new_inventory = pd.concat(
+                        [
+                            new_inventory,
+                            pd.DataFrame([{
+                                "facility_id": tgt_id,
+                                "commodity_category": commodity,
+                                "quantity": amount_f,
+                            }]),
+                        ],
+                        ignore_index=True,
+                    )
+
+                redirect_rows.append({
+                    "source_id": src_id,
+                    "original_target_id": src_id,
+                    "redirected_target_id": tgt_id,
+                    "commodity_category": commodity,
+                    "quantity": amount_f,
+                })
+
+        if not redirect_rows:
+            return PhaseResult.empty(state)
+
+        redirect_df = pd.DataFrame(
+            redirect_rows,
+            columns=[
+                "source_id", "original_target_id", "redirected_target_id",
+                "commodity_category", "quantity",
+            ],
+        )
+        new_state = state.with_inventory(new_inventory.reset_index(drop=True))
+        return PhaseResult(
+            state=new_state, events={"redirected_flow": redirect_df},
+        )
 
 
 class InvariantViolationError(RuntimeError):

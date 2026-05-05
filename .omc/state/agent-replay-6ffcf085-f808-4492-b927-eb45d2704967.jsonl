@@ -15,3 +15,5 @@
 {"t":0,"agent":"system","event":"skill_invoked","skill_name":"oh-my-claudecode:autopilot"}
 {"t":0,"agent":"aa49dcf","agent_type":"unknown","event":"agent_stop","success":true}
 {"t":0,"agent":"a4b9246","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"aa8687f","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"a4a5a28","agent_type":"unknown","event":"agent_stop","success":true}
