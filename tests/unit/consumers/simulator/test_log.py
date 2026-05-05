@@ -54,6 +54,8 @@ class TestEmptyLog:
             "simulation_latent_demand_log",
             "simulation_lost_demand_log",
             "simulation_dock_blocking_log",
+            "simulation_redirected_flow_log",
+            "simulation_invariant_violation_log",
         }
 
     def test_empty_columns(self) -> None:

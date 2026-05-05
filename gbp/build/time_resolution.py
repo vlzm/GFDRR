@@ -8,7 +8,6 @@ from gbp.core.attributes.registry import AttributeRegistry
 from gbp.core.enums import PeriodType
 from gbp.core.model import RawModelData
 
-
 _PERIOD_FREQ: dict[str, str] = {
     PeriodType.DAY.value: "D",
     PeriodType.WEEK.value: "W-MON",
@@ -108,7 +107,7 @@ def resolve_to_periods(
     periods: pd.DataFrame,
     value_columns: list[str],
     group_grain: list[str],
-    agg_func: str = "mean",
+    agg_func: str | dict[str, str] = "mean",
 ) -> pd.DataFrame:
     """Map ``date`` rows into ``period_id`` buckets and aggregate values.
 
@@ -122,7 +121,12 @@ def resolve_to_periods(
         periods: Must contain ``period_id``, ``start_date``, ``end_date``.
         value_columns: Numeric columns to aggregate.
         group_grain: Non-time key columns (excluding ``date``).
-        agg_func: Pandas aggregate name (``mean``, ``sum``, ``min``, ``max``).
+        agg_func: Either a single pandas aggregate name applied to every value
+            column (``mean``, ``sum``, ``min``, ``max``), or a mapping
+            ``{value_column: aggregate_name}`` for per-column rules.  The
+            mapping form is required when columns mix semantically (e.g.
+            ``quantity`` summed and ``duration_hours`` averaged in the same
+            ``observed_flow`` resolution).
 
     Returns:
         DataFrame with ``group_grain + [period_id] + value_columns``.
@@ -211,7 +215,9 @@ def resolve_all_time_varying(raw: RawModelData, periods: pd.DataFrame) -> dict[s
     """
     resolved: dict[str, pd.DataFrame] = {}
 
-    specs: list[tuple[str, pd.DataFrame | None, list[str], list[str], str]] = [
+    specs: list[
+        tuple[str, pd.DataFrame | None, list[str], list[str], str | dict[str, str]]
+    ] = [
         ("demand", raw.demand, ["facility_id", "commodity_category"], ["quantity"], "sum"),
         ("supply", raw.supply, ["facility_id", "commodity_category"], ["quantity"], "sum"),
         (
@@ -239,8 +245,8 @@ def resolve_all_time_varying(raw: RawModelData, periods: pd.DataFrame) -> dict[s
             "observed_flow",
             raw.observed_flow,
             ["source_id", "target_id", "commodity_category"],
-            ["quantity"],
-            "sum",
+            ["quantity", "duration_hours"],
+            {"quantity": "sum", "duration_hours": "mean"},
         ),
         (
             "observed_inventory",
@@ -260,6 +266,18 @@ def resolve_all_time_varying(raw: RawModelData, periods: pd.DataFrame) -> dict[s
         if not vc:
             continue
         g = [c for c in grain if c in df.columns]
-        resolved[name] = resolve_to_periods(df, periods, vc, g, agg_func=agg)
+        # When agg is a per-column mapping, restrict it to the value columns
+        # actually present.  Legacy raw frames that pre-date a schema bump
+        # may carry only a subset of the canonical value columns; the rest
+        # are skipped silently.
+        if isinstance(agg, dict):
+            agg_resolved: str | dict[str, str] = {
+                col: agg[col] for col in vc if col in agg
+            }
+            if not agg_resolved:
+                continue
+        else:
+            agg_resolved = agg
+        resolved[name] = resolve_to_periods(df, periods, vc, g, agg_func=agg_resolved)
 
     return resolved

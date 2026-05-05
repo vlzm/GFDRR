@@ -639,13 +639,24 @@ class DataLoaderGraph:
         # ── trips → observed_flow ────────────────────────────────────
         df_trips = _nonempty_df(self._source, "df_trips")
         if df_trips is not None:
+            has_ended_at = "ended_at" in df_trips.columns
             keep_cols = ["start_station_id", "end_station_id", "started_at"]
+            if has_ended_at:
+                keep_cols = [*keep_cols, "ended_at"]
             trips = df_trips[keep_cols].copy()
             trips = trips.rename(columns={
                 "start_station_id": "source_id",
                 "end_station_id": "target_id",
             })
             trips["date"] = pd.to_datetime(trips["started_at"]).dt.date
+            if has_ended_at:
+                trips["duration_hours"] = (
+                    pd.to_datetime(trips["ended_at"])
+                    - pd.to_datetime(trips["started_at"])
+                ).dt.total_seconds() / 3600.0
+                trips = trips.drop(columns=["ended_at"])
+            else:
+                trips["duration_hours"] = float("nan")
             if "rideable_type" in df_trips.columns:
                 trips["commodity_category"] = df_trips["rideable_type"].astype(str).values
             else:
@@ -661,6 +672,7 @@ class DataLoaderGraph:
                 grain = ["source_id", "target_id", "commodity_category", "date"]
                 agg = trips.groupby(grain, as_index=False).agg(
                     quantity=("quantity", "sum"),
+                    duration_hours=("duration_hours", "mean"),
                     modal_type=("modal_type", "first"),
                     resource_id=("resource_id", "first"),
                 )

@@ -1,7 +1,7 @@
 {
-  "tool_name": "PowerShell",
-  "tool_input_preview": "{\"command\":\".venv\\\\Scripts\\\\python.exe -m pytest --no-cov -q -x 2>&1 | Select-Object -Last 30\",\"timeout\":300000,\"description\":\"Run full pytest suite synchronously, fail-fast\"}",
-  "error": "Exit code 1\nargs = (AttributeRegistry(1 attributes),   period_id planning_horizon_id  ...  start_date    end_date\r\n0        p0            ...    h1  ...  2025-01-02  2025-01-03\r\n2        p2                  h1  ...  2025-01-03  2025-01-04\r\n\r\n[3 rows x 7 columns])\r\nkwargs = {}\r\n\r\n    def _step(name: str, fn: object, *args: object, **kwargs: object) -> object:\r\n        try:\r\n            return fn(*args, **kwargs)  # type: ignore[operator]\r\n        except Exception as exc:\r\n>           raise BuildE...",
-  "timestamp": "2026-05-03T20:27:52.798Z",
-  "retry_count": 1
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\".venv/Scripts/python.exe -m ruff check --output-format=concise gbp/core/schemas/observations.py gbp/build/time_resolution.py gbp/loaders/dataloader_graph.py gbp/consumers/simulator/_period...",
+  "error": "Exit code 1\nwarning: The top-level linter settings are deprecated in favour of their counterparts in the `lint` section. Please update the following options in `pyproject.toml`:\n  - 'ignore' -> 'lint.ignore'\n  - 'select' -> 'lint.select'\n  - 'pydocstyle' -> 'lint.pydocstyle'\ngbp\\build\\time_resolution.py:3:1: I001 [*] Import block is un-sorted or un-formatted\ngbp\\consumers\\simulator\\built_in_phases.py:977:5: D205 1 blank line required between summary line and description\ngbp\\consumers\\simulator\\b...",
+  "timestamp": "2026-05-05T20:41:03.516Z",
+  "retry_count": 2
 }

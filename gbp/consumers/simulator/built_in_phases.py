@@ -7,11 +7,13 @@ live in separate modules.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pandas as pd
 
+from gbp.consumers.simulator._period_helpers import period_duration_hours
 from gbp.consumers.simulator.inventory import (
     apply_delta,
     merge_with_inventory,
@@ -543,12 +545,29 @@ class HistoricalTripSamplingPhase:
     :class:`DeparturePhysicsPhase` and before :class:`ArrivalsPhase`.
     Pairing with strict-mode physics will desynchronise the trip count
     from the inventory adjustment.
+
+    When ``use_durations`` is ``True`` (the default) and the per-period
+    ``observed_flow`` slice carries a ``duration_hours`` column, the
+    arrival period is computed as
+    ``period_index + ceil(duration_hours / period_duration_hours)`` per
+    row.  Rows with null ``duration_hours`` fall back to same-period
+    delivery (``tau = 0``), preserving the legacy zero-tau semantics for
+    historical sources that do not record trip end times.
+
+    Set ``use_durations=False`` to force same-period delivery for every
+    row, regardless of the column's presence — matches the pre-extension
+    behaviour for callers that explicitly opt out of the duration logic.
     """
 
     name: str = "HISTORICAL_TRIP_SAMPLING"
 
-    def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+    def __init__(
+        self,
+        use_durations: bool = True,
+        schedule: Schedule | None = None,
+    ) -> None:
+        """Initialise with an optional duration-mode flag and schedule."""
+        self._use_durations = use_durations
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
@@ -567,6 +586,20 @@ class HistoricalTripSamplingPhase:
             return PhaseResult.empty(state)
 
         n = len(flows)
+        if self._use_durations and "duration_hours" in flows.columns:
+            period_dur_h = period_duration_hours(resolved)
+            duration_filled = (
+                flows["duration_hours"].fillna(0.0).to_numpy(dtype=float)
+            )
+            # ``floor`` matches the doc's "if t_arr <= t+1: same period"
+            # semantics: trips with duration <= one period stay in-period;
+            # only durations exceeding a full period bump the arrival forward.
+            # ``ceil`` would over-count by one for every intra-period trip.
+            tau_periods = np.floor(duration_filled / period_dur_h).astype(int)
+            arrival_periods = period.period_index + tau_periods
+        else:
+            arrival_periods = np.full(n, period.period_index, dtype=int)
+
         new_trips = pd.DataFrame({
             "shipment_id": [
                 f"organic_trip_{period.period_index}_{i}" for i in range(n)
@@ -577,7 +610,7 @@ class HistoricalTripSamplingPhase:
             "quantity": flows["quantity"].to_numpy(),
             "resource_id": [None] * n,
             "departure_period": [period.period_index] * n,
-            "arrival_period": [period.period_index] * n,
+            "arrival_period": arrival_periods,
         })
 
         if state.in_transit.empty:
@@ -837,3 +870,246 @@ class DockCapacityPhase:
 
         events = {"dock_blocking": dock_log} if not dock_log.empty else {}
         return PhaseResult(state=state.with_inventory(new_inv), events=events)
+
+
+class OverflowRedirectPhase:
+    """Redirect overflow inventory to nearest facility with free capacity.
+
+    ORDERING CONTRACT: Must run immediately after :class:`ArrivalsPhase`.
+    ``ArrivalsPhase`` writes the period's incoming inventory into
+    ``state.inventory``; this phase inspects the resulting inventory against
+    ``operation_capacity[storage]`` and redirects any overflow per
+    ``(facility_id, commodity_category)``.  Inserting other inventory-mutating
+    phases between ``ArrivalsPhase`` and this one breaks redirect accounting.
+
+    On the canonical historical replay where ``observed_flow.target_id`` is
+    already post-redirect (spec Constraint 3), this phase is a no-op:
+    capacity is never violated by construction, so no redirects are emitted.
+    Treatment scenarios with inflated demand may legitimately trigger
+    redirects.
+
+    Per :data:`gbp.consumers.simulator.log.LOG_TABLES`, redirect events flow
+    into ``simulation_redirected_flow_log`` with columns
+    ``[period_index, period_id, phase_name, source_id, original_target_id,
+    redirected_target_id, commodity_category, quantity]``.
+
+    Facilities lacking an ``operation_capacity[storage]`` row are treated as
+    unbounded: no overflow is recorded for them.  This mirrors
+    :class:`DockCapacityPhase` semantics and keeps the canonical replay
+    pipeline stable when a fixture lists only a subset of facilities in the
+    storage attribute.
+    """
+
+    name: str = "OVERFLOW_REDIRECT"
+
+    def __init__(self, schedule: Schedule | None = None) -> None:
+        """Initialise with an optional schedule (default: every period)."""
+        self._schedule = schedule or Schedule.every()
+
+    def should_run(self, period: PeriodRow) -> bool:
+        """Delegate to schedule."""
+        return self._schedule.should_run(period)
+
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+    ) -> PhaseResult:
+        """Detect and redirect over-capacity inventory per commodity."""
+        # 1. Read per-(facility, commodity) capacity from the storage attribute.
+        if "operation_capacity" not in resolved.attributes:
+            return PhaseResult.empty(state)
+        cap_data = resolved.attributes.get("operation_capacity").data
+        storage = cap_data.loc[
+            cap_data["operation_type"] == "storage",
+            ["facility_id", "commodity_category", "capacity"],
+        ]
+        if storage.empty:
+            return PhaseResult.empty(state)
+
+        # 2. Compute overflow per (facility, commodity).  Facilities without
+        # a storage row are unbounded -> no overflow.
+        merged = state.inventory.merge(
+            storage, on=["facility_id", "commodity_category"], how="left",
+        )
+        bounded = merged["capacity"].notna()
+        merged["overflow"] = 0.0
+        merged.loc[bounded, "overflow"] = (
+            merged.loc[bounded, "quantity"] - merged.loc[bounded, "capacity"]
+        ).clip(lower=0.0)
+        overflow_rows = merged.loc[merged["overflow"] > 0]
+        if overflow_rows.empty:
+            return PhaseResult.empty(state)
+
+        # 3. Per-iteration nearest-with-capacity search -- SKELETON (TODO).
+        #
+        # TODO: vectorized nearest-with-capacity selection.
+        #   Precondition: D = D.reindex(columns=sorted(D.columns)) before any
+        #   ``np.argmin`` call (deterministic lexicographic tie-break on
+        #   facility_id; see ADR Sec. 7.6).
+        #   1. Build distance matrix D of shape (n_overflow, n_facilities)
+        #      using ``resolved.distance_matrix`` when present, else
+        #      Haversine on facilities[lat, lon] (mirror
+        #      ``tasks/rebalancer._haversine_distance_m``).
+        #   2. Build availability mask M[i, j] = (free_capacity[j, commodity_i]
+        #      > 0) AND (j != source_i).
+        #   3. masked_D = np.where(M, D, np.inf)
+        #   4. winner = masked_D.argmin(axis=1)
+        #   5. Tie-break is lexicographic on ``facility_id`` thanks to the
+        #      sort precondition above (np.argmin returns first minimum on
+        #      ties).
+        #   6. Apply redirect: subtract overflow from source rows, add to
+        #      winner rows, and re-decrement free_capacity[winner] so the
+        #      next iteration sees the updated remaining space.  Vectorize
+        #      across overflow rows; NO Python ``for`` loops.
+        #   7. Build the events DataFrame with columns
+        #      [source_id, original_target_id, redirected_target_id,
+        #       commodity_category, quantity] and return it under
+        #      ``events["redirected_flow"]``.
+        #
+        # Until the search is implemented, the phase emits no redirect
+        # events on overflow.  The canonical replay (no overflow) is
+        # unaffected.  Treatment scenarios that intentionally undersize
+        # capacity will see the overflow remain in inventory and (when
+        # paired with InvariantCheckPhase) the conservation check still
+        # holds because no commodity is created or destroyed.
+        return PhaseResult.empty(state)
+
+
+class InvariantViolationError(RuntimeError):
+    """Raised on per-commodity conservation violation.
+
+    Emitted by :class:`InvariantCheckPhase` when ``fail_on_violation=True``
+    and the per-commodity baseline does not match the current state.
+    """
+
+
+class InvariantCheckPhase:
+    """Assert per-commodity conservation across the simulation.
+
+    For every commodity, the total stock plus in-transit quantity must equal
+    the baseline established at construction time (or on first ``execute``
+    when ``baseline=None``; see ADR Sec. 7.4).  A violation either raises
+    :class:`InvariantViolationError` (default) or emits a row to
+    ``simulation_invariant_violation_log``.
+
+    ORDERING CONTRACT: Must run last in the period.  Other phases mutate
+    inventory and in_transit; running this phase mid-period would assert
+    against a transient state.
+
+    Per ADR Sec. 7.7: per-commodity baseline tracks ONLY commodities present
+    in the initial inventory snapshot (i.e., commodities that appear with a
+    non-zero baseline).  Commodities appearing later in ``observed_flow``
+    but absent from ``inventory_initial`` are EXCLUDED from invariant
+    tracking and never trigger spurious violations.
+
+    Per ADR Sec. 7.4: when ``baseline=None`` the first ``execute`` captures
+    per-commodity totals into ``state.intermediates["invariant_baseline"]``
+    and memoises them on ``self`` so subsequent periods (where
+    ``intermediates`` has been wiped by ``advance_period``) still see the
+    captured value.  No log row is emitted on capture.
+    """
+
+    name: str = "INVARIANT_CHECK"
+
+    def __init__(
+        self,
+        *,
+        baseline: Mapping[str, float] | None = None,
+        fail_on_violation: bool = True,
+        tolerance: float = 1e-9,
+        schedule: Schedule | None = None,
+    ) -> None:
+        """Initialise the phase.
+
+        Args:
+            baseline: Optional per-commodity baseline ``dict[str, float]``.
+                When omitted the first ``execute`` captures the current
+                state as the baseline.
+            fail_on_violation: When ``True`` (default for canonical
+                replay), violations raise :class:`InvariantViolationError`.
+                When ``False`` (treatment scenarios), violations are
+                logged into ``simulation_invariant_violation_log`` and
+                the run continues.
+            tolerance: Absolute tolerance for floating-point comparison.
+            schedule: Optional schedule (default: every period).
+        """
+        self._baseline: dict[str, float] | None = (
+            None if baseline is None else dict(baseline)
+        )
+        self._fail_on_violation = fail_on_violation
+        self._tolerance = tolerance
+        self._schedule = schedule or Schedule.every()
+
+    def should_run(self, period: PeriodRow) -> bool:
+        """Delegate to schedule."""
+        return self._schedule.should_run(period)
+
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+    ) -> PhaseResult:
+        """Capture-or-assert the per-commodity conservation invariant."""
+        current = _per_commodity_total(state)
+
+        if self._baseline is None:
+            self._baseline = {k: float(v) for k, v in current.items()}
+            return PhaseResult(
+                state=state.with_intermediates(
+                    invariant_baseline=dict(self._baseline),
+                ),
+                events={},
+            )
+
+        violations: list[dict[str, object]] = []
+        for commodity, baseline in self._baseline.items():
+            observed = float(current.get(commodity, 0.0))
+            delta = observed - baseline
+            if abs(delta) > self._tolerance:
+                violations.append({
+                    "commodity_category": commodity,
+                    "baseline": baseline,
+                    "current": observed,
+                    "delta": delta,
+                })
+
+        if not violations:
+            return PhaseResult.empty(state)
+
+        if self._fail_on_violation:
+            offending = ", ".join(
+                f"{v['commodity_category']} "
+                f"(baseline={v['baseline']}, current={v['current']}, "
+                f"delta={v['delta']})"
+                for v in violations
+            )
+            msg = (
+                f"Invariant violated at period {period.period_id}: {offending}"
+            )
+            raise InvariantViolationError(msg)
+
+        violation_df = pd.DataFrame(violations)
+        return PhaseResult(
+            state=state, events={"invariant_violation": violation_df},
+        )
+
+
+def _per_commodity_total(state: SimulationState) -> dict[str, float]:
+    """Sum ``state.inventory + state.in_transit`` per commodity_category."""
+    if state.inventory.empty:
+        inv_totals = pd.Series(dtype=float)
+    else:
+        inv_totals = (
+            state.inventory.groupby("commodity_category")["quantity"].sum()
+        )
+    if state.in_transit.empty:
+        transit_totals = pd.Series(dtype=float)
+    else:
+        transit_totals = (
+            state.in_transit.groupby("commodity_category")["quantity"].sum()
+        )
+    combined = inv_totals.add(transit_totals, fill_value=0.0)
+    return {str(k): float(v) for k, v in combined.items()}

@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
+from gbp.consumers.simulator._period_helpers import period_duration_hours
 from gbp.consumers.simulator.task import DISPATCH_COLUMNS
 from gbp.core.enums import ModalType, ResourceStatus
 
@@ -223,26 +224,15 @@ class RebalancerTask:
     # ── helpers ───────────────────────────────────────────────────────
 
     def _resolve_period_duration(self, resolved: ResolvedModelData) -> float:
-        """Return period duration in hours; derive from ``resolved.periods``
-        when not supplied at construction time.
+        """Return period duration in hours.
 
-        Falls back to 1.0 when the period table is too small or the dates
-        cannot be subtracted.
+        Honours an explicit constructor override; otherwise delegates to the
+        shared :func:`gbp.consumers.simulator._period_helpers.period_duration_hours`
+        helper.
         """
         if self.period_duration_hours is not None:
             return float(self.period_duration_hours)
-        periods = resolved.periods
-        if periods is None or len(periods) < 2:
-            return 1.0
-        try:
-            d0 = pd.Timestamp(periods.iloc[0]["start_date"])
-            d1 = pd.Timestamp(periods.iloc[1]["start_date"])
-            delta = (d1 - d0).total_seconds() / 3600.0
-        except (KeyError, TypeError, ValueError):
-            return 1.0
-        if delta <= 0:
-            return 1.0
-        return float(delta)
+        return period_duration_hours(resolved)
 
 
 # ---------------------------------------------------------------------------

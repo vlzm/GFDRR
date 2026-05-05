@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1777838256178,
-  "projectRoot": "e:\\Documents\\vlzm\\GFDRR",
+  "lastScanned": 1778007630297,
+  "projectRoot": "E:\\Documents\\vlzm\\GFDRR",
   "techStack": {
     "languages": [
       {
@@ -30,7 +30,7 @@
   },
   "build": {
     "buildCommand": null,
-    "testCommand": "git stash && .venv/Scripts/python.exe -m pytest tests/unit/core/test_registry.py::TestIntegrationWithModel::test_build_with_registry_attributes --no-cov -q 2>&1 | tail -5; git stash pop 2>&1 | tail -2",
+    "testCommand": ".venv/Scripts/python.exe -m pytest tests/unit/consumers/simulator/ tests/integration/test_environment.py -q --no-cov 2>&1 | tail -5",
     "lintCommand": "ruff check",
     "devCommand": null,
     "scripts": {}
@@ -56,14 +56,14 @@
       "path": "data",
       "purpose": "Data files",
       "fileCount": 0,
-      "lastAccessed": 1777838256162,
+      "lastAccessed": 1778007630272,
       "keyFiles": []
     },
     "docs": {
       "path": "docs",
       "purpose": "Documentation",
       "fileCount": 7,
-      "lastAccessed": 1777838256163,
+      "lastAccessed": 1778007630274,
       "keyFiles": [
         "architecture_diagrams.md",
         "ARCHITECTURE_MAP.md",
@@ -76,7 +76,7 @@
       "path": "gbp",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1777838256163,
+      "lastAccessed": 1778007630274,
       "keyFiles": [
         "__init__.py"
       ]
@@ -85,7 +85,7 @@
       "path": "notebooks",
       "purpose": null,
       "fileCount": 5,
-      "lastAccessed": 1777838256164,
+      "lastAccessed": 1778007630275,
       "keyFiles": [
         "01_test_graph_api.ipynb",
         "02_test_graph_loader.ipynb",
@@ -98,7 +98,7 @@
       "path": "reference",
       "purpose": null,
       "fileCount": 4,
-      "lastAccessed": 1777838256164,
+      "lastAccessed": 1778007630275,
       "keyFiles": [
         "costs.md",
         "current_graph_model.py",
@@ -110,7 +110,7 @@
       "path": "tests",
       "purpose": "Test files",
       "fileCount": 3,
-      "lastAccessed": 1777838256164,
+      "lastAccessed": 1778007630276,
       "keyFiles": [
         "conftest.py",
         "test_graph_loader.py",
@@ -121,7 +121,7 @@
       "path": "gbp\\build",
       "purpose": "Build output",
       "fileCount": 12,
-      "lastAccessed": 1777838256165,
+      "lastAccessed": 1778007630277,
       "keyFiles": [
         "defaults.py",
         "edge_builder.py",
@@ -132,7 +132,7 @@
       "path": "notebooks\\utils",
       "purpose": "Utility functions",
       "fileCount": 2,
-      "lastAccessed": 1777838256166,
+      "lastAccessed": 1778007630277,
       "keyFiles": [
         "download_gbfs.ipynb",
         "load_trips_data.ipynb"
@@ -142,13 +142,49 @@
       "path": "tests\\fixtures",
       "purpose": "Test fixtures",
       "fileCount": 1,
-      "lastAccessed": 1777838256166,
+      "lastAccessed": 1778007630278,
       "keyFiles": [
         "__init__.py"
       ]
     }
   },
   "hotPaths": [
+    {
+      "path": "gbp\\consumers\\simulator\\built_in_phases.py",
+      "accessCount": 16,
+      "lastAccessed": 1778014739837,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\tasks\\rebalancer.py",
+      "accessCount": 13,
+      "lastAccessed": 1778012133250,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\loaders\\dataloader_graph.py",
+      "accessCount": 11,
+      "lastAccessed": 1778011714554,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\log.py",
+      "accessCount": 10,
+      "lastAccessed": 1778012091560,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\state.py",
+      "accessCount": 9,
+      "lastAccessed": 1778010855058,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\core\\model.py",
+      "accessCount": 8,
+      "lastAccessed": 1778009790786,
+      "type": "file"
+    },
     {
       "path": "gbp\\core\\roles.py",
       "accessCount": 7,
@@ -162,21 +198,15 @@
       "type": "file"
     },
     {
-      "path": "gbp\\core\\model.py",
+      "path": "gbp\\core\\schemas\\observations.py",
+      "accessCount": 6,
+      "lastAccessed": 1778011536241,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\loaders\\dataloader_mock.py",
       "accessCount": 5,
-      "lastAccessed": 1777838965126,
-      "type": "file"
-    },
-    {
-      "path": "gbp\\loaders\\dataloader_graph.py",
-      "accessCount": 4,
-      "lastAccessed": 1777838962450,
-      "type": "file"
-    },
-    {
-      "path": "gbp\\consumers\\simulator\\built_in_phases.py",
-      "accessCount": 4,
-      "lastAccessed": 1777839041273,
+      "lastAccessed": 1778011629999,
       "type": "file"
     },
     {
@@ -192,9 +222,27 @@
       "type": "file"
     },
     {
-      "path": "gbp\\consumers\\simulator\\tasks\\rebalancer.py",
-      "accessCount": 3,
-      "lastAccessed": 1777750985067,
+      "path": "gbp\\core\\enums.py",
+      "accessCount": 4,
+      "lastAccessed": 1778009789556,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator",
+      "accessCount": 4,
+      "lastAccessed": 1778010073181,
+      "type": "directory"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\engine.py",
+      "accessCount": 4,
+      "lastAccessed": 1778010095261,
+      "type": "file"
+    },
+    {
+      "path": "tests\\unit\\consumers\\simulator\\test_built_in_phases.py",
+      "accessCount": 4,
+      "lastAccessed": 1778012519891,
       "type": "file"
     },
     {
@@ -216,33 +264,27 @@
       "type": "file"
     },
     {
-      "path": "gbp\\core\\enums.py",
+      "path": "gbp\\consumers\\simulator\\phases.py",
       "accessCount": 3,
-      "lastAccessed": 1777839253995,
+      "lastAccessed": 1778007810490,
       "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\dispatch_phase.py",
+      "accessCount": 3,
+      "lastAccessed": 1778007820378,
+      "type": "file"
+    },
+    {
+      "path": "tests\\conftest.py",
+      "accessCount": 3,
+      "lastAccessed": 1778010080531,
+      "type": "directory"
     },
     {
       "path": "gbp\\consumers\\simulator\\dispatch_lifecycle.py",
       "accessCount": 2,
       "lastAccessed": 1777661379209,
-      "type": "file"
-    },
-    {
-      "path": "gbp\\consumers\\simulator\\phases.py",
-      "accessCount": 2,
-      "lastAccessed": 1777803373960,
-      "type": "file"
-    },
-    {
-      "path": "gbp\\consumers\\simulator\\dispatch_phase.py",
-      "accessCount": 2,
-      "lastAccessed": 1777838958686,
-      "type": "file"
-    },
-    {
-      "path": "gbp\\loaders\\dataloader_mock.py",
-      "accessCount": 2,
-      "lastAccessed": 1777838964360,
       "type": "file"
     },
     {
@@ -264,16 +306,34 @@
       "type": "file"
     },
     {
-      "path": "gbp\\consumers\\simulator",
-      "accessCount": 2,
-      "lastAccessed": 1777839043707,
-      "type": "directory"
-    },
-    {
       "path": "PROJECT_STATE.md",
       "accessCount": 2,
       "lastAccessed": 1777839848259,
       "type": "file"
+    },
+    {
+      "path": "gbp\\core\\schemas\\edge.py",
+      "accessCount": 2,
+      "lastAccessed": 1778009774090,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\io\\dict_io.py",
+      "accessCount": 2,
+      "lastAccessed": 1778010055604,
+      "type": "file"
+    },
+    {
+      "path": "tests",
+      "accessCount": 2,
+      "lastAccessed": 1778010070331,
+      "type": "directory"
+    },
+    {
+      "path": "",
+      "accessCount": 2,
+      "lastAccessed": 1778010088949,
+      "type": "directory"
     },
     {
       "path": "gbp\\consumers\\simulator\\task.py",
@@ -288,21 +348,9 @@
       "type": "file"
     },
     {
-      "path": "gbp\\consumers\\simulator\\engine.py",
-      "accessCount": 1,
-      "lastAccessed": 1777661368754,
-      "type": "file"
-    },
-    {
       "path": "notebooks\\verify\\10_rebalancer_experiment_unrolled.py",
       "accessCount": 1,
       "lastAccessed": 1777661678385,
-      "type": "file"
-    },
-    {
-      "path": "gbp\\consumers\\simulator\\state.py",
-      "accessCount": 1,
-      "lastAccessed": 1777803347057,
       "type": "file"
     },
     {
@@ -316,12 +364,6 @@
       "accessCount": 1,
       "lastAccessed": 1777838952527,
       "type": "file"
-    },
-    {
-      "path": "tests",
-      "accessCount": 1,
-      "lastAccessed": 1777838964709,
-      "type": "directory"
     },
     {
       "path": "gbp\\loaders\\contracts.py",
@@ -382,6 +424,30 @@
       "accessCount": 1,
       "lastAccessed": 1777839653360,
       "type": "file"
+    },
+    {
+      "path": "docs\\scenarios\\algorithm_bike_simulation_historical.md",
+      "accessCount": 1,
+      "lastAccessed": 1778007804493,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\io\\parquet.py",
+      "accessCount": 1,
+      "lastAccessed": 1778009778630,
+      "type": "file"
+    },
+    {
+      "path": "tests\\unit\\consumers\\simulator\\test_latent_demand_inflator.py",
+      "accessCount": 1,
+      "lastAccessed": 1778009780404,
+      "type": "file"
+    },
+    {
+      "path": "gbp",
+      "accessCount": 1,
+      "lastAccessed": 1778009788427,
+      "type": "directory"
     }
   ],
   "userDirectives": []

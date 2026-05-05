@@ -1,0 +1,17 @@
+{
+  "active": false,
+  "current_phase": "completed",
+  "task_description": "Historical bike replay pipeline spec — interview completed at 14% ambiguity, 4 rounds, handed off to ralplan for consensus planning then autopilot execution.",
+  "completed_at": "2026-05-05T19:35:00Z",
+  "interview_id": "hist-replay-2026-05-05",
+  "spec_path": ".omc/specs/deep-interview-historical-replay.md",
+  "final_ambiguity": "0.14",
+  "rounds_completed": "4",
+  "execution_choice": "ralplan_then_autopilot",
+  "_meta": {
+    "mode": "deep-interview",
+    "sessionId": null,
+    "updatedAt": "2026-05-05T19:34:51.168Z",
+    "updatedBy": "state_write_tool"
+  }
+}

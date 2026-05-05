@@ -129,6 +129,26 @@ DOCK_BLOCKING_LOG_COLUMNS: list[str] = [
     "blocked",
 ]
 
+REDIRECTED_FLOW_LOG_COLUMNS: list[str] = [
+    "period_index",
+    "period_id",
+    "phase_name",
+    "source_id",
+    "original_target_id",
+    "redirected_target_id",
+    "commodity_category",
+    "quantity",
+]
+
+INVARIANT_VIOLATION_LOG_COLUMNS: list[str] = [
+    "period_index",
+    "period_id",
+    "commodity_category",
+    "baseline",
+    "current",
+    "delta",
+]
+
 
 # -- Log-table registry --------------------------------------------------------
 
@@ -179,6 +199,16 @@ LOG_TABLES: tuple[LogTableSchema, ...] = (
         "dock_blocking",
         "simulation_dock_blocking_log",
         DOCK_BLOCKING_LOG_COLUMNS,
+    ),
+    LogTableSchema(
+        "redirected_flow",
+        "simulation_redirected_flow_log",
+        REDIRECTED_FLOW_LOG_COLUMNS,
+    ),
+    LogTableSchema(
+        "invariant_violation",
+        "simulation_invariant_violation_log",
+        INVARIANT_VIOLATION_LOG_COLUMNS,
     ),
 )
 
