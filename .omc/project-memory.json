@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1778007630297,
-  "projectRoot": "E:\\Documents\\vlzm\\GFDRR",
+  "lastScanned": 1778094117909,
+  "projectRoot": "e:\\Documents\\vlzm\\GFDRR",
   "techStack": {
     "languages": [
       {
@@ -30,7 +30,7 @@
   },
   "build": {
     "buildCommand": null,
-    "testCommand": ".venv/Scripts/python.exe -m pytest tests/unit/consumers/simulator/ tests/integration/test_environment.py -q --no-cov 2>&1 | tail -3",
+    "testCommand": ".venv/Scripts/python.exe -m pytest tests/unit/consumers/simulator/ -q --no-cov 2>&1 | tail -15",
     "lintCommand": "ruff check",
     "devCommand": null,
     "scripts": {}
@@ -56,14 +56,14 @@
       "path": "data",
       "purpose": "Data files",
       "fileCount": 0,
-      "lastAccessed": 1778007630272,
+      "lastAccessed": 1778094117889,
       "keyFiles": []
     },
     "docs": {
       "path": "docs",
       "purpose": "Documentation",
       "fileCount": 7,
-      "lastAccessed": 1778007630274,
+      "lastAccessed": 1778094117890,
       "keyFiles": [
         "architecture_diagrams.md",
         "ARCHITECTURE_MAP.md",
@@ -76,7 +76,7 @@
       "path": "gbp",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1778007630274,
+      "lastAccessed": 1778094117891,
       "keyFiles": [
         "__init__.py"
       ]
@@ -85,7 +85,7 @@
       "path": "notebooks",
       "purpose": null,
       "fileCount": 5,
-      "lastAccessed": 1778007630275,
+      "lastAccessed": 1778094117891,
       "keyFiles": [
         "01_test_graph_api.ipynb",
         "02_test_graph_loader.ipynb",
@@ -98,7 +98,7 @@
       "path": "reference",
       "purpose": null,
       "fileCount": 4,
-      "lastAccessed": 1778007630275,
+      "lastAccessed": 1778094117892,
       "keyFiles": [
         "costs.md",
         "current_graph_model.py",
@@ -110,7 +110,7 @@
       "path": "tests",
       "purpose": "Test files",
       "fileCount": 3,
-      "lastAccessed": 1778007630276,
+      "lastAccessed": 1778094117892,
       "keyFiles": [
         "conftest.py",
         "test_graph_loader.py",
@@ -121,7 +121,7 @@
       "path": "gbp\\build",
       "purpose": "Build output",
       "fileCount": 12,
-      "lastAccessed": 1778007630277,
+      "lastAccessed": 1778094117893,
       "keyFiles": [
         "defaults.py",
         "edge_builder.py",
@@ -132,7 +132,7 @@
       "path": "notebooks\\utils",
       "purpose": "Utility functions",
       "fileCount": 2,
-      "lastAccessed": 1778007630277,
+      "lastAccessed": 1778094117893,
       "keyFiles": [
         "download_gbfs.ipynb",
         "load_trips_data.ipynb"
@@ -142,7 +142,7 @@
       "path": "tests\\fixtures",
       "purpose": "Test fixtures",
       "fileCount": 1,
-      "lastAccessed": 1778007630278,
+      "lastAccessed": 1778094117894,
       "keyFiles": [
         "__init__.py"
       ]
@@ -151,14 +151,14 @@
   "hotPaths": [
     {
       "path": "gbp\\consumers\\simulator\\built_in_phases.py",
-      "accessCount": 19,
-      "lastAccessed": 1778016059918,
+      "accessCount": 21,
+      "lastAccessed": 1778098418807,
       "type": "file"
     },
     {
       "path": "gbp\\consumers\\simulator\\tasks\\rebalancer.py",
-      "accessCount": 14,
-      "lastAccessed": 1778015805225,
+      "accessCount": 15,
+      "lastAccessed": 1778094216703,
       "type": "file"
     },
     {
@@ -169,14 +169,14 @@
     },
     {
       "path": "gbp\\consumers\\simulator\\log.py",
-      "accessCount": 10,
-      "lastAccessed": 1778012091560,
+      "accessCount": 11,
+      "lastAccessed": 1778098316401,
       "type": "file"
     },
     {
       "path": "gbp\\consumers\\simulator\\state.py",
-      "accessCount": 9,
-      "lastAccessed": 1778010855058,
+      "accessCount": 10,
+      "lastAccessed": 1778098316871,
       "type": "file"
     },
     {
@@ -210,6 +210,12 @@
       "type": "file"
     },
     {
+      "path": "tests\\unit\\consumers\\simulator\\test_built_in_phases.py",
+      "accessCount": 5,
+      "lastAccessed": 1778098324743,
+      "type": "file"
+    },
+    {
       "path": "tests\\unit\\core\\test_enums.py",
       "accessCount": 4,
       "lastAccessed": 1777839293914,
@@ -240,9 +246,15 @@
       "type": "file"
     },
     {
-      "path": "tests\\unit\\consumers\\simulator\\test_built_in_phases.py",
+      "path": "gbp\\consumers\\simulator\\dispatch_phase.py",
       "accessCount": 4,
-      "lastAccessed": 1778012519891,
+      "lastAccessed": 1778094215801,
+      "type": "file"
+    },
+    {
+      "path": "gbp\\consumers\\simulator\\phases.py",
+      "accessCount": 4,
+      "lastAccessed": 1778098325156,
       "type": "file"
     },
     {
@@ -264,18 +276,6 @@
       "type": "file"
     },
     {
-      "path": "gbp\\consumers\\simulator\\phases.py",
-      "accessCount": 3,
-      "lastAccessed": 1778007810490,
-      "type": "file"
-    },
-    {
-      "path": "gbp\\consumers\\simulator\\dispatch_phase.py",
-      "accessCount": 3,
-      "lastAccessed": 1778007820378,
-      "type": "file"
-    },
-    {
       "path": "tests\\conftest.py",
       "accessCount": 3,
       "lastAccessed": 1778010080531,
@@ -283,8 +283,8 @@
     },
     {
       "path": "gbp\\consumers\\simulator\\dispatch_lifecycle.py",
-      "accessCount": 2,
-      "lastAccessed": 1777661379209,
+      "accessCount": 3,
+      "lastAccessed": 1778094223728,
       "type": "file"
     },
     {
@@ -334,6 +334,12 @@
       "accessCount": 2,
       "lastAccessed": 1778010088949,
       "type": "directory"
+    },
+    {
+      "path": "tests\\unit\\consumers\\simulator\\test_latent_demand_inflator.py",
+      "accessCount": 2,
+      "lastAccessed": 1778098325979,
+      "type": "file"
     },
     {
       "path": "gbp\\consumers\\simulator\\task.py",
@@ -435,12 +441,6 @@
       "path": "gbp\\io\\parquet.py",
       "accessCount": 1,
       "lastAccessed": 1778009778630,
-      "type": "file"
-    },
-    {
-      "path": "tests\\unit\\consumers\\simulator\\test_latent_demand_inflator.py",
-      "accessCount": 1,
-      "lastAccessed": 1778009780404,
       "type": "file"
     },
     {

@@ -1131,6 +1131,168 @@ class OverflowRedirectPhase:
         )
 
 
+class EndOfPeriodDeficitPhase:
+    """Record end-of-period negative inventory as lost demand.
+
+    Pairs with :class:`DeparturePhysicsPhase` ``mode="permissive"`` to form an
+    "end-of-period clip" semantics: departures are subtracted without start-of-
+    period clipping, arrivals are then added, and only the residual negative
+    balance at the end of the period is treated as unmet demand.  This is the
+    conservative complement to ``mode="strict"`` (start-of-period clip): strict
+    over-reports lost demand by ignoring same-period arrivals; this phase
+    under-reports it by assuming intra-period arrivals are interleaved with
+    departures.  Truth lies between the two bounds.
+
+    Pipeline placement: after :class:`ArrivalsPhase` and
+    :class:`OverflowRedirectPhase`, before :class:`DispatchPhase` so the
+    rebalancer sees clipped (non-negative) inventory.
+
+    On the canonical historical replay (no inflator, ``multiplier=1.0``) the
+    end-of-period inventory is non-negative by construction of the source
+    data, so this phase is a no-op.  Deficits arise only in treatment
+    scenarios where :class:`LatentDemandInflatorPhase` scales the latent
+    marginals above what physical supply can cover.
+
+    Conservation: bikes counted as "lost" never actually left the source
+    station — the customer did not find a bike.  To keep
+    ``inventory + in_transit`` consistent, the phase removes a matching
+    quantity from current-period shipments departing the deficit facility,
+    in DataFrame order.  When same-period trips have already been delivered
+    by ``ArrivalsPhase`` (``tau == 0``), those shipments are no longer in
+    ``in_transit`` and cannot be reduced; the residual mismatch surfaces
+    through :class:`InvariantCheckPhase` (use ``fail_on_violation=False``
+    in this mode).
+    """
+
+    name: str = "END_OF_PERIOD_DEFICIT"
+
+    def __init__(
+        self,
+        tolerance: float = 1e-9,
+        schedule: Schedule | None = None,
+    ) -> None:
+        """Initialise with optional tolerance and schedule.
+
+        Args:
+            tolerance: Absolute floor below which a negative inventory is
+                treated as floating-point noise rather than a real deficit.
+            schedule: Optional schedule (default: every period).
+        """
+        self._tolerance = tolerance
+        self._schedule = schedule or Schedule.every()
+
+    def should_run(self, period: PeriodRow) -> bool:
+        """Delegate to schedule."""
+        return self._schedule.should_run(period)
+
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+    ) -> PhaseResult:
+        """Detect end-of-period deficits, record them, clip inventory to zero."""
+        if state.inventory.empty:
+            return PhaseResult.empty(state)
+
+        deficit_mask = state.inventory["quantity"] < -self._tolerance
+        if not deficit_mask.any():
+            return PhaseResult.empty(state)
+
+        latent_lookup: dict[tuple[str, str], float] = {}
+        latent = state.intermediates.get("latent_demand")
+        if latent is not None and not latent.empty:
+            for _, lat_row in latent.iterrows():
+                latent_lookup[
+                    (str(lat_row["facility_id"]),
+                     str(lat_row["commodity_category"]))
+                ] = float(lat_row.get("latent_departures", float("nan")))
+
+        new_inventory = state.inventory.copy()
+        new_in_transit = state.in_transit.copy()
+        lost_rows: list[dict[str, object]] = []
+
+        deficits = state.inventory.loc[deficit_mask]
+        for _, row in deficits.iterrows():
+            facility_id = str(row["facility_id"])
+            commodity = str(row["commodity_category"])
+            deficit = -float(row["quantity"])
+
+            self._reduce_in_transit(
+                new_in_transit, facility_id, commodity,
+                period.period_index, deficit,
+            )
+
+            inv_mask = (
+                (new_inventory["facility_id"] == facility_id)
+                & (new_inventory["commodity_category"] == commodity)
+            )
+            new_inventory.loc[inv_mask, "quantity"] = 0.0
+
+            latent_value = latent_lookup.get(
+                (facility_id, commodity), float("nan"),
+            )
+            realized = (
+                latent_value - deficit
+                if not pd.isna(latent_value)
+                else float("nan")
+            )
+            lost_rows.append({
+                "facility_id": facility_id,
+                "commodity_category": commodity,
+                "latent": latent_value,
+                "realized": realized,
+                "lost": deficit,
+            })
+
+        if not new_in_transit.empty:
+            new_in_transit = new_in_transit[
+                new_in_transit["quantity"] > self._tolerance
+            ].reset_index(drop=True)
+
+        new_state = (
+            state
+            .with_inventory(new_inventory.reset_index(drop=True))
+            .with_in_transit(new_in_transit)
+        )
+        return PhaseResult(
+            state=new_state,
+            events={"lost_demand": pd.DataFrame(lost_rows)},
+        )
+
+    @staticmethod
+    def _reduce_in_transit(
+        in_transit: pd.DataFrame,
+        facility_id: str,
+        commodity: str,
+        period_index: int,
+        deficit: float,
+    ) -> None:
+        """Best-effort cancel current-period shipments from *facility_id*.
+
+        Reduces shipment quantities in DataFrame order until *deficit* is
+        covered or no candidate shipments remain.  Mutates *in_transit* in
+        place — the caller owns the copy.
+        """
+        if in_transit.empty:
+            return
+        candidates = in_transit.index[
+            (in_transit["source_id"] == facility_id)
+            & (in_transit["commodity_category"] == commodity)
+            & (in_transit["departure_period"] == period_index)
+        ]
+        remaining = deficit
+        for idx in candidates:
+            if remaining <= 0:
+                break
+            qty = float(in_transit.at[idx, "quantity"])
+            if qty <= 0:
+                continue
+            reduction = min(qty, remaining)
+            in_transit.at[idx, "quantity"] = qty - reduction
+            remaining -= reduction
+
+
 class InvariantViolationError(RuntimeError):
     """Raised on per-commodity conservation violation.
 
