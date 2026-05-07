@@ -9,7 +9,8 @@ without touching the lifecycle.
 The algorithm is a port of the deprecated ``gbp/rebalancer/`` prototype:
 
 - ``_compute_imbalance``        — salvaged from ``gbp/rebalancer/demand.py``.
-- ``_create_pickup_delivery_pairs`` — salvaged from
+- :class:`~gbp.consumers.simulator.tasks.rebalancer_planner.IntervalOverlapPlanner`
+  — pickup-delivery matching, salvaged from
   ``gbp/rebalancer/dataloader.py``.
 - ``_solve_pdp`` and ``_extract_pdp_solution`` — salvaged from
   ``gbp/rebalancer/routing/{vrp,postprocessing}.py``.
@@ -31,6 +32,10 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from gbp.consumers.simulator._period_helpers import period_duration_hours
 from gbp.consumers.simulator.task import DISPATCH_COLUMNS
+from gbp.consumers.simulator.tasks.rebalancer_planner import (
+    IntervalOverlapPlanner,
+    Planner,
+)
 from gbp.core.enums import ModalType, ResourceStatus
 
 if TYPE_CHECKING:
@@ -66,6 +71,7 @@ class RebalancerTask:
         truck_resource_category: str = "rebalancing_truck",
         commodity_category: str = "working_bike",
         modal_type: str = ModalType.ROAD.value,
+        planner: Planner | None = None,
     ) -> None:
         """Initialise the task.
 
@@ -83,6 +89,10 @@ class RebalancerTask:
                 trucks in ``state.resources``.
             commodity_category: Commodity moved by the rebalancer.
             modal_type: Modal type stamped on every dispatch row.
+            planner: Strategy for turning per-station imbalance into PDP
+                pickup-delivery pairs.  ``None`` falls back to
+                :class:`IntervalOverlapPlanner` (geography-blind cumulative
+                interval matching).
         """
         self.min_threshold = min_threshold
         self.max_threshold = max_threshold
@@ -93,6 +103,7 @@ class RebalancerTask:
         self.truck_resource_category = truck_resource_category
         self.commodity_category = commodity_category
         self.modal_type = modal_type
+        self.planner: Planner = planner if planner is not None else IntervalOverlapPlanner()
 
     # ── public entry point ────────────────────────────────────────────
 
@@ -141,8 +152,10 @@ class RebalancerTask:
         if truck_capacity is None or truck_capacity <= 0:
             return empty
 
-        # Step 4 — pairs (greedy, capped by truck capacity).
-        pairs = _create_pickup_delivery_pairs(sources, destinations, truck_capacity)
+        # Step 4 — pairs (matching strategy is pluggable via self.planner).
+        pairs = self.planner.plan(
+            sources, destinations, truck_capacity, resolved.distance_matrix,
+        )
         if not pairs:
             return empty
 
@@ -378,56 +391,6 @@ def _truck_capacity(
     if match.empty:
         return None
     return float(match.iloc[0]["base_capacity"])
-
-
-def _create_pickup_delivery_pairs(
-    sources: pd.DataFrame,
-    destinations: pd.DataFrame,
-    truck_capacity: float,
-) -> list[dict[str, Any]]:
-    """Greedy match sources to destinations by interval-overlap on excess /
-    deficit cumulative sums; clamp every pair to ``truck_capacity``.
-
-    Salvaged from
-    ``gbp/rebalancer/dataloader.py:DataLoaderRebalancer.create_pickup_delivery_pairs``.
-    """
-    if sources.empty or destinations.empty:
-        return []
-
-    supply = sources.sort_values("excess", ascending=False).reset_index(drop=True)
-    demand = destinations.sort_values("deficit", ascending=False).reset_index(drop=True)
-
-    supply = supply.copy()
-    demand = demand.copy()
-    supply["end"] = supply["excess"].cumsum()
-    supply["start"] = supply["end"] - supply["excess"]
-    demand["end"] = demand["deficit"].cumsum()
-    demand["start"] = demand["end"] - demand["deficit"]
-
-    cross = supply.assign(_k=1).merge(
-        demand.assign(_k=1), on="_k", suffixes=("_p", "_d"),
-    )
-    cross["quantity"] = (
-        cross[["end_p", "end_d"]].min(axis=1)
-        - cross[["start_p", "start_d"]].max(axis=1)
-    ).clip(lower=0).astype(int)
-    cross["quantity"] = cross["quantity"].clip(upper=int(truck_capacity))
-    cross = cross[cross["quantity"] > 0]
-    if cross.empty:
-        return []
-
-    pairs: list[dict[str, Any]] = []
-    for _, r in cross.iterrows():
-        pairs.append({
-            "pickup_node_id": str(r["node_id_p"]),
-            "pickup_latitude": float(r["latitude_p"]),
-            "pickup_longitude": float(r["longitude_p"]),
-            "delivery_node_id": str(r["node_id_d"]),
-            "delivery_latitude": float(r["latitude_d"]),
-            "delivery_longitude": float(r["longitude_d"]),
-            "quantity": int(r["quantity"]),
-        })
-    return pairs
 
 
 def _build_pdp_model(
