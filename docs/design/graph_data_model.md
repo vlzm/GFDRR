@@ -6,24 +6,6 @@
 
 Документ описывает **только модель данных** — структуры, таблицы, грейны и отношения. Модель данных описывает "мир" (какие объекты, связи и параметры существуют) и является **общей** для разных потребителей: оптимизатор (все периоды одновременно), симулятор (шаг за шагом), аналитика (reporting). Каждый потребитель использует одну и ту же `ResolvedModelData`, но обрабатывает её по-своему (§15).
 
-### Implementation status vs repository (`gbp`)
-
-The following stays aligned with the current Python packages:
-
-- **Containers:** `RawModelData` / `ResolvedModelData` in `gbp/core/model.py` — required tables, optional tables, and Pydantic row schemas in `gbp/core/schemas/`.
-- **Build:** `gbp/build/pipeline.py` — `build_model()` runs `validate_raw_model` → `resolve_all_time_varying` → edge materialization → `resolve_lead_times` → `resolve_transformations` → `compute_fleet_capacity` → `assemble_spines`.
-- **Enums / roles:** `gbp/core/enums.py`, `gbp/core/roles.py` — bike-sharing L3 defaults.
-
-**Document-only or not yet wired into `RawModelData`:**
-
-- **§12 Historical layer** (`shipment`, `historical_*`) — conceptual; no matching DataFrame fields in `gbp/core/model.py` today.
-- **§13.8 Hierarchical aggregation** — not implemented as a step in `gbp/build` (no `aggregation` module); scenario hierarchy fields describe intent for consumers or future tooling.
-- **Output tables (§11.12)** — schemas exist in `gbp/core/schemas/output.py`; they are not populated by `build_model()` (consumer-generated).
-
-**Parametric attributes:** Parametric tables (`operation_costs`, `transport_costs`, `resource_costs`, `operation_capacities`, etc.) are NOT fixed fields on `RawModelData`. They live in `raw.attributes: AttributeRegistry` and are registered via `registry.register()`. Attribute names are singular (`operation_cost`, `transport_cost`). See `docs/design/attribute_system.md` for the full design.
-
-**Validation caveat:** `validate_raw_model()` uses **`raw.edges` and `raw.edge_commodities`** for resource completeness, graph connectivity, and transformation consistency. If edges and `edge_commodities` are **only** produced inside `build_model()` from `edge_rules` / `scenario_manual_edges`, those checks may not run unless you pre-materialize those tables on `raw` before validation.
-
 ---
 
 ## 1. Основные сущности
