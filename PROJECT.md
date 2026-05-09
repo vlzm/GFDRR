@@ -23,10 +23,11 @@
 1. **Foundation** — модель данных, build pipeline, loader
 2. **Environment** — step-by-step engine, state management
 3. **Rebalancer** — первая задача внутри Environment (VRP)
-4. **Trip Generator** — синтетический поток поездок для симуляции
-5. **UI** — визуализация Environment (Streamlit)
-6. **Infrastructure** — DB, API, Docker, CI/CD
-7. **Cloud** — Azure deployment
+4. **Implement real data instead of mock data** — на данном этапе берём реальные данные из "data\raw\202602-citibike-tripdata_1.csv" и создаём dataloader_raw и dataloader_graph под реальные данные
+5. **Create FastAPI for future UI** — Тут нужно понять, что мы хотим видеть в UI. И потом на основе этого понимани сделать FastAPI.
+6. **UI** — визуализация Environment (Streamlit or gradio or React)
+7. **Infrastructure** — DB, API, Docker, CI/CD
+8. **Cloud** — Azure deployment
 
 Каждая фаза начинается с design doc. Текущий прогресс — в `PROJECT_STATE.md`.
 
@@ -35,15 +36,9 @@
 ## Принципы
 
 **Minimalism (Nano-style).** Код должен быть hackable. Без model factories, тяжёлых DI-контейнеров, скрытой магии. Каждый файл можно понять за 5 минут.
-
 **Vectorization first.** Вся математика через pandas/NumPy. Никаких `for` циклов по данным в hot paths.
-
-**Design doc before code.** Каждая новая подсистема начинается с design doc, обсуждения, и только потом — реализация по milestone'ам.
-
-**Структурное vs параметрическое.** Topology (facilities, edges, demand) — фиксированные поля. Числовые параметры (costs, capacities) — через AttributeRegistry с кастомными grain'ами.
-
+**Design doc before code.** Каждая новая подсистема начинается с design doc, обсуждения, и только потом — реализация.
 **Strict typing.** Pydantic для всех контрактов. Type hints на всех public функциях.
-
 **English in code, Russian in chat.** Код, комментарии, docstrings — только на английском. Общение с пользователем — на русском.
 
 ---
@@ -54,6 +49,4 @@
 |----------|------------|--------------------|
 | `PROJECT.md` | Vision, roadmap, принципы | Редко (при смене vision) |
 | `PROJECT_STATE.md` | Текущая фаза, прогресс, "not now" | При переходе между фазами и внутри фазы |
-| `.cursorrules` | Правила для AI, инварианты модели | Редко |
 | `docs/design/` | Design docs по подсистемам | По одному на фазу |
-| `docs/IDEAS.md` | Парковка идей (ML, GNN, ...) | Когда появляется идея |

@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1778094117909,
+  "lastScanned": 1778328785466,
   "projectRoot": "e:\\Documents\\vlzm\\GFDRR",
   "techStack": {
     "languages": [
@@ -30,7 +30,7 @@
   },
   "build": {
     "buildCommand": null,
-    "testCommand": ".venv/Scripts/python.exe -m pytest tests/unit/consumers/simulator/ -q --no-cov 2>&1 | tail -15",
+    "testCommand": "pytest",
     "lintCommand": "ruff check",
     "devCommand": null,
     "scripts": {}
@@ -56,14 +56,14 @@
       "path": "data",
       "purpose": "Data files",
       "fileCount": 0,
-      "lastAccessed": 1778094117889,
+      "lastAccessed": 1778328785448,
       "keyFiles": []
     },
     "docs": {
       "path": "docs",
       "purpose": "Documentation",
       "fileCount": 7,
-      "lastAccessed": 1778094117890,
+      "lastAccessed": 1778328785449,
       "keyFiles": [
         "architecture_diagrams.md",
         "ARCHITECTURE_MAP.md",
@@ -76,7 +76,7 @@
       "path": "gbp",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1778094117891,
+      "lastAccessed": 1778328785450,
       "keyFiles": [
         "__init__.py"
       ]
@@ -85,7 +85,7 @@
       "path": "notebooks",
       "purpose": null,
       "fileCount": 5,
-      "lastAccessed": 1778094117891,
+      "lastAccessed": 1778328785450,
       "keyFiles": [
         "01_test_graph_api.ipynb",
         "02_test_graph_loader.ipynb",
@@ -98,7 +98,7 @@
       "path": "reference",
       "purpose": null,
       "fileCount": 4,
-      "lastAccessed": 1778094117892,
+      "lastAccessed": 1778328785451,
       "keyFiles": [
         "costs.md",
         "current_graph_model.py",
@@ -110,7 +110,7 @@
       "path": "tests",
       "purpose": "Test files",
       "fileCount": 3,
-      "lastAccessed": 1778094117892,
+      "lastAccessed": 1778328785451,
       "keyFiles": [
         "conftest.py",
         "test_graph_loader.py",
@@ -121,7 +121,7 @@
       "path": "gbp\\build",
       "purpose": "Build output",
       "fileCount": 12,
-      "lastAccessed": 1778094117893,
+      "lastAccessed": 1778328785452,
       "keyFiles": [
         "defaults.py",
         "edge_builder.py",
@@ -132,7 +132,7 @@
       "path": "notebooks\\utils",
       "purpose": "Utility functions",
       "fileCount": 2,
-      "lastAccessed": 1778094117893,
+      "lastAccessed": 1778328785452,
       "keyFiles": [
         "download_gbfs.ipynb",
         "load_trips_data.ipynb"
@@ -142,7 +142,7 @@
       "path": "tests\\fixtures",
       "purpose": "Test fixtures",
       "fileCount": 1,
-      "lastAccessed": 1778094117894,
+      "lastAccessed": 1778328785453,
       "keyFiles": [
         "__init__.py"
       ]
