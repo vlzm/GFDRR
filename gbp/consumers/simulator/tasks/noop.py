@@ -17,7 +17,13 @@ if TYPE_CHECKING:
 
 
 class NoopTask:
-    """Task that returns empty dispatches.  For testing the engine."""
+    """Task that return empty dispatches for testing the engine.
+
+    Attributes
+    ----------
+    name
+        Task identifier, always ``"noop"``.
+    """
 
     name: str = "noop"
 
@@ -27,5 +33,20 @@ class NoopTask:
         resolved: ResolvedModelData,
         period: PeriodRow,
     ) -> pd.DataFrame:
-        """Return an empty dispatches DataFrame."""
+        """Return an empty dispatches DataFrame.
+
+        Parameters
+        ----------
+        state
+            Current simulation state (unused).
+        resolved
+            Resolved model data (unused).
+        period
+            Current period descriptor (unused).
+
+        Returns
+        -------
+        pd.DataFrame
+            Empty DataFrame with ``DISPATCH_COLUMNS`` schema.
+        """
         return pd.DataFrame(columns=DISPATCH_COLUMNS)

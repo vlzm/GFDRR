@@ -26,7 +26,18 @@ _DATE_COLUMNS = frozenset({
 
 
 def _df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
-    """Serialize a DataFrame to list-of-dicts with dates as ISO strings."""
+    """Serialize a DataFrame to list-of-dicts with dates as ISO strings.
+
+    Parameters
+    ----------
+    df
+        DataFrame to serialize.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        Each dict represents one row with date columns cast to ISO strings.
+    """
     out = df.copy()
     for col in out.columns:
         if col in _DATE_COLUMNS or pd.api.types.is_datetime64_any_dtype(out[col]):
@@ -35,7 +46,18 @@ def _df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 def _records_to_df(records: list[dict[str, Any]]) -> pd.DataFrame:
-    """Reconstruct a DataFrame, parsing known date columns."""
+    """Reconstruct a DataFrame, parsing known date columns.
+
+    Parameters
+    ----------
+    records
+        List of row dicts as produced by ``_df_to_records``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Reconstructed DataFrame with known date columns parsed.
+    """
     df = pd.DataFrame(records)
     for col in df.columns:
         if col in _DATE_COLUMNS:
@@ -47,7 +69,18 @@ def _records_to_df(records: list[dict[str, Any]]) -> pd.DataFrame:
 
 
 def _registry_to_dict(registry: AttributeRegistry) -> dict[str, Any]:
-    """Serialize AttributeRegistry to a JSON-friendly dict."""
+    """Serialize an AttributeRegistry to a JSON-friendly dict.
+
+    Parameters
+    ----------
+    registry
+        Attribute registry to serialize.
+
+    Returns
+    -------
+    dict[str, Any]
+        Mapping of attribute name to ``{"spec": ..., "data": ...}`` entries.
+    """
     if not registry:
         return {}
     result: dict[str, Any] = {}
@@ -76,7 +109,18 @@ def _registry_to_dict(registry: AttributeRegistry) -> dict[str, Any]:
 
 
 def _registry_from_dict(data: dict[str, Any]) -> AttributeRegistry:
-    """Deserialize AttributeRegistry from a dict."""
+    """Deserialize an AttributeRegistry from a dict.
+
+    Parameters
+    ----------
+    data
+        Dict previously produced by ``_registry_to_dict``.
+
+    Returns
+    -------
+    AttributeRegistry
+        Reconstructed registry with specs and data re-registered.
+    """
     registry = AttributeRegistry()
     for name, entry in data.items():
         sd = entry["spec"]
@@ -99,6 +143,18 @@ def _registry_from_dict(data: dict[str, Any]) -> AttributeRegistry:
 
 
 def _to_dict(obj: RawModelData | ResolvedModelData) -> dict[str, Any]:
+    """Serialize a model dataclass to a JSON-compatible dict.
+
+    Parameters
+    ----------
+    obj
+        ``RawModelData`` or ``ResolvedModelData`` instance.
+
+    Returns
+    -------
+    dict[str, Any]
+        Nested dict with DataFrame fields as record lists.
+    """
     result: dict[str, Any] = {}
     for f in fields(obj):
         if any(f.name.startswith(p) for p in _SKIP_PREFIXES):
@@ -128,6 +184,27 @@ def _from_dict(
     cls: type,
     required: frozenset[str],
 ) -> dict[str, Any]:
+    """Reconstruct constructor kwargs for a model dataclass from a dict.
+
+    Parameters
+    ----------
+    data
+        Dict previously produced by ``_to_dict``.
+    cls
+        Target dataclass type (``RawModelData`` or ``ResolvedModelData``).
+    required
+        Field names that must be present in *data*.
+
+    Returns
+    -------
+    dict[str, Any]
+        Keyword arguments suitable for ``cls(**kwargs)``.
+
+    Raises
+    ------
+    ValueError
+        If a required table is missing from *data*.
+    """
     kwargs: dict[str, Any] = {}
     field_names = {f.name for f in fields(cls)}
 
@@ -156,12 +233,34 @@ def _from_dict(
 
 
 def raw_to_dict(raw: RawModelData) -> dict[str, Any]:
-    """Serialize ``RawModelData`` to a JSON-compatible dict."""
+    """Serialize ``RawModelData`` to a JSON-compatible dict.
+
+    Parameters
+    ----------
+    raw
+        Raw model data to serialize.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-serializable representation of *raw*.
+    """
     return _to_dict(raw)
 
 
 def raw_from_dict(data: dict[str, Any]) -> RawModelData:
-    """Reconstruct ``RawModelData`` from a dict (inverse of ``raw_to_dict``)."""
+    """Reconstruct ``RawModelData`` from a dict (inverse of ``raw_to_dict``).
+
+    Parameters
+    ----------
+    data
+        Dict previously produced by ``raw_to_dict``.
+
+    Returns
+    -------
+    RawModelData
+        Validated raw model data.
+    """
     kwargs = _from_dict(data, RawModelData, RawModelData._REQUIRED)
     raw = RawModelData(**kwargs)
     raw.validate()
@@ -169,7 +268,18 @@ def raw_from_dict(data: dict[str, Any]) -> RawModelData:
 
 
 def resolved_to_dict(resolved: ResolvedModelData) -> dict[str, Any]:
-    """Serialize ``ResolvedModelData`` to a JSON-compatible dict."""
+    """Serialize ``ResolvedModelData`` to a JSON-compatible dict.
+
+    Parameters
+    ----------
+    resolved
+        Resolved model data to serialize.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-serializable representation of *resolved*.
+    """
     return _to_dict(resolved)
 
 
@@ -178,6 +288,18 @@ def resolved_from_dict(data: dict[str, Any], *, validate: bool = False) -> Resol
 
     Validation is off by default because resolved tables may have different
     column sets after time resolution (e.g. ``period_id`` replaces ``date``).
+
+    Parameters
+    ----------
+    data
+        Dict previously produced by ``resolved_to_dict``.
+    validate
+        Run schema validation on the result. Default is ``False``.
+
+    Returns
+    -------
+    ResolvedModelData
+        Reconstructed resolved model data.
     """
     kwargs = _from_dict(data, ResolvedModelData, ResolvedModelData._REQUIRED)
     resolved = ResolvedModelData(**kwargs)

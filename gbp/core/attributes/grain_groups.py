@@ -1,4 +1,4 @@
-"""Grain groups: cluster attributes to avoid cross-join spine explosions."""
+"""Cluster attributes by grain compatibility to avoid cross-join spine explosions."""
 
 from __future__ import annotations
 
@@ -9,7 +9,20 @@ from gbp.core.attributes.spec import AttributeSpec
 
 @dataclass
 class GrainGroup:
-    """A set of attributes whose grains form a chain (subset/superset) on dimensions."""
+    """Represent a set of attributes whose grains form a chain on dimensions.
+
+    Two grains are chain-compatible when one dimension set is a subset of
+    the other.
+
+    Parameters
+    ----------
+    name
+        Human-readable group identifier (e.g. ``"group_0"``).
+    grain
+        Union of all dimension columns across grouped attributes.
+    attributes
+        Attribute specs assigned to this group. Default is an empty list.
+    """
 
     name: str
     grain: list[str]
@@ -23,8 +36,26 @@ def auto_group_attributes(
     """Place each attribute in a group where grains are chain-compatible.
 
     Two grains are compatible if one dimension set is a subset of the other.
-    When an attribute fits an existing group, the group's grain becomes the union
-    of dimensions (document §10.3).
+    When an attribute fits an existing group, the group's grain becomes the
+    union of dimensions (document section 10.3).
+
+    Parameters
+    ----------
+    entity_grain
+        Identity columns for the entity base table.
+    attributes
+        Attribute specs to cluster.
+
+    Returns
+    -------
+    list of GrainGroup
+        Groups with chain-compatible grains, sorted by insertion order.
+
+    Raises
+    ------
+    ValueError
+        If any attribute's resolved grain does not contain all entity
+        grain columns.
     """
     if not attributes:
         return []

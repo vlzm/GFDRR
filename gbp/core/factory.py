@@ -62,31 +62,51 @@ def make_raw_model(
     """Create a valid ``RawModelData`` from minimal inputs.
 
     Auto-generates:
-    - ``planning_horizon`` + ``planning_horizon_segments`` + ``periods`` from date range
+
+    - ``planning_horizon`` + ``planning_horizon_segments`` + ``periods``
+      from date range
     - ``facility_roles`` from ``facility_type`` using ``DEFAULT_ROLES``
     - ``facility_operations`` with all operations enabled per facility
     - ``edge_rules``: all-to-all ROAD if not provided
 
-    Args:
-        facilities: Must have ``facility_id``, ``facility_type``, ``name``.
-        commodity_categories: Must have ``commodity_category_id``, ``name``, ``unit``.
-        resource_categories: Must have ``resource_category_id``, ``name``,
-            ``base_capacity``.
-        planning_start: First day of the planning horizon (inclusive).
-        planning_end: Last day of the planning horizon (exclusive).
-        period_type: Period granularity (``"day"``, ``"week"``, ``"month"``).
-        edge_rules: Custom edge rules. If *None*, a single all-to-all ROAD rule is used.
-        demand: Optional demand table.
-        supply: Optional supply table.
-        attributes: Pre-populated ``AttributeRegistry`` for parametric data.
-        **extra_tables: Any additional tables to pass through to ``RawModelData``
-            (e.g. ``inventory_initial``, ``edges``).
+    Parameters
+    ----------
+    facilities
+        Must have ``facility_id``, ``facility_type``, ``name``.
+    commodity_categories
+        Must have ``commodity_category_id``, ``name``, ``unit``.
+    resource_categories
+        Must have ``resource_category_id``, ``name``,
+        ``base_capacity``.
+    planning_start
+        First day of the planning horizon (inclusive).
+    planning_end
+        Last day of the planning horizon (exclusive).
+    period_type
+        Period granularity (``"day"``, ``"week"``, ``"month"``).
+        Default is ``"day"``.
+    edge_rules
+        Custom edge rules. If not provided, a single all-to-all
+        ROAD rule is used.
+    demand
+        Optional demand table.
+    supply
+        Optional supply table.
+    attributes
+        Pre-populated ``AttributeRegistry`` for parametric data.
+    **extra_tables
+        Any additional tables to pass through to ``RawModelData``
+        (e.g. ``inventory_initial``, ``edges``).
 
-    Returns:
-        A validated ``RawModelData`` instance ready for ``build_model()``.
+    Returns
+    -------
+    RawModelData
+        A validated instance ready for ``build_model()``.
 
-    Raises:
-        ValueError: If validation of the assembled model fails.
+    Raises
+    ------
+    ValueError
+        If validation of the assembled model fails.
     """
     temporal = _generate_temporal(planning_start, planning_end, period_type)
     facility_roles = _generate_facility_roles(facilities)

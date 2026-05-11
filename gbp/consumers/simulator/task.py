@@ -36,6 +36,11 @@ class Task(Protocol):
     the ``DispatchPhase`` will auto-assign available resources.
     ``arrival_period`` should be computed by the Task from lead times
     in resolved data.
+
+    Attributes
+    ----------
+    name : str
+        Unique task name used in phase naming and logging.
     """
 
     name: str
@@ -48,8 +53,21 @@ class Task(Protocol):
     ) -> pd.DataFrame:
         """Execute the task and return a dispatches DataFrame.
 
-        Columns: source_id, target_id, commodity_category, quantity,
-        resource_id (nullable), modal_type (nullable),
-        arrival_period (int, computed from lead times).
+        Parameters
+        ----------
+        state
+            Current simulation state.
+        resolved
+            Resolved model data.
+        period
+            Current period descriptor.
+
+        Returns
+        -------
+        pd.DataFrame
+            Dispatches with columns: source_id, target_id,
+            commodity_category, quantity, resource_id (nullable),
+            modal_type (nullable), arrival_period (int, computed from
+            lead times).
         """
         ...

@@ -48,11 +48,23 @@ RESOURCE_CATEGORY = "rebalancing_truck"
 
 
 def _nonempty_df(source: BikeShareSourceProtocol, attr: str) -> pd.DataFrame | None:
-    """Return ``getattr(source, attr)`` if it exists and is a non-empty DataFrame.
+    """Return ``getattr(source, attr)`` if it is a non-empty DataFrame.
 
     Optional source tables are allowed to be ``None`` *or* missing entirely;
     empty DataFrames are treated as "no rows" and collapsed to ``None`` so
     downstream code can use a single ``is None`` check.
+
+    Parameters
+    ----------
+    source
+        Data source implementing ``BikeShareSourceProtocol``.
+    attr
+        Attribute name to look up on *source*.
+
+    Returns
+    -------
+    pd.DataFrame or None
+        The DataFrame when present and non-empty, otherwise ``None``.
     """
     val = getattr(source, attr, None)
     if val is None:
@@ -67,6 +79,7 @@ def _nonempty_df(source: BikeShareSourceProtocol, attr: str) -> pd.DataFrame | N
 # ---------------------------------------------------------------------------
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Compute great-circle distance between two points in kilometres."""
     rlat1, rlon1 = math.radians(lat1), math.radians(lon1)
     rlat2, rlon2 = math.radians(lat2), math.radians(lon2)
     dlat, dlon = rlat2 - rlat1, rlon2 - rlon1
@@ -75,6 +88,7 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _euclidean_latlon_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Compute approximate Euclidean distance between two lat/lon points in kilometres."""
     km_per_deg_lat = 111.0
     km_per_deg_lon = 111.0 * math.cos(math.radians((lat1 + lat2) / 2))
     dx = (lon2 - lon1) * km_per_deg_lon
@@ -85,6 +99,7 @@ def _euclidean_latlon_km(lat1: float, lon1: float, lat2: float, lon2: float) -> 
 def _pair_distance_km(
     lat1: float, lon1: float, lat2: float, lon2: float, backend: str,
 ) -> float:
+    """Dispatch pairwise distance calculation to the chosen backend."""
     if backend == "euclidean":
         return _euclidean_latlon_km(lat1, lon1, lat2, lon2)
     return _haversine_km(lat1, lon1, lat2, lon2)
@@ -96,6 +111,7 @@ def _pair_distance_km(
 
 class _EntityResult(NamedTuple):
     """Intermediate result from ``_build_entities`` used by downstream builders."""
+
     tables: dict[str, pd.DataFrame]
     station_ids: list[str]
     depot_ids: list[str]
@@ -108,8 +124,16 @@ class _EntityResult(NamedTuple):
 class DataLoaderGraph:
     """Assemble ``RawModelData`` from a ``BikeShareSourceProtocol``.
 
-    The loader covers only the source → raw transition.  Call
+    The loader covers only the source-to-raw transition.  Call
     ``gbp.build.pipeline.build_model`` explicitly to produce the resolved model.
+
+    Parameters
+    ----------
+    source
+        Bike-sharing data source that satisfies ``BikeShareSourceProtocol``.
+    config
+        Loader configuration. When ``None``, defaults from
+        ``GraphLoaderConfig`` are used.
     """
 
     def __init__(
@@ -131,7 +155,12 @@ class DataLoaderGraph:
 
         Validation and derivation of optional tables happen later, inside
         ``build_model``.  The returned raw model is cached on the loader and
-        also accessible via the :attr:`raw` property.
+        also accessible via the ``raw`` property.
+
+        Returns
+        -------
+        RawModelData
+            Assembled raw model data.
         """
         self._log.info("load_start")
         self._source.load_data()
@@ -143,17 +172,25 @@ class DataLoaderGraph:
 
     @property
     def raw(self) -> RawModelData:
+        """Return cached ``RawModelData``.
+
+        Raises
+        ------
+        ValueError
+            If ``load()`` has not been called yet.
+        """
         if self._raw is None:
             raise ValueError("Data is not loaded. Call load() first.")
         return self._raw
 
     @property
     def available_dates(self) -> pd.DatetimeIndex:
+        """Return the timestamp index from the underlying source."""
         return self._source.timestamps
 
     @property
     def source(self) -> BikeShareSourceProtocol:
-        """Underlying data source (raw DataFrames, including non-core tables)."""
+        """Return the underlying data source (raw DataFrames, including non-core tables)."""
         return self._source
 
     # ------------------------------------------------------------------
@@ -161,7 +198,7 @@ class DataLoaderGraph:
     # ------------------------------------------------------------------
 
     def _validate_source(self) -> None:
-        """Validate source shape — required tables always, optional ones when present."""
+        """Validate source shape with Pandera schemas."""
         StationsSourceSchema.validate(self._source.df_stations)
         if self._config.build_observations:
             TripsSourceSchema.validate(self._source.df_trips)
@@ -181,7 +218,13 @@ class DataLoaderGraph:
     # ------------------------------------------------------------------
 
     def _build_raw_model(self) -> RawModelData:
-        """Assemble ``RawModelData`` from source DataFrames."""
+        """Assemble ``RawModelData`` from source DataFrames.
+
+        Returns
+        -------
+        RawModelData
+            Fully assembled (but not yet resolved) model data.
+        """
         temporal = self._build_temporal()
         entities = self._build_entities()
         behavior = self._build_behavior(entities)
@@ -212,11 +255,16 @@ class DataLoaderGraph:
         )
 
     def _build_temporal(self) -> dict[str, pd.DataFrame]:
-        """Planning horizon + single daily segment covering the source time range.
+        """Build planning horizon and single daily segment covering the source time range.
 
         Prefers ``source.timestamps`` when available.  Falls back to the date
         range of ``df_trips["started_at"]`` for minimal sources that don't carry
         an explicit timestamp index.
+
+        Returns
+        -------
+        dict[str, pd.DataFrame]
+            ``planning_horizon`` and ``planning_horizon_segments`` tables.
         """
         start_d, end_d = self._derive_horizon_dates()
 
@@ -237,10 +285,20 @@ class DataLoaderGraph:
         }
 
     def _derive_horizon_dates(self) -> tuple:
-        """Return ``(start_date, end_date)`` for the planning horizon.
+        """Derive ``(start_date, end_date)`` for the planning horizon.
 
         Uses ``source.timestamps`` when present.  Otherwise derives the span
-        from ``df_trips["started_at"]``.  Raises when neither is available.
+        from ``df_trips["started_at"]``.
+
+        Returns
+        -------
+        tuple
+            ``(start_date, end_date)`` as ``datetime.date`` objects.
+
+        Raises
+        ------
+        ValueError
+            If neither ``timestamps`` nor ``df_trips["started_at"]`` is available.
         """
         ts = getattr(self._source, "timestamps", None)
         if ts is not None and len(ts) > 0:
@@ -261,11 +319,16 @@ class DataLoaderGraph:
         )
 
     def _build_entities(self) -> _EntityResult:
-        """Facilities + commodity/resource categories from the source.
+        """Build facilities and commodity/resource categories from the source.
 
         Depots, resource categories, and explicit commodities are all optional.
         When absent, the loader either emits a default placeholder or leaves
         the table out entirely for ``build_model`` to derive.
+
+        Returns
+        -------
+        _EntityResult
+            Intermediate carrier with tables, station ids, and depot ids.
         """
         stations = self._source.df_stations
         fac_stations = pd.DataFrame({
@@ -322,8 +385,13 @@ class DataLoaderGraph:
     def _commodity_categories(self) -> tuple[str, ...]:
         """Discover commodity categories from ``df_trips.rideable_type`` if present.
 
-        Returns a tuple of category ids.  Falls back to a single
-        ``DEFAULT_COMMODITY_CATEGORY_ID`` when trips carry no explicit type.
+        Falls back to a single ``DEFAULT_COMMODITY_CATEGORY_ID`` when trips
+        carry no explicit type.
+
+        Returns
+        -------
+        tuple[str, ...]
+            Sorted tuple of commodity category identifiers.
         """
         trips = _nonempty_df(self._source, "df_trips")
         if trips is not None and "rideable_type" in trips.columns:
@@ -335,14 +403,24 @@ class DataLoaderGraph:
         return (DEFAULT_COMMODITY_CATEGORY_ID,)
 
     def _build_behavior(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
-        """Facility operations and edge generation rules.
+        """Build facility operations and edge generation rules.
 
         Roles are derived by ``build_model`` from ``(facility_type, operations)``
-        via :func:`gbp.core.roles.derive_roles`; the loader intentionally does
+        via ``gbp.core.roles.derive_roles``; the loader intentionally does
         not emit a ``facility_roles`` table.
 
-        Edge rules cover ``station↔station`` always; depot pairs are only
+        Edge rules cover station-to-station always; depot pairs are only
         emitted when the source actually has depots.
+
+        Parameters
+        ----------
+        entities
+            Intermediate entity result from ``_build_entities``.
+
+        Returns
+        -------
+        dict[str, pd.DataFrame]
+            ``facility_operations`` and ``edge_rules`` tables.
         """
         op_rows: list[dict] = []
 
@@ -395,7 +473,18 @@ class DataLoaderGraph:
         }
 
     def _build_distance_matrix(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
-        """All-pairs pairwise distances and travel durations between facilities."""
+        """Compute all-pairs pairwise distances and travel durations between facilities.
+
+        Parameters
+        ----------
+        entities
+            Intermediate entity result from ``_build_entities``.
+
+        Returns
+        -------
+        dict[str, pd.DataFrame]
+            Single-key dict with the ``distance_matrix`` table.
+        """
         facilities = entities.tables["facilities"]
         latlon = {
             str(r["facility_id"]): (float(r["lat"]), float(r["lon"]))
@@ -426,13 +515,25 @@ class DataLoaderGraph:
         self,
         registry: AttributeRegistry,
     ) -> dict[str, pd.DataFrame]:
-        """Initial inventory and storage capacities — both optional in minimal mode.
+        """Build initial inventory and register storage capacity attributes.
+
+        Both are optional in minimal mode:
 
         - ``inventory_initial`` is taken directly from the source when present.
           Otherwise ``build_model`` seeds it from observed flow (or leaves it
           empty if flow is also absent).
         - Storage capacity attributes are registered only when the source has
           station / depot capacities.
+
+        Parameters
+        ----------
+        registry
+            Attribute registry where capacity attributes are registered.
+
+        Returns
+        -------
+        dict[str, pd.DataFrame]
+            May contain ``inventory_initial``; empty dict when absent.
         """
         result: dict[str, pd.DataFrame] = {}
 
@@ -483,6 +584,13 @@ class DataLoaderGraph:
 
         Costs are per-day; the horizon is taken from ``planning_horizon`` so
         this works even for minimal sources without ``timestamps``.
+
+        Parameters
+        ----------
+        registry
+            Attribute registry to register costs into.
+        temporal
+            Dict containing the ``planning_horizon`` table.
         """
         station_costs = _nonempty_df(self._source, "df_station_costs")
         depot_costs = _nonempty_df(self._source, "df_depot_costs")
@@ -528,10 +636,20 @@ class DataLoaderGraph:
             )
 
     def _build_resources(self, entities: _EntityResult) -> dict[str, pd.DataFrame | None]:
-        """Resource fleet and compatibility tables.
+        """Build resource fleet and compatibility tables.
 
         Skipped entirely when the source has no depots (no home for the fleet)
-        or no ``df_resources`` — returns ``{}`` in that case.
+        or no ``df_resources`` -- returns ``{}`` in that case.
+
+        Parameters
+        ----------
+        entities
+            Intermediate entity result from ``_build_entities``.
+
+        Returns
+        -------
+        dict[str, pd.DataFrame | None]
+            Resource-related tables or empty dict when not applicable.
         """
         if not entities.depot_ids:
             return {}
@@ -587,7 +705,18 @@ class DataLoaderGraph:
         registry: AttributeRegistry,
         entities: _EntityResult,
     ) -> None:
-        """Register per-resource cost attributes (cost_per_km, cost_per_hour, fixed_dispatch)."""
+        """Register per-resource cost attributes in the attribute registry.
+
+        Registers ``resource_cost_per_km``, ``resource_cost_per_hour``, and
+        ``resource_fixed_dispatch`` when the source provides truck rates.
+
+        Parameters
+        ----------
+        registry
+            Attribute registry to register costs into.
+        entities
+            Intermediate entity result from ``_build_entities``.
+        """
         if not entities.depot_ids:
             return
         tr = _nonempty_df(self._source, "df_truck_rates")
@@ -627,11 +756,21 @@ class DataLoaderGraph:
     def _build_observations(
         self, entities: _EntityResult,
     ) -> dict[str, pd.DataFrame | None]:
-        """Map trips → observed_flow and telemetry → observed_inventory.
+        """Map trips to ``observed_flow`` and telemetry to ``observed_inventory``.
 
         When trips carry no ``rideable_type`` column, the flow is labelled
         with ``DEFAULT_COMMODITY_CATEGORY_ID`` so it lines up with the default
         single-category table emitted by ``_build_entities``.
+
+        Parameters
+        ----------
+        entities
+            Intermediate entity result from ``_build_entities``.
+
+        Returns
+        -------
+        dict[str, pd.DataFrame | None]
+            ``observed_flow`` and ``observed_inventory`` (either may be ``None``).
         """
         known_ids = set(entities.station_ids) | set(entities.depot_ids)
         result: dict[str, pd.DataFrame | None] = {}

@@ -157,13 +157,17 @@ INVARIANT_VIOLATION_LOG_COLUMNS: list[str] = [
 class LogTableSchema:
     """Metadata for one log table.
 
-    Attributes:
-        short_name: Key used by phases in ``PhaseResult.events`` and by
-            :meth:`SimulationLog.record_period` for snapshot tables.
-        output_key: Final key used by :meth:`SimulationLog.to_dataframes`.
-        columns: Canonical column order for the output DataFrame.  When
-            ``"phase_name"`` appears here, the record loop tags rows with
-            the emitting phase's name; otherwise it does not.
+    Attributes
+    ----------
+    short_name : str
+        Key used by phases in ``PhaseResult.events`` and by
+        :meth:`SimulationLog.record_period` for snapshot tables.
+    output_key : str
+        Final key used by :meth:`SimulationLog.to_dataframes`.
+    columns : list[str]
+        Canonical column order for the output DataFrame.  When
+        ``"phase_name"`` appears here, the record loop tags rows with
+        the emitting phase's name; otherwise it does not.
     """
 
     short_name: str
@@ -236,7 +240,15 @@ class SimulationLog:
     # -- Recording helpers -----------------------------------------------------
 
     def record_period(self, state: SimulationState, period: PeriodRow) -> None:
-        """Snapshot end-of-period inventory and resources."""
+        """Snapshot end-of-period inventory and resources.
+
+        Parameters
+        ----------
+        state
+            Current simulation state to snapshot.
+        period
+            Period descriptor for timestamp annotation.
+        """
         self._record("inventory", state.inventory, period, phase_name=None)
         self._record("resource", state.resources, period, phase_name=None)
 
@@ -246,7 +258,17 @@ class SimulationLog:
         phase_name: str,
         period: PeriodRow,
     ) -> None:
-        """Route a phase's emitted events into the matching log buckets."""
+        """Route a phase's emitted events into the matching log buckets.
+
+        Parameters
+        ----------
+        result
+            Phase execution result containing event DataFrames.
+        phase_name
+            Name of the emitting phase, used to tag rows.
+        period
+            Period descriptor for timestamp annotation.
+        """
         for short_name, df in result.events.items():
             self._record(short_name, df, period, phase_name=phase_name)
 
@@ -261,6 +283,22 @@ class SimulationLog:
 
         Skips silently when *df* is empty.  Raises ``KeyError`` for unknown
         short names so typos in phase code surface immediately.
+
+        Parameters
+        ----------
+        short_name
+            Registry key identifying the target log table.
+        df
+            Event rows to store.
+        period
+            Period descriptor for timestamp annotation.
+        phase_name
+            Name of the emitting phase, or ``None`` for snapshot tables.
+
+        Raises
+        ------
+        KeyError
+            If *short_name* is not found in the log table registry.
         """
         if df is None or df.empty:
             return
@@ -284,7 +322,9 @@ class SimulationLog:
     def to_dataframes(self) -> dict[str, pd.DataFrame]:
         """Concatenate all per-period buckets into final DataFrames.
 
-        Returns:
+        Returns
+        -------
+        dict[str, pd.DataFrame]
             Dictionary keyed by each table's ``output_key`` (e.g.
             ``simulation_flow_log``).  Empty buckets produce empty DataFrames
             with the canonical column order from the registry.
@@ -301,7 +341,21 @@ def _concat_or_empty(
     frames: list[pd.DataFrame],
     columns: list[str],
 ) -> pd.DataFrame:
-    """Concatenate a list of DataFrames; return empty with correct columns if empty."""
+    """Concatenate a list of DataFrames; return empty with correct columns if empty.
+
+    Parameters
+    ----------
+    frames
+        List of DataFrames to concatenate.
+    columns
+        Canonical column order for the output.
+
+    Returns
+    -------
+    pd.DataFrame
+        Concatenated result, or an empty DataFrame with *columns* when
+        *frames* is empty.
+    """
     if not frames:
         return pd.DataFrame(columns=columns)
     result = pd.concat(frames, ignore_index=True)

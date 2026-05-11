@@ -30,20 +30,26 @@ if TYPE_CHECKING:
 class PhaseResult:
     """Output of a single phase execution.
 
-    Attributes:
-        state: Updated simulation state after the phase.
-        events: Mapping of event-table short name to the rows produced by this
-            phase.  Each key must match a registered log table (see
-            ``gbp.consumers.simulator.log.LOG_TABLES``).  Empty or missing
-            entries are skipped by ``SimulationLog.record_events``.
+    Attributes
+    ----------
+    state : SimulationState
+        Updated simulation state after the phase.
+    events : dict[str, pd.DataFrame]
+        Mapping of event-table short name to the rows produced by this
+        phase.  Each key must match a registered log table (see
+        ``gbp.consumers.simulator.log.LOG_TABLES``).  Empty or missing
+        entries are skipped by ``SimulationLog.record_events``.
 
-    Common keys:
-        - ``"flow_events"``        — commodity movements (-> simulation_flow_log)
-        - ``"unmet_demand"``       — demand not fulfilled by inventory
-        - ``"rejected_dispatches"`` — dispatches rejected during validation
-        - ``"latent_demand"``      — origin/destination marginals
-        - ``"lost_demand"``        — gap between latent and realised departures
-        - ``"dock_blocking"``      — arrivals refused over storage capacity
+    Notes
+    -----
+    Common event keys:
+
+    - ``"flow_events"``        — commodity movements (-> simulation_flow_log)
+    - ``"unmet_demand"``       — demand not fulfilled by inventory
+    - ``"rejected_dispatches"`` — dispatches rejected during validation
+    - ``"latent_demand"``      — origin/destination marginals
+    - ``"lost_demand"``        — gap between latent and realised departures
+    - ``"dock_blocking"``      — arrivals refused over storage capacity
     """
 
     state: SimulationState
@@ -51,7 +57,18 @@ class PhaseResult:
 
     @classmethod
     def empty(cls, state: SimulationState) -> PhaseResult:
-        """Create a no-op result that passes the state through unchanged."""
+        """Create a no-op result that passes the state through unchanged.
+
+        Parameters
+        ----------
+        state
+            Simulation state to pass through.
+
+        Returns
+        -------
+        PhaseResult
+            Result with the given state and no events.
+        """
         return cls(state=state)
 
     def event(self, name: str) -> pd.DataFrame:
@@ -59,6 +76,16 @@ class PhaseResult:
 
         Convenience for callers and tests that want a single-line check.
         Does not enforce schema; the log layer validates against the registry.
+
+        Parameters
+        ----------
+        name
+            Event-table short name to look up.
+
+        Returns
+        -------
+        pd.DataFrame
+            The event DataFrame, or an empty DataFrame if *name* is absent.
         """
         df = self.events.get(name)
         return df if df is not None else pd.DataFrame()
@@ -69,41 +96,80 @@ class PhaseResult:
 
 @dataclass(frozen=True)
 class Schedule:
-    """Determines in which periods a phase should run.
+    """Determine in which periods a phase should run.
 
     Uses a callable predicate for maximum flexibility.  Convenience
     constructors cover common patterns.
 
-    Attributes:
-        predicate: Function ``(PeriodRow) -> bool``.
+    Attributes
+    ----------
+    predicate : Callable[[PeriodRow], bool]
+        Function ``(PeriodRow) -> bool``.
     """
 
     predicate: Callable[[PeriodRow], bool]
 
     def should_run(self, period: PeriodRow) -> bool:
-        """Return whether the phase should execute in *period*."""
+        """Return whether the phase should execute in *period*.
+
+        Parameters
+        ----------
+        period
+            Period descriptor to evaluate.
+
+        Returns
+        -------
+        bool
+            ``True`` if the phase should execute in *period*.
+        """
         return self.predicate(period)
 
     # -- Convenience constructors ----------------------------------------------
 
     @staticmethod
     def every() -> Schedule:
-        """Run every period."""
+        """Run every period.
+
+        Returns
+        -------
+        Schedule
+            A schedule that fires every period.
+        """
         return Schedule(predicate=lambda _p: True)
 
     @staticmethod
     def every_n(n: int, offset: int = 0) -> Schedule:
         """Run every *n*-th period, starting from *offset*.
 
-        Args:
-            n: Interval between executions.
-            offset: First period index to execute on (modulo *n*).
+        Parameters
+        ----------
+        n
+            Interval between executions.
+        offset
+            First period index to execute on (modulo *n*).  Defaults to ``0``.
+
+        Returns
+        -------
+        Schedule
+            A schedule that fires every *n*-th period.
         """
         return Schedule(predicate=lambda p: p.period_index % n == offset)
 
     @staticmethod
     def custom(predicate: Callable[[PeriodRow], bool]) -> Schedule:
-        """Run when *predicate* returns ``True``."""
+        """Run when *predicate* returns ``True``.
+
+        Parameters
+        ----------
+        predicate
+            Callable that receives a ``PeriodRow`` and returns ``True``
+            when the phase should fire.
+
+        Returns
+        -------
+        Schedule
+            A schedule driven by the given predicate.
+        """
         return Schedule(predicate=predicate)
 
 
@@ -112,12 +178,29 @@ class Schedule:
 
 @runtime_checkable
 class Phase(Protocol):
-    """Contract for a logical operation within a simulation period."""
+    """Contract for a logical operation within a simulation period.
+
+    Attributes
+    ----------
+    name : str
+        Unique phase name used in logging and dispatch naming.
+    """
 
     name: str
 
     def should_run(self, period: PeriodRow) -> bool:
-        """Whether this phase should execute in the given period."""
+        """Return whether this phase should execute in the given period.
+
+        Parameters
+        ----------
+        period
+            Period descriptor to evaluate.
+
+        Returns
+        -------
+        bool
+            ``True`` if the phase should execute.
+        """
         ...
 
     def execute(
@@ -126,5 +209,20 @@ class Phase(Protocol):
         resolved: ResolvedModelData,
         period: PeriodRow,
     ) -> PhaseResult:
-        """Execute the phase logic and return updated state + events."""
+        """Execute the phase logic and return updated state and events.
+
+        Parameters
+        ----------
+        state
+            Current simulation state.
+        resolved
+            Resolved model data.
+        period
+            Current period descriptor.
+
+        Returns
+        -------
+        PhaseResult
+            Updated state and any emitted event DataFrames.
+        """
         ...

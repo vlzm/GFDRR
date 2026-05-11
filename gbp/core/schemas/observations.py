@@ -1,4 +1,4 @@
-"""Observed flow and inventory row schemas (historical data)."""
+"""Define observed flow and inventory row schemas (historical data)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ObservedFlow(BaseModel):
-    """Historical commodity movement between facilities (raw date).
+    """Represent historical commodity movement between facilities (raw date).
 
     The optional ``duration_hours`` carries the absolute trip duration in hours
     used by the historical-replay pipeline to compute the arrival period
@@ -30,7 +30,7 @@ class ObservedFlow(BaseModel):
 
 
 class ObservedInventory(BaseModel):
-    """Historical inventory snapshot at a facility (raw date)."""
+    """Represent a historical inventory snapshot at a facility (raw date)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

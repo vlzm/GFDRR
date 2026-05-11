@@ -1,4 +1,4 @@
-"""N-to-M commodity transformation row schemas."""
+"""Define N-to-M commodity transformation row schemas."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Transformation(BaseModel):
-    """One transformation process at a facility."""
+    """Represent one transformation process at a facility."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -19,7 +19,7 @@ class Transformation(BaseModel):
 
 
 class TransformationInput(BaseModel):
-    """Input commodity ratio for one transformation cycle."""
+    """Represent input commodity ratio for one transformation cycle."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -29,7 +29,7 @@ class TransformationInput(BaseModel):
 
 
 class TransformationOutput(BaseModel):
-    """Output commodity ratio for one transformation cycle."""
+    """Represent output commodity ratio for one transformation cycle."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

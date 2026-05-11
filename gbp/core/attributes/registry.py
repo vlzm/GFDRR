@@ -1,4 +1,4 @@
-"""AttributeRegistry: central API for registering parametric attributes."""
+"""Central API for registering parametric attributes."""
 
 from __future__ import annotations
 
@@ -15,17 +15,25 @@ from gbp.core.enums import AttributeKind
 
 @dataclass(frozen=True)
 class RegisteredAttribute:
-    """Attribute spec paired with its data — stored together."""
+    """Pair an attribute spec with its data for joint storage.
+
+    Parameters
+    ----------
+    spec
+        Attribute specification.
+    data
+        DataFrame holding the attribute values.
+    """
 
     spec: AttributeSpec
     data: pd.DataFrame
 
 
 class AttributeRegistry:
-    """Registry of parametric attributes for a model.
+    """Provide a central API for parametric attribute registration.
 
-    Central API for adding, validating, and retrieving parameter tables
-    with their grain definitions.
+    Store, validate, and retrieve parameter tables together with their
+    grain definitions.
     """
 
     def __init__(self) -> None:
@@ -49,11 +57,40 @@ class AttributeRegistry:
     ) -> None:
         """Register a parametric attribute with its data and grain.
 
-        Validates grain columns are present in *data*, value column exists,
-        and numeric values satisfy kind constraints (COST >= 0, CAPACITY > 0).
+        Validate that grain columns are present in *data*, value column
+        exists, and numeric values satisfy kind constraints (COST >= 0,
+        CAPACITY > 0).
 
-        Raises:
-            ValueError: on validation failure.
+        Parameters
+        ----------
+        name
+            Unique attribute name.
+        data
+            DataFrame containing the attribute values and grain columns.
+        entity_type
+            One of ``"facility"``, ``"edge"``, ``"resource"``.
+        kind
+            Semantic kind (cost, capacity, rate, revenue, additional).
+        grain
+            Raw grain column names (use ``"date"`` for time-varying).
+        value_column
+            Column in *data* holding the attribute value.
+        aggregation
+            Aggregation function name. Default is ``"mean"``.
+        unit
+            Physical unit string. Default is ``None``.
+        nullable
+            Whether missing values are allowed. Default is ``True``.
+        eav_filter
+            Column-value pairs for EAV-style row filtering. Default is
+            ``None``.
+
+        Raises
+        ------
+        ValueError
+            If *name* is already registered, required columns are missing
+            from *data*, numeric constraints are violated, or *data* is
+            empty with ``nullable=False``.
         """
         if name in self._attributes:
             raise ValueError(
@@ -100,52 +137,130 @@ class AttributeRegistry:
         self._attributes[name] = RegisteredAttribute(spec=spec, data=data)
 
     def register_raw(self, spec: AttributeSpec, data: pd.DataFrame) -> None:
-        """Register with a pre-built spec (used for resolved / deserialized data)."""
+        """Register with a pre-built spec.
+
+        Intended for resolved or deserialized data that already has a
+        fully constructed ``AttributeSpec``.
+
+        Parameters
+        ----------
+        spec
+            Pre-built attribute specification.
+        data
+            DataFrame holding the attribute values.
+        """
         self._attributes[spec.name] = RegisteredAttribute(spec=spec, data=data)
 
     # ── lookup ────────────────────────────────────────────────────────
 
     def get(self, name: str) -> RegisteredAttribute:
-        """Get attribute by name. Raises ``KeyError`` if not found."""
+        """Return attribute by name.
+
+        Parameters
+        ----------
+        name
+            Registered attribute name.
+
+        Returns
+        -------
+        RegisteredAttribute
+            Spec and data pair.
+
+        Raises
+        ------
+        KeyError
+            If *name* is not registered.
+        """
         return self._attributes[name]
 
     def get_by_entity(self, entity_type: str) -> list[RegisteredAttribute]:
-        """All attributes for a given entity type."""
+        """Return all attributes for a given entity type.
+
+        Parameters
+        ----------
+        entity_type
+            Entity kind to filter by.
+
+        Returns
+        -------
+        list of RegisteredAttribute
+            Matching attributes (may be empty).
+        """
         return [a for a in self._attributes.values() if a.spec.entity_type == entity_type]
 
     def get_by_kind(self, kind: AttributeKind) -> list[RegisteredAttribute]:
-        """All attributes of a given kind (e.g. all COSTs)."""
+        """Return all attributes of a given kind.
+
+        Parameters
+        ----------
+        kind
+            Attribute kind to filter by (e.g. ``AttributeKind.COST``).
+
+        Returns
+        -------
+        list of RegisteredAttribute
+            Matching attributes (may be empty).
+        """
         return [a for a in self._attributes.values() if a.spec.kind == kind]
 
     # ── properties ────────────────────────────────────────────────────
 
     @property
     def specs(self) -> list[AttributeSpec]:
-        """All registered specs (for build pipeline)."""
+        """Return all registered specs.
+
+        Returns
+        -------
+        list of AttributeSpec
+            Specs in insertion order, suitable for the build pipeline.
+        """
         return [a.spec for a in self._attributes.values()]
 
     @property
     def names(self) -> list[str]:
-        """All registered attribute names."""
+        """Return all registered attribute names.
+
+        Returns
+        -------
+        list of str
+            Names in insertion order.
+        """
         return list(self._attributes.keys())
 
     def __len__(self) -> int:
+        """Return the number of registered attributes."""
         return len(self._attributes)
 
     def __contains__(self, name: str) -> bool:
+        """Check whether *name* is registered."""
         return name in self._attributes
 
     def __bool__(self) -> bool:
+        """Return ``True`` if any attributes are registered."""
         return bool(self._attributes)
 
     # ── serialization helpers ─────────────────────────────────────────
 
     def to_dict(self) -> dict[str, pd.DataFrame]:
-        """All attribute data as ``{name: DataFrame}``."""
+        """Return all attribute data as a name-to-DataFrame mapping.
+
+        Returns
+        -------
+        dict of str to pd.DataFrame
+            Attribute data keyed by name.
+        """
         return {name: a.data for name, a in self._attributes.items()}
 
     def copy(self) -> AttributeRegistry:
-        """Shallow copy — specs are frozen, DataFrames are shared."""
+        """Return a shallow copy of the registry.
+
+        Specs are frozen dataclasses; DataFrames are shared, not copied.
+
+        Returns
+        -------
+        AttributeRegistry
+            New registry with the same entries.
+        """
         new = AttributeRegistry()
         new._attributes = dict(self._attributes)
         return new
@@ -153,7 +268,14 @@ class AttributeRegistry:
     # ── display ───────────────────────────────────────────────────────
 
     def summary(self) -> str:
-        """Human-readable summary of registered attributes."""
+        """Return a human-readable summary of registered attributes.
+
+        Returns
+        -------
+        str
+            Multi-line summary with one line per attribute showing row
+            count, entity type, kind, and grain.
+        """
         if not self._attributes:
             return "  (no attributes registered)"
         lines: list[str] = []
@@ -168,4 +290,5 @@ class AttributeRegistry:
         return "\n".join(lines)
 
     def __repr__(self) -> str:
+        """Return developer-friendly string representation."""
         return f"AttributeRegistry({len(self._attributes)} attributes)"

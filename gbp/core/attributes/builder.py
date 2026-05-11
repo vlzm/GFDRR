@@ -1,4 +1,4 @@
-"""AttributeBuilder: assemble spine tables from base entities and attribute DataFrames."""
+"""Assemble spine tables from base entities and attribute DataFrames."""
 
 from __future__ import annotations
 
@@ -11,7 +11,21 @@ from gbp.core.enums import AttributeKind
 
 
 def _validate_numeric_series(spec: AttributeSpec, series: pd.Series) -> None:
-    """Raise ``ValueError`` if values violate kind constraints."""
+    """Raise ``ValueError`` if values violate kind constraints.
+
+    Parameters
+    ----------
+    spec
+        Attribute specification whose ``kind`` determines constraints.
+    series
+        Value series to validate.
+
+    Raises
+    ------
+    ValueError
+        If all non-null values fail numeric coercion, COST/REVENUE/RATE
+        values are negative, or CAPACITY values are non-positive.
+    """
     if series.empty:
         return
     # Distinguish "all values are None/NaN" (legitimate for nullable) from
@@ -42,6 +56,20 @@ def _validate_numeric_series(spec: AttributeSpec, series: pd.Series) -> None:
 
 
 def _validate_grain_columns(spec: AttributeSpec, df: pd.DataFrame) -> None:
+    """Verify that *df* contains all grain and value columns required by *spec*.
+
+    Parameters
+    ----------
+    spec
+        Attribute specification defining required columns.
+    df
+        DataFrame to check.
+
+    Raises
+    ------
+    ValueError
+        If any required column is missing from *df*.
+    """
     need = list(spec.resolved_merge_grain()) + [spec.value_column]
     missing = [c for c in need if c not in df.columns]
     if missing:
@@ -51,7 +79,28 @@ def _validate_grain_columns(spec: AttributeSpec, df: pd.DataFrame) -> None:
 
 
 def _prepare_attribute_frame(spec: AttributeSpec, df: pd.DataFrame) -> pd.DataFrame:
-    """Filter EAV rows and select merge columns with output named ``spec.name``."""
+    """Filter EAV rows and select merge columns with output named ``spec.name``.
+
+    Parameters
+    ----------
+    spec
+        Attribute specification controlling EAV filtering, grain selection,
+        and numeric validation.
+    df
+        Raw attribute data.
+
+    Returns
+    -------
+    pd.DataFrame
+        Deduplicated frame with grain columns and the value column renamed
+        to ``spec.name``. May be empty if the EAV filter eliminates all rows.
+
+    Raises
+    ------
+    ValueError
+        If an ``eav_filter`` key is not present in *df* columns, or if
+        required grain/value columns are missing.
+    """
     out = df.copy()
     if spec.eav_filter:
         for col, val in spec.eav_filter.items():
@@ -71,10 +120,21 @@ def _prepare_attribute_frame(spec: AttributeSpec, df: pd.DataFrame) -> pd.DataFr
 
 
 class AttributeBuilder:
-    """Registers ``AttributeSpec`` rows and builds one spine per grain group."""
+    """Register ``AttributeSpec`` rows and build one spine per grain group.
 
-    def __init__(self, entity_type: str) -> None:
-        """Create a builder for one entity kind (``facility``, ``edge``, or ``resource``)."""
+    Parameters
+    ----------
+    entity_type
+        Entity kind this builder accepts: ``"facility"``, ``"edge"``,
+        or ``"resource"``.
+
+    Raises
+    ------
+    ValueError
+        If *entity_type* is not one of the known entity kinds.
+    """
+
+    def __init__(self, entity_type: str) -> None:  # noqa: D107
         if entity_type not in _ENTITY_GRAINS:
             raise ValueError(
                 f"entity_type must be one of {sorted(_ENTITY_GRAINS)}, got {entity_type!r}"
@@ -85,16 +145,40 @@ class AttributeBuilder:
 
     @property
     def entity_type(self) -> str:
-        """Entity kind this builder accepts (``facility``, ``edge``, ``resource``)."""
+        """Return entity kind this builder accepts.
+
+        Returns
+        -------
+        str
+            One of ``"facility"``, ``"edge"``, ``"resource"``.
+        """
         return self._entity_type
 
     @property
     def entity_grain(self) -> list[str]:
-        """Identity column names for the entity base table."""
+        """Return identity column names for the entity base table.
+
+        Returns
+        -------
+        list of str
+            Copy of the entity grain column names.
+        """
         return list(self._entity_grain)
 
     def register(self, spec: AttributeSpec) -> None:
-        """Register a spec; must match this builder's entity type and grains."""
+        """Register a spec; must match this builder's entity type and grains.
+
+        Parameters
+        ----------
+        spec
+            Attribute specification to add.
+
+        Raises
+        ------
+        ValueError
+            If *spec.entity_type* or *spec.entity_grain* does not match
+            this builder.
+        """
         if spec.entity_type != self._entity_type:
             raise ValueError(
                 f"Spec {spec.name!r} has entity_type={spec.entity_type!r}, "
@@ -113,7 +197,26 @@ class AttributeBuilder:
         base_df: pd.DataFrame,
         attribute_data: dict[str, pd.DataFrame],
     ) -> dict[str, pd.DataFrame]:
-        """Return mapping ``group_name`` -> spine DataFrame."""
+        """Build one spine DataFrame per grain group.
+
+        Parameters
+        ----------
+        base_df
+            Entity base table containing at least the entity grain columns.
+        attribute_data
+            Mapping from attribute name to its raw data DataFrame.
+
+        Returns
+        -------
+        dict of str to pd.DataFrame
+            Mapping from group name to the assembled spine DataFrame.
+
+        Raises
+        ------
+        ValueError
+            If *base_df* is missing entity grain columns, required attribute
+            data is absent, or merge keys cannot be resolved.
+        """
         if not self._attributes:
             return {}
 

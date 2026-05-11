@@ -29,10 +29,14 @@ def period_duration_hours(resolved: ResolvedModelData) -> float:
     ``1.0`` when the period table is too small (fewer than two rows) or
     when the dates cannot be subtracted.
 
-    Args:
-        resolved: A built model carrying a ``periods`` DataFrame.
+    Parameters
+    ----------
+    resolved
+        A built model carrying a ``periods`` DataFrame.
 
-    Returns:
+    Returns
+    -------
+    float
         Period duration in hours as a positive float.  ``1.0`` is returned
         as a safe default rather than zero so that downstream divisions
         do not raise.

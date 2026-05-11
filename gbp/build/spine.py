@@ -10,7 +10,19 @@ from gbp.core.model import ResolvedModelData
 
 
 def _normalize_resource_categories(df: pd.DataFrame) -> pd.DataFrame:
-    """Use ``resource_category`` as the FK column name for resource spines."""
+    """Normalize FK column to ``resource_category`` for resource spines.
+
+    Parameters
+    ----------
+    df
+        Resource categories DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy with ``resource_category_id`` renamed to ``resource_category``
+        if needed.
+    """
     out = df.copy()
     if "resource_category_id" in out.columns and "resource_category" not in out.columns:
         out = out.rename(columns={"resource_category_id": "resource_category"})
@@ -18,7 +30,20 @@ def _normalize_resource_categories(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _load_attribute_table(resolved: ResolvedModelData, spec: AttributeSpec) -> pd.DataFrame | None:
-    """Return a copy of the source table with resource FK naming aligned."""
+    """Return a copy of the source table with resource FK naming aligned.
+
+    Parameters
+    ----------
+    resolved
+        Resolved model data containing source tables.
+    spec
+        Attribute specification indicating which table to load.
+
+    Returns
+    -------
+    pd.DataFrame or None
+        Copy of the table, or ``None`` if missing or empty.
+    """
     df = getattr(resolved, spec.source_table, None)
     if df is None or df.empty:
         return None
@@ -32,7 +57,22 @@ def _maybe_put_attr_data(
     resolved: ResolvedModelData,
     spec: AttributeSpec,
 ) -> None:
-    """Store attribute data if the source table and value column are available."""
+    """Store attribute data if the source table and value column are available.
+
+    Parameters
+    ----------
+    attr_data
+        Mutable mapping of attribute name to its data DataFrame.
+    resolved
+        Resolved model data.
+    spec
+        Attribute specification to look up.
+
+    Raises
+    ------
+    ValueError
+        If a required (non-nullable) column or ``period_id`` is missing.
+    """
     t = _load_attribute_table(resolved, spec)
     if t is None or t.empty:
         return
@@ -68,10 +108,21 @@ def _collect_all_specs(
 ) -> list[AttributeSpec]:
     """Combine registry specs, explicit specs, and structural defaults.
 
-    Priority:
-    1. Explicit ``attribute_specs`` (if given) are used as-is.
-    2. Otherwise: registry specs + structural defaults for any entity
-       that has no registry coverage.
+    Priority: (1) explicit *attribute_specs* if given; (2) registry specs
+    plus structural defaults for any entity without registry coverage.
+
+    Parameters
+    ----------
+    resolved
+        Resolved model data (used for its attribute registry).
+    attribute_specs
+        Explicit spec list overriding the registry. Default is ``None``
+        (derive from registry and structural defaults).
+
+    Returns
+    -------
+    list of AttributeSpec
+        Merged specification list.
     """
     if attribute_specs is not None:
         return attribute_specs
@@ -93,7 +144,20 @@ def _collect_attr_data(
     resolved: ResolvedModelData,
     specs: list[AttributeSpec],
 ) -> dict[str, pd.DataFrame]:
-    """Gather attribute data from registry and structural tables."""
+    """Gather attribute data from registry and structural tables.
+
+    Parameters
+    ----------
+    resolved
+        Resolved model data.
+    specs
+        Attribute specifications to collect data for.
+
+    Returns
+    -------
+    dict of str to pd.DataFrame
+        Mapping from attribute name to its data DataFrame.
+    """
     attr_data: dict[str, pd.DataFrame] = {}
     registry = resolved.attributes
 
@@ -114,12 +178,22 @@ def assemble_spines(
 ) -> dict[str, dict[str, pd.DataFrame]]:
     """Build per-entity spine dicts keyed by grain-group name.
 
-    When ``attribute_specs`` is *None*, specs are drawn from the
+    When *attribute_specs* is ``None``, specs are drawn from the
     ``resolved.attributes`` registry (with structural defaults added
     for any missing entity coverage), falling back to the full legacy
     default catalog when the registry is empty.
 
-    Returns:
+    Parameters
+    ----------
+    resolved
+        Fully resolved model data.
+    attribute_specs
+        Optional explicit spec list. Default is ``None`` (use registry +
+        structural defaults).
+
+    Returns
+    -------
+    dict of str to dict of str to pd.DataFrame
         ``{"facility": {group: df, ...}, "edge": {...}, "resource": {...}}``.
         Missing entity bases (e.g. no ``edges``) yield empty inner dicts.
     """

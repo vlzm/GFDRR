@@ -1,4 +1,4 @@
-"""Tiered commodity pricing row schemas."""
+"""Define tiered commodity pricing row schemas."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CommoditySellPriceTier(BaseModel):
-    """Volume-tiered sell price at a SINK facility (raw date)."""
+    """Represent volume-tiered sell price at a SINK facility (raw date)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -22,7 +22,7 @@ class CommoditySellPriceTier(BaseModel):
 
 
 class CommodityProcurementCostTier(BaseModel):
-    """Volume-tiered procurement cost at a SOURCE facility (raw date)."""
+    """Represent volume-tiered procurement cost at a SOURCE facility (raw date)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

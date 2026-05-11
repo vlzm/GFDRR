@@ -15,17 +15,32 @@ from dataclasses import dataclass, field
 class BuildReport:
     """Record of derivations performed by ``build_model``.
 
-    Attributes:
-        derivations: Mapping from table name to a short human-readable
-            reason string (e.g. ``"derived from observed_flow"``).
+    Attributes
+    ----------
+    derivations : dict[str, str]
+        Mapping from table name to a short human-readable reason string
+        (e.g. ``"derived from observed_flow"``). Default is an empty dict.
     """
 
     derivations: dict[str, str] = field(default_factory=dict)
 
     def add(self, table: str, reason: str) -> None:
-        """Record that ``table`` was auto-derived with the given ``reason``."""
+        """Record that *table* was auto-derived with the given *reason*.
+
+        Parameters
+        ----------
+        table
+            Name of the derived table.
+        reason
+            Human-readable derivation rationale.
+        """
         self.derivations[table] = reason
 
     def is_empty(self) -> bool:
-        """Return ``True`` when no derivation was recorded."""
+        """Return ``True`` when no derivation was recorded.
+
+        Returns
+        -------
+        bool
+        """
         return not self.derivations

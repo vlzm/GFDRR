@@ -47,13 +47,16 @@ if TYPE_CHECKING:
 class DispatchOutcome:
     """Result of running dispatches through the full lifecycle.
 
-    Attributes:
-        state: Updated simulation state.  Equal to the input *state* whenever
-            no dispatch was applied (empty input or every dispatch rejected).
-        rejected: Dispatches that failed validation, with an extra ``reason``
-            column.  Empty when nothing was rejected.
-        flow_events: One row per applied dispatch.  Empty when nothing was
-            applied.
+    Attributes
+    ----------
+    state : SimulationState
+        Updated simulation state.  Equal to the input *state* whenever
+        no dispatch was applied (empty input or every dispatch rejected).
+    rejected : pd.DataFrame
+        Dispatches that failed validation, with an extra ``reason``
+        column.  Empty when nothing was rejected.
+    flow_events : pd.DataFrame
+        One row per applied dispatch.  Empty when nothing was applied.
     """
 
     state: SimulationState
@@ -69,18 +72,24 @@ def run_dispatch_lifecycle(
 ) -> DispatchOutcome:
     """Run *dispatches* through assign -> validate -> apply.
 
-    Args:
-        dispatches: Task-produced dispatches.  Must follow ``DISPATCH_COLUMNS``
-            (see :mod:`gbp.consumers.simulator.task`).  ``resource_id`` may be
-            ``None`` for rows that should auto-assign.
-        state: Current simulation state.
-        resolved: Resolved model with edges, resources, and (optionally)
-            compatibility tables.
-        period: The period in which the dispatches fire.
+    Parameters
+    ----------
+    dispatches
+        Task-produced dispatches.  Must follow ``DISPATCH_COLUMNS``
+        (see :mod:`gbp.consumers.simulator.task`).  ``resource_id`` may be
+        ``None`` for rows that should auto-assign.
+    state
+        Current simulation state.
+    resolved
+        Resolved model with edges, resources, and (optionally)
+        compatibility tables.
+    period
+        The period in which the dispatches fire.
 
-    Returns:
-        :class:`DispatchOutcome` — see attribute docs for state, rejected,
-        and flow_events semantics.
+    Returns
+    -------
+    DispatchOutcome
+        See attribute docs for state, rejected, and flow_events semantics.
     """
     if dispatches.empty:
         return DispatchOutcome(
@@ -188,11 +197,24 @@ def _validate_dispatches(
 
     Rejection rules run in a fixed order; the first failing rule sets
     ``reason`` for that dispatch.  Subsequent rules ignore already-rejected
-    rows.  Returns:
+    rows.
 
-    - ``valid``     — rows that passed every rule, with the internal marker
-      column dropped.
-    - ``rejected``  — rows that failed at least one rule, with ``reason``.
+    Parameters
+    ----------
+    dispatches
+        Dispatches to validate.
+    state
+        Current simulation state.
+    resolved
+        Resolved model data.
+    period
+        Current period descriptor.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        ``(valid, rejected)`` — *valid* rows passed every rule (internal
+        marker column dropped); *rejected* rows carry a ``reason`` column.
     """
     dispatches = dispatches.copy()
     dispatches["_reject_reason"] = None
@@ -229,6 +251,13 @@ def _reject_invalid_edge(
     No-op when the resolved model has no edge table — without an edge
     whitelist there is nothing to validate against, so dispatches pass
     this rule unchanged.
+
+    Parameters
+    ----------
+    dispatches
+        Dispatches DataFrame with ``_reject_reason`` column.  Mutated in place.
+    resolved
+        Resolved model providing the edge table.
     """
     if resolved.edges.empty:
         return
@@ -338,6 +367,13 @@ def _reject_insufficient_inventory(
     Sequential allocation: dispatches are processed in row order.  Earlier
     dispatches consume available inventory; later ones may be rejected if
     the remaining stock is insufficient.
+
+    Parameters
+    ----------
+    dispatches
+        Dispatches DataFrame with ``_reject_reason`` column.  Mutated in place.
+    state
+        Current simulation state providing inventory levels.
     """
     pending_mask = dispatches["_reject_reason"].isna()
     if not pending_mask.any():
@@ -371,7 +407,24 @@ def _apply_dispatches(
     dispatches: pd.DataFrame,
     period: PeriodRow,
 ) -> tuple[SimulationState, pd.DataFrame]:
-    """Apply *dispatches* to *state*, returning ``(new_state, flow_events)``."""
+    """Apply *dispatches* to *state* and return updated state with flow events.
+
+    Parameters
+    ----------
+    state
+        Current simulation state.
+    dispatches
+        Validated dispatches to apply.
+    period
+        Current period descriptor.
+
+    Returns
+    -------
+    tuple[SimulationState, pd.DataFrame]
+        ``(new_state, flow_events)`` — state with decremented inventory,
+        appended in-transit shipments, and updated resources; one flow
+        event row per applied dispatch.
+    """
     dispatches = dispatches.copy()
 
     # 1. Generate shipment IDs and stamp the departure period.

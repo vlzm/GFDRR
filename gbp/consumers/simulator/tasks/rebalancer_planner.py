@@ -31,14 +31,22 @@ import pandas as pd
 class Pair(TypedDict):
     """One pickup-delivery instruction for the PDP solver.
 
-    Attributes:
-        pickup_node_id: Source station id.
-        pickup_latitude: Source latitude (degrees).
-        pickup_longitude: Source longitude (degrees).
-        delivery_node_id: Destination station id.
-        delivery_latitude: Destination latitude (degrees).
-        delivery_longitude: Destination longitude (degrees).
-        quantity: Units to move; always ``> 0`` and ``<= truck_capacity``.
+    Attributes
+    ----------
+    pickup_node_id
+        Source station id.
+    pickup_latitude
+        Source latitude (degrees).
+    pickup_longitude
+        Source longitude (degrees).
+    delivery_node_id
+        Destination station id.
+    delivery_latitude
+        Destination latitude (degrees).
+    delivery_longitude
+        Destination longitude (degrees).
+    quantity
+        Units to move; always ``> 0`` and ``<= truck_capacity``.
     """
 
     pickup_node_id: str
@@ -62,18 +70,24 @@ class Planner(Protocol):
     ) -> list[Pair]:
         """Match sources to destinations and return pickup-delivery pairs.
 
-        Args:
-            sources: Over-utilized stations, with at least ``node_id``,
-                ``latitude``, ``longitude``, ``excess`` columns.
-            destinations: Under-utilized stations, with at least
-                ``node_id``, ``latitude``, ``longitude``, ``deficit``
-                columns.
-            truck_capacity: Per-trip cap on a single pair's ``quantity``.
-            distance_matrix: Optional distance matrix in km.  May be
-                ignored by geography-blind strategies.
+        Parameters
+        ----------
+        sources
+            Over-utilized stations, with at least ``node_id``,
+            ``latitude``, ``longitude``, ``excess`` columns.
+        destinations
+            Under-utilized stations, with at least ``node_id``,
+            ``latitude``, ``longitude``, ``deficit`` columns.
+        truck_capacity
+            Per-trip cap on a single pair's ``quantity``.
+        distance_matrix
+            Optional distance matrix in km.  May be ignored by
+            geography-blind strategies.
 
-        Returns:
-            A list of :class:`Pair` dicts.  Empty when nothing can be
+        Returns
+        -------
+        list of Pair
+            Pickup-delivery pair dicts.  Empty when nothing can be
             matched.
         """
         ...
@@ -91,12 +105,13 @@ class IntervalOverlapPlanner:
     Salvaged from
     ``gbp/rebalancer/dataloader.py:DataLoaderRebalancer.create_pickup_delivery_pairs``.
 
-    Note:
-        ``distance_matrix`` is accepted for protocol compatibility but
-        ignored — the matching never looks at geography.  This is the
-        algorithm's main blind spot: a geographically attractive pair
-        whose intervals do not overlap is simply hidden from the PDP
-        solver.
+    Notes
+    -----
+    ``distance_matrix`` is accepted for protocol compatibility but
+    ignored — the matching never looks at geography.  This is the
+    algorithm's main blind spot: a geographically attractive pair
+    whose intervals do not overlap is simply hidden from the PDP
+    solver.
     """
 
     def plan(
@@ -106,7 +121,26 @@ class IntervalOverlapPlanner:
         truck_capacity: float,
         distance_matrix: pd.DataFrame | None,
     ) -> list[Pair]:
-        """Return interval-overlap pairs; see class docstring for semantics."""
+        """Return interval-overlap pairs.
+
+        See class docstring for full algorithm semantics.
+
+        Parameters
+        ----------
+        sources
+            Over-utilized stations with ``excess`` column.
+        destinations
+            Under-utilized stations with ``deficit`` column.
+        truck_capacity
+            Maximum quantity per pair.
+        distance_matrix
+            Ignored (geography-blind by design).
+
+        Returns
+        -------
+        list of Pair
+            Matched pickup-delivery pairs clipped to *truck_capacity*.
+        """
         del distance_matrix  # geography-blind by design
 
         if sources.empty or destinations.empty:
@@ -141,7 +175,18 @@ class IntervalOverlapPlanner:
 
 
 def _row_to_pair(r: Any) -> Pair:
-    """Map a merged cross-join row to a :class:`Pair`."""
+    """Map a merged cross-join row to a :class:`Pair`.
+
+    Parameters
+    ----------
+    r
+        A single row from the cross-joined sources/destinations frame.
+
+    Returns
+    -------
+    Pair
+        Pickup-delivery pair dict.
+    """
     return Pair(
         pickup_node_id=str(r["node_id_p"]),
         pickup_latitude=float(r["latitude_p"]),

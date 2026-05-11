@@ -1,4 +1,4 @@
-"""Pydantic row schemas for tabular graph logistics data."""
+"""Provide Pydantic row schemas for tabular graph logistics data."""
 
 from gbp.core.schemas.behavior import (
     EdgeRule,

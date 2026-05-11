@@ -1,12 +1,12 @@
 """Default ``AttributeSpec`` catalog for bike-sharing (L3) scenarios.
 
-Provides two categories of attribute specs:
+Provide two categories of attribute specs:
 
-- **Structural**: derive values from structural tables (``edges``,
+- **Structural** -- derive values from structural tables (``edges``,
   ``resource_categories``).  Their ``source_table`` points to a fixed
   ``RawModelData`` field.
-- **Parametric**: previously stored in dedicated fixed fields
-  (``operation_costs``, ``transport_costs``, …) now registered via
+- **Parametric** -- previously stored in dedicated fixed fields
+  (``operation_costs``, ``transport_costs``, ...) now registered via
   ``AttributeRegistry``.
 
 ``register_bike_sharing_defaults()`` is the convenience entry-point for
@@ -30,11 +30,17 @@ if TYPE_CHECKING:
 # ── Structural attribute specs (data lives in structural tables) ─────────
 
 def get_structural_attribute_specs() -> list[AttributeSpec]:
-    """Attributes sourced from structural tables (edges, resource_categories).
+    """Return attribute specs sourced from structural tables.
 
     These specs are NOT registered in the ``AttributeRegistry``; their data
     is loaded from the corresponding ``source_table`` field on
     ``ResolvedModelData`` during spine assembly.
+
+    Returns
+    -------
+    list of AttributeSpec
+        Specs for ``edges`` and ``resource_categories`` structural
+        attributes.
     """
     return [
         AttributeSpec(
@@ -106,6 +112,31 @@ def register_bike_sharing_defaults(
     Convenience wrapper that registers known attributes with typical grains.
     Users can also call ``registry.register()`` directly for custom
     attributes or non-standard grains.
+
+    Only non-``None`` DataFrames are registered; the rest are silently
+    skipped.
+
+    Parameters
+    ----------
+    registry
+        Target registry to populate.
+    operation_costs
+        Per-facility operation cost table. Default is ``None``.
+    transport_costs
+        Per-edge transport cost table. Default is ``None``.
+    operation_capacities
+        Per-facility operation capacity table. Default is ``None``.
+    edge_capacities
+        Per-edge capacity table. Default is ``None``.
+    resource_costs
+        EAV-style resource cost table (fixed cost and maintenance).
+        Default is ``None``.
+    commodity_sell_price_tiers
+        Tiered sell-price table per facility and commodity. Default is
+        ``None``.
+    commodity_procurement_cost_tiers
+        Tiered procurement-cost table per facility and commodity. Default
+        is ``None``.
     """
     if operation_costs is not None:
         registry.register(

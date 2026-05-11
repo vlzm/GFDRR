@@ -95,7 +95,18 @@ from gbp.core.schemas import (
 # ---------------------------------------------------------------------------
 
 def _required_column_names(row_model: type[BaseModel]) -> list[str]:
-    """Return field names that must appear as DataFrame columns."""
+    """Return field names that must appear as DataFrame columns.
+
+    Parameters
+    ----------
+    row_model
+        Pydantic model whose fields define column expectations.
+
+    Returns
+    -------
+    list[str]
+        Names of required fields.
+    """
     return [name for name, fi in row_model.model_fields.items() if fi.is_required()]
 
 
@@ -104,7 +115,22 @@ def _validate_dataframe_columns(
     df: pd.DataFrame,
     row_model: type[BaseModel],
 ) -> list[str]:
-    """Return error messages for column mismatches (empty if ok)."""
+    """Return error messages for column mismatches.
+
+    Parameters
+    ----------
+    name
+        Table name used in error messages.
+    df
+        DataFrame to validate.
+    row_model
+        Pydantic model defining expected columns.
+
+    Returns
+    -------
+    list[str]
+        Error messages for missing required columns. Empty if valid.
+    """
     missing = [c for c in _required_column_names(row_model) if c not in df.columns]
     if missing:
         return [f"{name}: missing required columns {missing}"]
@@ -112,7 +138,20 @@ def _validate_dataframe_columns(
 
 
 def _collect_group(obj: object, field_names: list[str]) -> dict[str, pd.DataFrame]:
-    """Return {name: df} for non-None DataFrames in *field_names*."""
+    """Return non-None DataFrames for the given field names.
+
+    Parameters
+    ----------
+    obj
+        Object whose attributes to inspect.
+    field_names
+        Attribute names to collect.
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        Mapping of field name to DataFrame for non-None entries.
+    """
     result: dict[str, pd.DataFrame] = {}
     for name in field_names:
         val = getattr(obj, name, None)
@@ -122,7 +161,23 @@ def _collect_group(obj: object, field_names: list[str]) -> dict[str, pd.DataFram
 
 
 def _compact_repr(obj: object, groups: dict[str, list[str]], required: frozenset[str]) -> str:
-    """One-line-per-table repr: ``ClassName(tables=N, rows=M)`` + detail lines."""
+    """Build a compact repr with one line per table.
+
+    Parameters
+    ----------
+    obj
+        Model data instance.
+    groups
+        Mapping of group name to field name lists.
+    required
+        Set of required field names.
+
+    Returns
+    -------
+    str
+        Repr string in the form ``ClassName(tables=N, total_rows=M)``
+        followed by per-group detail lines.
+    """
     cls_name = type(obj).__name__
     table_count = 0
     total_rows = 0
@@ -154,7 +209,22 @@ def _compact_repr(obj: object, groups: dict[str, list[str]], required: frozenset
 def _compact_repr_html(
     obj: object, groups: dict[str, list[str]], required: frozenset[str],
 ) -> str:
-    """HTML table for rich Jupyter display."""
+    """Build an HTML table for rich Jupyter display.
+
+    Parameters
+    ----------
+    obj
+        Model data instance.
+    groups
+        Mapping of group name to field name lists.
+    required
+        Set of required field names.
+
+    Returns
+    -------
+    str
+        HTML string with a styled table summarizing all groups.
+    """
     cls_name = type(obj).__name__
     rows_html: list[str] = []
 
@@ -213,7 +283,22 @@ def _compact_repr_html(
 
 
 def _table_summary(obj: object, groups: dict[str, list[str]], required: frozenset[str]) -> str:
-    """Human-readable overview: group → table (rows) or '—'."""
+    """Build a human-readable overview of populated tables.
+
+    Parameters
+    ----------
+    obj
+        Model data instance.
+    groups
+        Mapping of group name to field name lists.
+    required
+        Set of required field names.
+
+    Returns
+    -------
+    str
+        Multi-line summary showing group, table name, and row count.
+    """
     lines: list[str] = []
     cls_name = type(obj).__name__
     lines.append(f"{cls_name} — table summary")
@@ -727,19 +812,35 @@ class ResolvedModelData(_TabularModelBase):
         """Build ``ResolvedModelData`` from raw tables and build artifacts.
 
         Centralizes the ``raw.field → resolved.field`` mapping so that
-        ``build_model()`` and notebooks share one canonical constructor call.
+        ``build_model()`` and notebooks share one canonical constructor
+        call.
 
-        Args:
-            raw: Validated raw model data.
-            periods: Period grid (possibly modified copy of ``raw.periods``).
-            resolved_time: Time-resolved structural tables from
-                ``resolve_all_time_varying``.
-            resolved_attrs: Registry with ``date → period_id`` resolved.
-            edges: Edge table (from raw or ``build_edges``).
-            edge_commodities: Edge-commodity table (from raw or built).
-            edge_lead_time_resolved: Lead-time resolution output.
-            transformation_resolved: N:M transformation output.
-            fleet_capacity: Fleet capacity output.
+        Parameters
+        ----------
+        raw
+            Validated raw model data.
+        periods
+            Period grid (possibly modified copy of ``raw.periods``).
+        resolved_time
+            Time-resolved structural tables from
+            ``resolve_all_time_varying``.
+        resolved_attrs
+            Registry with ``date → period_id`` resolved.
+        edges
+            Edge table (from raw or ``build_edges``).
+        edge_commodities
+            Edge-commodity table (from raw or built).
+        edge_lead_time_resolved
+            Lead-time resolution output.
+        transformation_resolved
+            N:M transformation output.
+        fleet_capacity
+            Fleet capacity output.
+
+        Returns
+        -------
+        ResolvedModelData
+            Fully assembled resolved model.
         """
 
         def _coalesce(key: str, raw_df: pd.DataFrame | None) -> pd.DataFrame | None:

@@ -1,4 +1,4 @@
-"""Demand, supply, and inventory boundary row schemas."""
+"""Define demand, supply, and inventory boundary row schemas."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Demand(BaseModel):
-    """Time-varying demand at a SINK facility (raw date)."""
+    """Represent time-varying demand at a SINK facility (raw date)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -20,7 +20,7 @@ class Demand(BaseModel):
 
 
 class Supply(BaseModel):
-    """Time-varying supply at a SOURCE facility (raw date)."""
+    """Represent time-varying supply at a SOURCE facility (raw date)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -31,7 +31,7 @@ class Supply(BaseModel):
 
 
 class InventoryInitial(BaseModel):
-    """Inventory at planning horizon start for STORAGE facilities."""
+    """Represent inventory at planning horizon start for STORAGE facilities."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -41,7 +41,7 @@ class InventoryInitial(BaseModel):
 
 
 class InventoryInTransit(BaseModel):
-    """Commodity in transit at horizon start."""
+    """Represent commodity in transit at horizon start."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

@@ -16,7 +16,6 @@ import pandas as pd
 from gbp.core.enums import FacilityRole
 from gbp.core.roles import derive_roles
 
-
 DEFAULT_COMMODITY_CATEGORY_ID = "DEFAULT_COMMODITY"
 DEFAULT_RESOURCE_CATEGORY_ID = "DEFAULT_RESOURCE"
 
@@ -31,12 +30,17 @@ def derive_facility_roles(
     no operation rows receive the default role set for their type (from
     ``DEFAULT_ROLES``) with any operation-dependent role trimmed out.
 
-    Args:
-        facilities: ``facility_id`` and ``facility_type`` columns.
-        facility_operations: ``facility_id``, ``operation_type``, ``enabled``.
+    Parameters
+    ----------
+    facilities
+        Must contain ``facility_id`` and ``facility_type`` columns.
+    facility_operations
+        Must contain ``facility_id``, ``operation_type``, ``enabled``.
 
-    Returns:
-        DataFrame with columns ``facility_id``, ``role`` (one row per role).
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``facility_id``, ``role`` (one row per role).
     """
     enabled_ops = facility_operations[facility_operations["enabled"].astype(bool)]
     ops_per_facility: pd.Series = (
@@ -66,7 +70,13 @@ def derive_facility_roles(
 
 
 def default_commodity_categories() -> pd.DataFrame:
-    """Return a single-row commodity category DataFrame for minimal models."""
+    """Return a single-row commodity category DataFrame for minimal models.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row with ``commodity_category_id``, ``name``, ``unit``.
+    """
     return pd.DataFrame({
         "commodity_category_id": [DEFAULT_COMMODITY_CATEGORY_ID],
         "name": ["Default commodity"],
@@ -75,7 +85,13 @@ def default_commodity_categories() -> pd.DataFrame:
 
 
 def default_resource_categories() -> pd.DataFrame:
-    """Return a single-row resource category DataFrame for minimal models."""
+    """Return a single-row resource category DataFrame for minimal models.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row with ``resource_category_id``, ``name``, ``base_capacity``.
+    """
     return pd.DataFrame({
         "resource_category_id": [DEFAULT_RESOURCE_CATEGORY_ID],
         "name": ["Default resource"],
@@ -88,6 +104,16 @@ def _organic_flow(observed_flow: pd.DataFrame) -> pd.DataFrame:
 
     Rows whose ``resource_id`` is set represent operator-driven moves
     (e.g. rebalancing) and must not be double-counted as organic demand/supply.
+
+    Parameters
+    ----------
+    observed_flow
+        Flow DataFrame, optionally containing a ``resource_id`` column.
+
+    Returns
+    -------
+    pd.DataFrame
+        Subset of rows where ``resource_id`` is absent or null.
     """
     if "resource_id" not in observed_flow.columns:
         return observed_flow
@@ -97,10 +123,22 @@ def _organic_flow(observed_flow: pd.DataFrame) -> pd.DataFrame:
 def derive_demand_from_flow(observed_flow: pd.DataFrame) -> pd.DataFrame:
     """Aggregate ``observed_flow`` into per-origin demand rows.
 
-    Groups organic flow by ``source_id × date × commodity_category`` and
-    renames ``source_id`` → ``facility_id`` so the result matches the
+    Groups organic flow by ``source_id x date x commodity_category`` and
+    renames ``source_id`` to ``facility_id`` so the result matches the
     ``Demand`` schema.  Flows attached to a resource (``resource_id``
     non-null) are excluded to avoid double-counting operator moves.
+
+    Parameters
+    ----------
+    observed_flow
+        Flow DataFrame with ``source_id``, ``commodity_category``, ``date``,
+        ``quantity`` columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``facility_id``, ``commodity_category``, ``date``,
+        ``quantity``.
     """
     columns = ["facility_id", "commodity_category", "date", "quantity"]
     if observed_flow is None or observed_flow.empty:
@@ -122,10 +160,22 @@ def derive_demand_from_flow(observed_flow: pd.DataFrame) -> pd.DataFrame:
 def derive_supply_from_flow(observed_flow: pd.DataFrame) -> pd.DataFrame:
     """Aggregate ``observed_flow`` into per-destination supply rows.
 
-    Groups organic flow by ``target_id × date × commodity_category`` and
-    renames ``target_id`` → ``facility_id`` so the result matches the
+    Groups organic flow by ``target_id x date x commodity_category`` and
+    renames ``target_id`` to ``facility_id`` so the result matches the
     ``Supply`` schema.  See :func:`derive_demand_from_flow` for the
     rationale on excluding resource-assigned flow.
+
+    Parameters
+    ----------
+    observed_flow
+        Flow DataFrame with ``target_id``, ``commodity_category``, ``date``,
+        ``quantity`` columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``facility_id``, ``commodity_category``, ``date``,
+        ``quantity``.
     """
     columns = ["facility_id", "commodity_category", "date", "quantity"]
     if observed_flow is None or observed_flow.empty:
@@ -145,9 +195,19 @@ def derive_supply_from_flow(observed_flow: pd.DataFrame) -> pd.DataFrame:
 
 
 def derive_inventory_initial(observed_inventory: pd.DataFrame) -> pd.DataFrame:
-    """Take the earliest observed snapshot per facility × commodity_category.
+    """Take the earliest observed snapshot per facility and commodity category.
 
-    Returns rows matching the ``InventoryInitial`` schema.
+    Parameters
+    ----------
+    observed_inventory
+        Must contain ``facility_id``, ``commodity_category``, ``date``,
+        ``quantity``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``facility_id``, ``commodity_category``, ``quantity``
+        matching the ``InventoryInitial`` schema.
     """
     columns = ["facility_id", "commodity_category", "quantity"]
     if observed_inventory is None or observed_inventory.empty:
@@ -165,20 +225,24 @@ def derive_inventory_from_flow(observed_flow: pd.DataFrame) -> pd.DataFrame:
 
     For each ``(source_id, commodity_category)`` in the earliest date present
     in ``observed_flow``, sum the departures.  A facility that starts a day
-    with N departures must have had at least N units in stock — this provides
+    with N departures must have had at least N units in stock -- this provides
     a reasonable non-zero seed when no ``observed_inventory`` telemetry is
     available (minimal-source case).
 
-    Args:
-        observed_flow: Columns ``source_id``, ``target_id``,
-            ``commodity_category``, ``date``, ``quantity``. May include a
-            ``resource_id`` column; rows with ``resource_id`` non-null are
-            dropped to avoid double-counting operator moves.
+    Parameters
+    ----------
+    observed_flow
+        Columns ``source_id``, ``target_id``, ``commodity_category``,
+        ``date``, ``quantity``. May include a ``resource_id`` column; rows
+        with ``resource_id`` non-null are dropped to avoid double-counting
+        operator moves.
 
-    Returns:
-        DataFrame with columns ``facility_id``, ``commodity_category``,
-        ``quantity``.  Empty when *observed_flow* is empty or has only
-        resource-assigned rows.
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``facility_id``, ``commodity_category``, ``quantity``.
+        Empty when *observed_flow* is empty or has only resource-assigned
+        rows.
     """
     columns = ["facility_id", "commodity_category", "quantity"]
     if observed_flow is None or observed_flow.empty:

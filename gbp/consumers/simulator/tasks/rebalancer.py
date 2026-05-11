@@ -55,6 +55,41 @@ class RebalancerTask:
     prototype.  Returns a DataFrame with exactly :data:`DISPATCH_COLUMNS`.
     Each row corresponds to one pickup-delivery pair on a truck's route;
     rows belonging to the same truck share an ``arrival_period``.
+
+    Parameters
+    ----------
+    min_threshold
+        Stations below this utilization are destinations.
+        Default is ``0.3``.
+    max_threshold
+        Stations above this utilization are sources.
+        Default is ``0.7``.
+    time_limit_seconds
+        OR-Tools solver time budget.  Default is ``30``.
+    pdp_random_seed
+        Forwarded to ``RoutingSearchParameters.random_seed``
+        so baseline-vs-treatment comparisons are reproducible.
+        Default is ``42``.
+    period_duration_hours
+        Hours per period.  ``None`` means derive from
+        ``resolved.periods`` at run time.  Default is ``None``.
+    truck_speed_kmh
+        Average truck speed used to convert route distance into hours.
+        Default is ``30.0``.
+    truck_resource_category
+        Resource category id of rebalancing trucks in ``state.resources``.
+        Default is ``"rebalancing_truck"``.
+    commodity_category
+        Commodity moved by the rebalancer.
+        Default is ``"working_bike"``.
+    modal_type
+        Modal type stamped on every dispatch row.
+        Default is ``ModalType.ROAD.value``.
+    planner
+        Strategy for turning per-station imbalance into PDP
+        pickup-delivery pairs.  ``None`` falls back to
+        :class:`IntervalOverlapPlanner` (geography-blind cumulative
+        interval matching).  Default is ``None``.
     """
 
     name: str = "rebalancer"
@@ -73,27 +108,6 @@ class RebalancerTask:
         modal_type: str = ModalType.ROAD.value,
         planner: Planner | None = None,
     ) -> None:
-        """Initialise the task.
-
-        Args:
-            min_threshold: Stations below this utilization are destinations.
-            max_threshold: Stations above this utilization are sources.
-            time_limit_seconds: OR-Tools solver time budget.
-            pdp_random_seed: Forwarded to ``RoutingSearchParameters.random_seed``
-                so baseline-vs-treatment comparisons are reproducible.
-            period_duration_hours: Hours per period.  ``None`` means: derive
-                from ``resolved.periods`` at run time.
-            truck_speed_kmh: Average truck speed used to convert route
-                distance into hours.
-            truck_resource_category: Resource category id of rebalancing
-                trucks in ``state.resources``.
-            commodity_category: Commodity moved by the rebalancer.
-            modal_type: Modal type stamped on every dispatch row.
-            planner: Strategy for turning per-station imbalance into PDP
-                pickup-delivery pairs.  ``None`` falls back to
-                :class:`IntervalOverlapPlanner` (geography-blind cumulative
-                interval matching).
-        """
         self.min_threshold = min_threshold
         self.max_threshold = max_threshold
         self.time_limit_seconds = time_limit_seconds
@@ -118,6 +132,20 @@ class RebalancerTask:
         Returns an empty :data:`DISPATCH_COLUMNS` frame whenever any
         early-exit condition is hit (no available trucks, no imbalance,
         solver failure, no depot).
+
+        Parameters
+        ----------
+        state
+            Current simulation state with inventory and resources.
+        resolved
+            Resolved model data with facilities, distance matrix, etc.
+        period
+            Current period descriptor.
+
+        Returns
+        -------
+        pd.DataFrame
+            Dispatches with ``DISPATCH_COLUMNS`` schema.
         """
         empty = _empty_dispatches()
 
@@ -242,6 +270,17 @@ class RebalancerTask:
         Honours an explicit constructor override; otherwise delegates to the
         shared :func:`gbp.consumers.simulator._period_helpers.period_duration_hours`
         helper.
+
+        Parameters
+        ----------
+        resolved
+            Resolved model data used to derive period duration when no
+            explicit override was set in the constructor.
+
+        Returns
+        -------
+        float
+            Period duration in hours.
         """
         if self.period_duration_hours is not None:
             return float(self.period_duration_hours)
@@ -254,7 +293,13 @@ class RebalancerTask:
 
 
 def _empty_dispatches() -> pd.DataFrame:
-    """Return an empty DataFrame with exactly the DISPATCH_COLUMNS schema."""
+    """Return an empty DataFrame with exactly the DISPATCH_COLUMNS schema.
+
+    Returns
+    -------
+    pd.DataFrame
+        Empty DataFrame with ``DISPATCH_COLUMNS`` columns.
+    """
     return pd.DataFrame(columns=DISPATCH_COLUMNS)
 
 
@@ -263,14 +308,30 @@ def _build_node_state(
     resolved: ResolvedModelData,
     commodity_category: str,
 ) -> pd.DataFrame | None:
-    """Build a per-station node-state frame: ``[node_id, latitude, longitude,
+    """Build a per-station node-state frame.
+
+    Returns a DataFrame with columns ``[node_id, latitude, longitude,
     quantity, inventory_capacity]``.
 
     Capacity comes from ``resolved.attributes["operation_capacity"]``
     filtered to ``operation_type == "storage"`` and matching
     *commodity_category*.  When the attribute is absent or yields no rows
     for the relevant slice, falls back to ``per_facility_quantity.max() * 2``.
-    Returns ``None`` when no usable station rows can be assembled.
+
+    Parameters
+    ----------
+    state
+        Current simulation state with inventory data.
+    resolved
+        Resolved model data with facilities and attributes.
+    commodity_category
+        Commodity to aggregate inventory for.
+
+    Returns
+    -------
+    pd.DataFrame or None
+        Per-station node-state frame, or ``None`` when no usable station
+        rows can be assembled.
     """
     inv = state.inventory[
         state.inventory["commodity_category"] == commodity_category
@@ -323,7 +384,21 @@ def _build_node_state(
 def _facility_capacity(
     resolved: ResolvedModelData, commodity_category: str,
 ) -> pd.Series | None:
-    """Per-facility storage capacity for *commodity_category*; None if absent."""
+    """Return per-facility storage capacity for a commodity category.
+
+    Parameters
+    ----------
+    resolved
+        Resolved model data containing attributes.
+    commodity_category
+        Commodity to look up storage capacity for.
+
+    Returns
+    -------
+    pd.Series or None
+        Series indexed by ``facility_id`` with summed capacity, or
+        ``None`` when the attribute is absent or has no matching rows.
+    """
     if "operation_capacity" not in resolved.attributes:
         return None
     cap_data = resolved.attributes.get("operation_capacity").data
@@ -340,10 +415,27 @@ def _facility_capacity(
 def _compute_imbalance(
     df: pd.DataFrame, min_threshold: float, max_threshold: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Compute utilization and split nodes into sources / destinations.
+    """Compute utilization and split nodes into sources and destinations.
 
     Salvaged from ``gbp/rebalancer/demand.py:compute_utilization_and_balance``,
     inlined to keep the Task self-contained.
+
+    Parameters
+    ----------
+    df
+        Node-state frame with ``quantity`` and ``inventory_capacity`` columns.
+    min_threshold
+        Utilization below which a station is a destination.
+    max_threshold
+        Utilization above which a station is a source.
+
+    Returns
+    -------
+    tuple of (pd.DataFrame, pd.DataFrame, pd.DataFrame)
+        ``(annotated_df, sources, destinations)`` where *annotated_df*
+        has added ``utilization``, ``target_count``, and ``balance``
+        columns; *sources* has an ``excess`` column; *destinations* has
+        a ``deficit`` column.
     """
     df = df.copy()
     df["utilization"] = df["quantity"] / df["inventory_capacity"]
@@ -367,7 +459,19 @@ def _compute_imbalance(
 def _pick_depot(
     resolved: ResolvedModelData,
 ) -> tuple[str, float, float] | None:
-    """Pick the first depot with valid lat/lon; return ``(id, lat, lon)``."""
+    """Pick the first depot with valid coordinates.
+
+    Parameters
+    ----------
+    resolved
+        Resolved model data containing facilities.
+
+    Returns
+    -------
+    tuple of (str, float, float) or None
+        ``(facility_id, lat, lon)`` of the first depot, or ``None``
+        when no depot with valid coordinates exists.
+    """
     facilities = resolved.facilities
     if facilities is None or facilities.empty:
         return None
@@ -383,7 +487,20 @@ def _pick_depot(
 def _truck_capacity(
     resolved: ResolvedModelData, truck_resource_category: str,
 ) -> float | None:
-    """Look up ``base_capacity`` for the truck resource category."""
+    """Look up ``base_capacity`` for the truck resource category.
+
+    Parameters
+    ----------
+    resolved
+        Resolved model data containing resource categories.
+    truck_resource_category
+        Resource category id to look up.
+
+    Returns
+    -------
+    float or None
+        Base capacity of the truck category, or ``None`` if not found.
+    """
     rc = resolved.resource_categories
     if rc is None or rc.empty:
         return None
@@ -408,6 +525,28 @@ def _build_pdp_model(
     Layout: ``[depot, pickup_1, delivery_1, pickup_2, delivery_2, ...]``.
     Distances come from ``resolved.distance_matrix`` when available, with a
     Haversine fallback in metres.
+
+    Parameters
+    ----------
+    pairs
+        Pickup-delivery pair dicts from the planner.
+    depot_id
+        Facility id of the depot node.
+    depot_lat
+        Depot latitude in degrees.
+    depot_lon
+        Depot longitude in degrees.
+    distance_matrix
+        Optional distance matrix DataFrame in km.
+    n_trucks
+        Number of available trucks (vehicles in the model).
+    truck_capacity
+        Per-truck capacity in commodity units.
+
+    Returns
+    -------
+    dict
+        Model dict consumable by :func:`_solve_pdp`.
     """
     locations: list[tuple[float, float]] = [(depot_lat, depot_lon)]
     graph_node_ids: list[str | None] = [depot_id]
@@ -448,7 +587,20 @@ def _build_pdp_model(
 def _build_edge_distance_map(
     distance_matrix: pd.DataFrame | None,
 ) -> dict[tuple[str, str], float]:
-    """Convert ``distance_matrix`` DataFrame to ``{(s, t): km}``."""
+    """Convert ``distance_matrix`` DataFrame to an edge-keyed dict.
+
+    Parameters
+    ----------
+    distance_matrix
+        Optional DataFrame with ``source_id``, ``target_id``, and
+        ``distance`` columns.
+
+    Returns
+    -------
+    dict of (str, str) to float
+        Mapping ``{(source_id, target_id): distance_km}``.
+        Empty dict when the input is ``None`` or empty.
+    """
     if distance_matrix is None or distance_matrix.empty:
         return {}
     return {
@@ -465,6 +617,20 @@ def _create_distance_matrix(
     """Build an NxN integer distance matrix in metres.
 
     Uses ``edge_distances`` (km) when available; falls back to Haversine.
+
+    Parameters
+    ----------
+    locations
+        List of ``(latitude, longitude)`` tuples for each node.
+    graph_node_ids
+        Parallel list of graph node ids (may contain ``None`` entries).
+    edge_distances
+        Pre-computed edge distances in km, keyed by ``(source, target)``.
+
+    Returns
+    -------
+    np.ndarray
+        Integer distance matrix of shape ``(N, N)`` in metres.
     """
     n = len(locations)
     matrix = np.zeros((n, n), dtype=int)
@@ -489,7 +655,20 @@ def _create_distance_matrix(
 def _haversine_distance_m(
     a: tuple[float, float], b: tuple[float, float],
 ) -> float:
-    """Great-circle distance in metres between two (lat, lon) points."""
+    """Compute great-circle distance in metres between two points.
+
+    Parameters
+    ----------
+    a
+        First point as ``(latitude, longitude)`` in degrees.
+    b
+        Second point as ``(latitude, longitude)`` in degrees.
+
+    Returns
+    -------
+    float
+        Distance in metres.
+    """
     lat1 = math.radians(a[0])
     lon1 = math.radians(a[1])
     lat2 = math.radians(b[0])
@@ -514,6 +693,22 @@ def _solve_pdp(
     Salvaged from ``gbp/rebalancer/routing/vrp.py:solve_pdp`` plus
     ``gbp/rebalancer/routing/postprocessing.py:extract_pdp_solution``,
     inlined and parameterized with a deterministic seed.
+
+    Parameters
+    ----------
+    data
+        Model dict produced by :func:`_build_pdp_model`.
+    time_limit_seconds
+        Solver time budget in seconds.
+    random_seed
+        Deterministic seed for reproducible solutions.
+
+    Returns
+    -------
+    dict or None
+        Solution dict with ``routes``, ``total_distance_m``, and
+        ``objective`` keys, or ``None`` when the solver finds no
+        feasible solution.
     """
     manager = pywrapcp.RoutingIndexManager(
         len(data["distance_matrix"]),
@@ -590,6 +785,23 @@ def _extract_pdp_solution(
     """Extract truck routes from the OR-Tools solution.
 
     Salvaged from ``gbp/rebalancer/routing/postprocessing.py``.
+
+    Parameters
+    ----------
+    data
+        Model dict produced by :func:`_build_pdp_model`.
+    manager
+        OR-Tools ``RoutingIndexManager``.
+    routing
+        OR-Tools ``RoutingModel``.
+    solution
+        OR-Tools solution object.
+
+    Returns
+    -------
+    dict
+        Dict with ``routes`` (list of per-truck route dicts),
+        ``total_distance_m`` (int), and ``objective`` (int).
     """
     routes: list[dict[str, Any]] = []
     total_distance = 0
@@ -643,12 +855,24 @@ def _route_to_pairs(
     route_steps: list[dict[str, Any]],
     pairs: list[dict[str, Any]],
 ) -> list[tuple[str, str, int]]:
-    """Walk a route and return the ``(pickup_id, delivery_id, qty)`` for each
-    pickup-delivery pair the truck actually visits.
+    """Walk a route and extract visited pickup-delivery triples.
 
     Pairs are emitted in pickup-step order, which preserves the chain
     rooted at the depot.  The truck starts at the depot, picks up at
     pickup_i, and delivers at delivery_i; one DataFrame row per i.
+
+    Parameters
+    ----------
+    route_steps
+        Ordered list of route-step dicts from the solver solution.
+    pairs
+        Original pickup-delivery pair dicts from the planner.
+
+    Returns
+    -------
+    list of (str, str, int)
+        ``(pickup_id, delivery_id, quantity)`` for each pair the truck
+        actually visits.
     """
     pickup_qty: dict[str, int] = {}
     out: list[tuple[str, str, int]] = []
@@ -677,10 +901,27 @@ def _find_pair_by_delivery(
     qty: int,
     pickup_qty: dict[str, int],
 ) -> tuple[str, str, int] | None:
-    """Resolve a delivery step to the ``(pickup, delivery, qty)`` triple.
+    """Resolve a delivery step to a pickup-delivery triple.
 
     Picks the first pair whose delivery matches and whose pickup has been
     visited (and whose recorded pickup_qty equals *qty*).
+
+    Parameters
+    ----------
+    pairs
+        Original pickup-delivery pair dicts from the planner.
+    delivery_id
+        Node id of the delivery step to resolve.
+    qty
+        Absolute demand at the delivery step.
+    pickup_qty
+        Mapping of already-visited pickup node ids to their quantities.
+
+    Returns
+    -------
+    tuple of (str, str, int) or None
+        ``(pickup_id, delivery_id, quantity)`` if a matching pair is
+        found, ``None`` otherwise.
     """
     for pair in pairs:
         if str(pair["delivery_node_id"]) != delivery_id:
@@ -697,7 +938,7 @@ def _find_pair_by_delivery(
 def _assert_resource_pre_assigned(
     dispatches: pd.DataFrame, available_truck_ids: set[str],
 ) -> None:
-    """Sanity-check: every emitted ``resource_id`` is non-null and known.
+    """Verify every emitted ``resource_id`` is non-null and known.
 
     Pickup-delivery rows are *logical* movements, not physical traversal
     legs.  A row's ``source_id`` is a pickup station and may not equal the
@@ -706,8 +947,17 @@ def _assert_resource_pre_assigned(
     lifecycle level.  This assertion catches solver bugs that would produce
     a non-existent or null ``resource_id``.
 
-    Raises:
-        RuntimeError: when any row has a null or unknown ``resource_id``.
+    Parameters
+    ----------
+    dispatches
+        Dispatches DataFrame to validate.
+    available_truck_ids
+        Set of valid truck resource ids.
+
+    Raises
+    ------
+    RuntimeError
+        When any row has a null or unknown ``resource_id``.
     """
     if dispatches.empty:
         return

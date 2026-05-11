@@ -25,14 +25,20 @@ def make_rng(
     BLAKE2b, giving a uniform 64-bit value per call.  Same inputs → same RNG
     → byte-identical samples on repeated runs.
 
-    Args:
-        global_seed: Seed from ``EnvironmentConfig.seed``.  When ``None``,
-            a non-deterministic generator is returned (avoid in production
-            simulations — used only when reproducibility is intentionally off).
-        phase_name: ``Phase.name`` of the calling phase.
-        period_index: ``PeriodRow.period_index`` of the current period.
+    Parameters
+    ----------
+    global_seed
+        Seed from ``EnvironmentConfig.seed``.  When ``None``,
+        a non-deterministic generator is returned (avoid in production
+        simulations — used only when reproducibility is intentionally off).
+    phase_name
+        ``Phase.name`` of the calling phase.
+    period_index
+        ``PeriodRow.period_index`` of the current period.
 
-    Returns:
+    Returns
+    -------
+    numpy.random.Generator
         A NumPy ``Generator`` seeded deterministically from the three inputs.
     """
     if global_seed is None:

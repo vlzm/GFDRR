@@ -11,12 +11,24 @@ from gbp.build._helpers import get_duration_hours
 def resolve_lead_times(edges: pd.DataFrame, periods: pd.DataFrame) -> pd.DataFrame:
     """Build ``edge_lead_time_resolved``: one row per edge x departure period.
 
-    Columns: source_id, target_id, modal_type, period_id, lead_time_periods,
-    arrival_period_id (nullable if arrival past horizon).
+    Output columns: ``source_id``, ``target_id``, ``modal_type``,
+    ``period_id``, ``lead_time_periods``, ``arrival_period_id`` (nullable
+    if arrival is past the horizon).
 
-    Args:
-        edges: Must include source_id, target_id, modal_type, lead_time_hours.
-        periods: Must include period_id, start_date, end_date, period_index, period_type.
+    Parameters
+    ----------
+    edges
+        Must include ``source_id``, ``target_id``, ``modal_type``,
+        ``lead_time_hours``.
+    periods
+        Must include ``period_id``, ``start_date``, ``end_date``,
+        ``period_index``, ``period_type``.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per edge x departure period with lead time in periods and
+        the resolved arrival period.
     """
     if edges.empty or periods.empty:
         return pd.DataFrame(
@@ -64,9 +76,22 @@ def _resolve_lead_times_multi_resolution(
     edges_unique: pd.DataFrame,
     periods: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Per-departure-period lead time when segment lengths differ.
+    """Compute per-departure-period lead time when segment lengths differ.
 
     Uses vectorized cross-join + ``np.searchsorted`` for O(E*P*log P).
+
+    Parameters
+    ----------
+    edges_unique
+        Deduplicated edges with ``lead_time_hours``.
+    periods
+        Period table with ``period_id``, ``period_index``, ``start_date``,
+        ``end_date``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Same schema as :func:`resolve_lead_times` output.
     """
     per_sorted = periods.sort_values("period_index").reset_index(drop=True)
 

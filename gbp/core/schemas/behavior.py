@@ -1,4 +1,4 @@
-"""Facility behavior and edge rule row schemas."""
+"""Define facility behavior and edge rule row schemas."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from gbp.core.enums import FacilityRole
 
 
 class FacilityRoleRecord(BaseModel):
-    """One row of the facility_role table."""
+    """Represent one row of the facility_role table."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -19,7 +19,7 @@ class FacilityRoleRecord(BaseModel):
 
 
 class FacilityOperation(BaseModel):
-    """One row of the facility_operation table."""
+    """Represent one row of the facility_operation table."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -29,7 +29,7 @@ class FacilityOperation(BaseModel):
 
 
 class FacilityAvailability(BaseModel):
-    """One row of the facility_availability table (raw dates)."""
+    """Represent one row of the facility_availability table (raw dates)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -40,7 +40,7 @@ class FacilityAvailability(BaseModel):
 
 
 class EdgeRule(BaseModel):
-    """One row of the edge_rule table."""
+    """Represent one row of the edge_rule table."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

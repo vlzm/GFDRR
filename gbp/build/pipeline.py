@@ -31,7 +31,18 @@ from gbp.core.model import RawModelData, ResolvedModelData
 
 
 def _prepare_distance_matrix(raw_dm: pd.DataFrame | None) -> pd.DataFrame | None:
-    """Rename ``duration`` → ``lead_time_hours`` so ``build_edges`` merge is compatible."""
+    """Rename ``duration`` to ``lead_time_hours`` for ``build_edges`` compatibility.
+
+    Parameters
+    ----------
+    raw_dm
+        Distance matrix DataFrame or ``None``.
+
+    Returns
+    -------
+    pd.DataFrame or None
+        Renamed copy, or ``None`` if input is missing or empty.
+    """
     if raw_dm is None or raw_dm.empty:
         return None
     return raw_dm.rename(columns={"duration": "lead_time_hours"})
@@ -40,7 +51,18 @@ def _prepare_distance_matrix(raw_dm: pd.DataFrame | None) -> pd.DataFrame | None
 def _ensure_edges_and_commodities(
     raw: RawModelData,
 ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
-    """Use ``raw.edges`` when populated; otherwise build from rules + distance_matrix."""
+    """Use ``raw.edges`` when populated; otherwise build from rules and distance_matrix.
+
+    Parameters
+    ----------
+    raw
+        Raw model data potentially missing explicit edges.
+
+    Returns
+    -------
+    tuple of (pd.DataFrame or None, pd.DataFrame or None)
+        ``(edges, edge_commodities)`` pair.
+    """
     if raw.edges is not None and not raw.edges.empty:
         return raw.edges, raw.edge_commodities
 
@@ -86,7 +108,20 @@ def _apply_derivations(raw: RawModelData, report: BuildReport) -> RawModelData:
 
     Derivation is a strict no-op when the user-provided table is not ``None``.
     An explicitly empty DataFrame is treated as a user choice of "no rows" and
-    is NOT re-derived — only a missing (``None``) table triggers derivation.
+    is NOT re-derived -- only a missing (``None``) table triggers derivation.
+
+    Parameters
+    ----------
+    raw
+        Original raw model data.
+    report
+        Mutable report where derivation reasons are recorded.
+
+    Returns
+    -------
+    RawModelData
+        A copy with derived tables filled in, or the original if nothing
+        was derived.
     """
     updates: dict[str, pd.DataFrame] = {}
 
@@ -149,7 +184,22 @@ def _apply_derivations(raw: RawModelData, report: BuildReport) -> RawModelData:
 
 
 class BuildError(Exception):
-    """Error during a named build pipeline step."""
+    """Wrap an exception raised during a named build pipeline step.
+
+    Parameters
+    ----------
+    step
+        Name of the pipeline step that failed.
+    cause
+        Original exception.
+
+    Attributes
+    ----------
+    step : str
+        Name of the pipeline step that failed.
+    cause : Exception
+        Original exception.
+    """
 
     def __init__(self, step: str, cause: Exception) -> None:
         self.step = step
@@ -158,13 +208,30 @@ class BuildError(Exception):
 
 
 def build_model(raw: RawModelData) -> ResolvedModelData:
-    """Run full build pipeline and return ``ResolvedModelData``.
+    """Run the full build pipeline and return ``ResolvedModelData``.
 
     Before validation the pipeline fills in derivable tables that the user
     did not supply (periods, facility_roles, default categories, demand/supply
     from observed flow, inventory_initial from observed inventory).  The
     resulting :class:`BuildReport` is attached to the returned model as
     ``ResolvedModelData.build_report``.
+
+    Parameters
+    ----------
+    raw
+        Unresolved raw model data.
+
+    Returns
+    -------
+    ResolvedModelData
+        Fully resolved model with spines and build report.
+
+    Raises
+    ------
+    ValueError
+        If raw model validation fails.
+    BuildError
+        If any pipeline step raises an exception.
     """
     report = BuildReport()
     raw = _apply_derivations(raw, report)

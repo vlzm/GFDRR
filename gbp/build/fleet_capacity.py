@@ -12,8 +12,26 @@ def compute_fleet_capacity(
 ) -> pd.DataFrame | None:
     """Compute ``effective_capacity`` per (facility, resource_category).
 
-    If ``resources`` is provided, aggregate per-resource capacity at
+    If *resources* is provided, aggregate per-resource capacity at
     ``home_facility_id``. Otherwise use ``count * base_capacity`` from fleet.
+
+    Parameters
+    ----------
+    resource_fleet
+        Fleet counts per facility and resource category. ``None`` yields an
+        immediate ``None`` return.
+    resource_categories
+        Must contain ``resource_category_id`` and ``base_capacity``.
+    resources
+        Optional individual-resource table with ``capacity_override``.
+        Default is ``None`` (use fleet-level counts).
+
+    Returns
+    -------
+    pd.DataFrame or None
+        Columns ``facility_id``, ``resource_category``,
+        ``effective_capacity``. ``None`` when *resource_fleet* is missing
+        or empty.
     """
     if resource_fleet is None or resource_fleet.empty:
         return None

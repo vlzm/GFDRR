@@ -1,4 +1,4 @@
-"""AttributeSpec: unified description of a numeric (or additional) attribute."""
+"""Unified description of a numeric (or additional) attribute."""
 
 from __future__ import annotations
 
@@ -20,10 +20,37 @@ _ENTITY_GRAINS: dict[str, tuple[str, ...]] = {
 
 @dataclass(frozen=True)
 class AttributeSpec:
-    """Describes one attribute column merged into a spine table.
+    """Describe one attribute column merged into a spine table.
 
-    ``grain`` uses ``date`` for time-varying raw tables; ``resolved_grain`` uses
-    ``period_id`` after the build pipeline time-resolution step.
+    ``grain`` uses ``date`` for time-varying raw tables; ``resolved_grain``
+    uses ``period_id`` after the build pipeline time-resolution step.
+
+    Parameters
+    ----------
+    name
+        Unique attribute identifier.
+    kind
+        Semantic kind (cost, capacity, rate, revenue, additional).
+    entity_type
+        One of ``"facility"``, ``"edge"``, ``"resource"``.
+    grain
+        Raw grain columns including ``"date"`` for time-varying attributes.
+    resolved_grain
+        Grain columns after time resolution (``"date"`` replaced by
+        ``"period_id"``).
+    value_column
+        Column in the source data that holds the attribute value.
+    source_table
+        Name of the raw data table or registry key.
+    unit
+        Physical unit string. Default is ``None``.
+    aggregation
+        Aggregation function name. Default is ``"mean"``.
+    nullable
+        Whether missing values are allowed. Default is ``False``.
+    eav_filter
+        Column-value pairs used to filter EAV-style tables before
+        extraction. Default is ``None``.
     """
 
     name: str
@@ -39,7 +66,15 @@ class AttributeSpec:
     eav_filter: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        """Validate entity grains, aggregation, and time-varying consistency."""
+        """Validate entity grains, aggregation, and time-varying consistency.
+
+        Raises
+        ------
+        ValueError
+            If aggregation is invalid, entity_type is unknown, entity grain
+            is not a subset of grain/resolved_grain, or time-varying
+            consistency rules are violated.
+        """
         if self.aggregation not in VALID_AGGREGATIONS:
             raise ValueError(
                 f"Attribute {self.name!r}: aggregation {self.aggregation!r} is not valid; "
@@ -70,14 +105,32 @@ class AttributeSpec:
 
     @property
     def entity_grain(self) -> tuple[str, ...]:
-        """Identity columns for the entity (facility, edge, or resource category)."""
+        """Return identity columns for the entity (facility, edge, or resource category).
+
+        Returns
+        -------
+        tuple of str
+            Column names that identify the entity.
+        """
         return _ENTITY_GRAINS[self.entity_type]
 
     @property
     def time_varying(self) -> bool:
-        """True when raw grain includes calendar ``date``."""
+        """Check whether raw grain includes calendar ``date``.
+
+        Returns
+        -------
+        bool
+            ``True`` when the attribute is time-varying.
+        """
         return "date" in self.grain
 
     def resolved_merge_grain(self) -> tuple[str, ...]:
-        """Grain columns used when merging resolved attribute tables."""
+        """Return grain columns used when merging resolved attribute tables.
+
+        Returns
+        -------
+        tuple of str
+            Column names forming the merge grain after time resolution.
+        """
         return self.resolved_grain

@@ -79,7 +79,7 @@ select = [
 ignore = ["D100", "D104"]  # Missing docstring in public module/package
 
 [tool.ruff.pydocstyle]
-convention = "google"
+convention = "numpy"
 
 [tool.mypy]
 python_version = "3.11"

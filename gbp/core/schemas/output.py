@@ -1,4 +1,4 @@
-"""Optimizer and simulator output row schemas."""
+"""Define optimizer and simulator output row schemas."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class SolutionFlow(BaseModel):
-    """Planned flow from optimizer."""
+    """Represent planned flow from optimizer."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -22,7 +22,7 @@ class SolutionFlow(BaseModel):
 
 
 class SolutionInventory(BaseModel):
-    """Planned end-of-period inventory from optimizer."""
+    """Represent planned end-of-period inventory from optimizer."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -34,7 +34,7 @@ class SolutionInventory(BaseModel):
 
 
 class SolutionUnmetDemand(BaseModel):
-    """Shortfall vs demand from optimizer."""
+    """Represent shortfall vs demand from optimizer."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -46,7 +46,7 @@ class SolutionUnmetDemand(BaseModel):
 
 
 class SolutionMetadata(BaseModel):
-    """Optimizer run metadata (one row per scenario)."""
+    """Represent optimizer run metadata (one row per scenario)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -59,7 +59,7 @@ class SolutionMetadata(BaseModel):
 
 
 class SimulationFlowLog(BaseModel):
-    """Simulated flow per period."""
+    """Represent simulated flow per period."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -73,7 +73,7 @@ class SimulationFlowLog(BaseModel):
 
 
 class SimulationInventoryLog(BaseModel):
-    """Simulated end-of-period inventory."""
+    """Represent simulated end-of-period inventory."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -85,7 +85,7 @@ class SimulationInventoryLog(BaseModel):
 
 
 class SimulationResourceLog(BaseModel):
-    """Simulated resource state per period."""
+    """Represent simulated resource state per period."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -99,7 +99,7 @@ class SimulationResourceLog(BaseModel):
 
 
 class SimulationMetadata(BaseModel):
-    """Simulator run metadata (one row per scenario)."""
+    """Represent simulator run metadata (one row per scenario)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

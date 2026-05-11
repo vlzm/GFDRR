@@ -37,16 +37,22 @@ def to_inventory_delta(
 ) -> pd.DataFrame:
     """Aggregate *rows* to a ``(facility_id, commodity_category, quantity)`` delta.
 
-    Args:
-        rows: Input DataFrame (e.g. observed flows, dispatches).  Must have
-            ``facility_col``, ``commodity_category``, and ``quantity_col``.
-        facility_col: Column to use as the facility key — ``"source_id"`` for
-            outflow, ``"target_id"`` for inflow.  Renamed to ``"facility_id"``
-            in the output.
-        quantity_col: Column whose values are summed.  Renamed to
-            ``"quantity"`` in the output.  Defaults to ``"quantity"``.
+    Parameters
+    ----------
+    rows
+        Input DataFrame (e.g. observed flows, dispatches).  Must have
+        ``facility_col``, ``commodity_category``, and ``quantity_col``.
+    facility_col
+        Column to use as the facility key — ``"source_id"`` for
+        outflow, ``"target_id"`` for inflow.  Renamed to ``"facility_id"``
+        in the output.
+    quantity_col
+        Column whose values are summed.  Renamed to
+        ``"quantity"`` in the output.  Defaults to ``"quantity"``.
 
-    Returns:
+    Returns
+    -------
+    pd.DataFrame
         DataFrame with exactly ``[facility_id, commodity_category, quantity]``.
     """
     return (
@@ -64,21 +70,29 @@ def apply_delta(
 ) -> pd.DataFrame:
     """Apply a per-(facility, commodity) delta to *inventory*.
 
-    Args:
-        inventory: Current inventory DataFrame in ``INVENTORY_COLUMNS`` shape.
-        delta: DataFrame with ``[facility_id, commodity_category, quantity]``;
-            the ``quantity`` column carries the delta magnitude.  Facilities
-            absent from *delta* are treated as delta = 0.
-        op: Arithmetic mode.  ``"subtract"`` and ``"add"`` apply the delta
-            directly.  ``"add_clip_zero"`` adds the delta and clips the
-            result at zero — used for organic arrivals where the source
-            facility's transient negative stock must not propagate.
+    Parameters
+    ----------
+    inventory
+        Current inventory DataFrame in ``INVENTORY_COLUMNS`` shape.
+    delta
+        DataFrame with ``[facility_id, commodity_category, quantity]``;
+        the ``quantity`` column carries the delta magnitude.  Facilities
+        absent from *delta* are treated as delta = 0.
+    op
+        Arithmetic mode.  ``"subtract"`` and ``"add"`` apply the delta
+        directly.  ``"add_clip_zero"`` adds the delta and clips the
+        result at zero — used for organic arrivals where the source
+        facility's transient negative stock must not propagate.
 
-    Returns:
+    Returns
+    -------
+    pd.DataFrame
         New inventory DataFrame in ``INVENTORY_COLUMNS`` shape.
 
-    Raises:
-        ValueError: If *op* is not one of the supported modes.
+    Raises
+    ------
+    ValueError
+        If *op* is not one of the supported modes.
     """
     merged = inventory.merge(
         delta.rename(columns={"quantity": "_delta"}),
@@ -113,14 +127,21 @@ def merge_with_inventory(
     :func:`apply_delta`.  Caller is responsible for the arithmetic and for
     reducing the result back to ``INVENTORY_COLUMNS`` shape.
 
-    Args:
-        inventory: Current inventory DataFrame.
-        delta: DataFrame to merge.  Must contain ``[facility_id,
-            commodity_category, value_col]``.
-        value_col: The column to ``fillna(default)`` after the merge.
-        default: Fill value for missing rows.
+    Parameters
+    ----------
+    inventory
+        Current inventory DataFrame.
+    delta
+        DataFrame to merge.  Must contain ``[facility_id,
+        commodity_category, value_col]``.
+    value_col
+        The column to ``fillna(default)`` after the merge.
+    default
+        Fill value for missing rows.  Defaults to ``0.0``.
 
-    Returns:
+    Returns
+    -------
+    pd.DataFrame
         Merged DataFrame including the inventory's ``quantity`` column and
         the filled *value_col*.
     """

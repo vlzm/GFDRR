@@ -1,4 +1,4 @@
-"""Build pipeline: RawModelData to ResolvedModelData."""
+"""Build pipeline: transform RawModelData to ResolvedModelData."""
 
 from gbp.build.pipeline import BuildError, build_model
 from gbp.build.spine import assemble_spines

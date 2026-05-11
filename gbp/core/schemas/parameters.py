@@ -1,4 +1,4 @@
-"""Operation, transport, and resource cost row schemas."""
+"""Define operation, transport, and resource cost row schemas."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class OperationCapacity(BaseModel):
-    """Capacity limit for an operation at a facility."""
+    """Represent capacity limit for an operation at a facility."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -19,7 +19,7 @@ class OperationCapacity(BaseModel):
 
 
 class OperationCost(BaseModel):
-    """Time-varying operation cost (raw date)."""
+    """Represent time-varying operation cost (raw date)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -31,7 +31,7 @@ class OperationCost(BaseModel):
 
 
 class TransportCost(BaseModel):
-    """Time-varying transport cost on an edge (raw date)."""
+    """Represent time-varying transport cost on an edge (raw date)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -44,7 +44,7 @@ class TransportCost(BaseModel):
 
 
 class ResourceCost(BaseModel):
-    """EAV-style custom resource attribute (cost or rate)."""
+    """Represent an EAV-style custom resource attribute (cost or rate)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

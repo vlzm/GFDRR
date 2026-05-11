@@ -1,4 +1,4 @@
-"""Facility and commodity hierarchy row schemas."""
+"""Define facility and commodity hierarchy row schemas."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class FacilityHierarchyType(BaseModel):
-    """One facility hierarchy kind (e.g. geographic, organizational)."""
+    """Represent one facility hierarchy kind (e.g. geographic, organizational)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -16,7 +16,7 @@ class FacilityHierarchyType(BaseModel):
 
 
 class FacilityHierarchyLevel(BaseModel):
-    """Named level within a facility hierarchy."""
+    """Represent a named level within a facility hierarchy."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -26,7 +26,7 @@ class FacilityHierarchyLevel(BaseModel):
 
 
 class FacilityHierarchyNode(BaseModel):
-    """Node in a facility hierarchy tree."""
+    """Represent a node in a facility hierarchy tree."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -38,7 +38,7 @@ class FacilityHierarchyNode(BaseModel):
 
 
 class FacilityHierarchyMembership(BaseModel):
-    """Maps a facility to one leaf node per hierarchy type."""
+    """Map a facility to one leaf node per hierarchy type."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -48,7 +48,7 @@ class FacilityHierarchyMembership(BaseModel):
 
 
 class CommodityHierarchyType(BaseModel):
-    """One commodity hierarchy kind (e.g. product_group)."""
+    """Represent one commodity hierarchy kind (e.g. product_group)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -58,7 +58,7 @@ class CommodityHierarchyType(BaseModel):
 
 
 class CommodityHierarchyLevel(BaseModel):
-    """Named level within a commodity hierarchy."""
+    """Represent a named level within a commodity hierarchy."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -68,7 +68,7 @@ class CommodityHierarchyLevel(BaseModel):
 
 
 class CommodityHierarchyNode(BaseModel):
-    """Node in a commodity hierarchy tree."""
+    """Represent a node in a commodity hierarchy tree."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -80,7 +80,7 @@ class CommodityHierarchyNode(BaseModel):
 
 
 class CommodityHierarchyMembership(BaseModel):
-    """Maps a commodity category to one leaf node per hierarchy type."""
+    """Map a commodity category to one leaf node per hierarchy type."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

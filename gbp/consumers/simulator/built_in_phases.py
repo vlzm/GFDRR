@@ -33,12 +33,17 @@ class DemandPhase:
 
     For each demand row matching the current period, subtracts from inventory.
     Logs flow events (commodity leaving system) and any unmet demand (deficit).
+
+    Parameters
+    ----------
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "DEMAND"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+        """Initialise with an optional schedule."""
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
@@ -120,7 +125,20 @@ def _period_flows(
     resolved: ResolvedModelData,
     period: PeriodRow,
 ) -> pd.DataFrame | None:
-    """Return observed_flow rows for *period*, or ``None`` if empty."""
+    """Return observed_flow rows for *period*, or ``None`` if empty.
+
+    Parameters
+    ----------
+    resolved
+        Resolved model carrying ``observed_flow``.
+    period
+        Period descriptor to filter by.
+
+    Returns
+    -------
+    pd.DataFrame or None
+        Filtered rows, or ``None`` when no flows exist for the period.
+    """
     if resolved.observed_flow.empty:
         return None
     flows = resolved.observed_flow[
@@ -142,12 +160,17 @@ class OrganicDeparturePhase:
     negative within a period.  The corresponding :class:`OrganicArrivalPhase`
     adds inflow and clips the result, restoring exact parity with the
     original :class:`OrganicFlowPhase`.
+
+    Parameters
+    ----------
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "ORGANIC_DEPARTURE"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+        """Initialise with an optional schedule."""
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
@@ -192,12 +215,17 @@ class OrganicArrivalPhase:
 
     Together, ``[OrganicDeparturePhase, OrganicArrivalPhase]`` produce the
     same final inventory as the original :class:`OrganicFlowPhase`.
+
+    Parameters
+    ----------
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "ORGANIC_ARRIVAL"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+        """Initialise with an optional schedule."""
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
@@ -231,12 +259,17 @@ class OrganicFlowPhase:
     Use this in place of :class:`DemandPhase` when the target side of every
     organic movement is known (e.g. bike-share trips where each demand event
     has a known destination station).
+
+    Parameters
+    ----------
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "ORGANIC_FLOW"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+        """Initialise with an optional schedule."""
         self._schedule = schedule or Schedule.every()
         self._departure = OrganicDeparturePhase(self._schedule)
         self._arrival = OrganicArrivalPhase(self._schedule)
@@ -278,12 +311,17 @@ class HistoricalLatentDemandPhase:
     "what people wanted" before any physics is applied.  Because the marginals
     are read directly from ``observed_flow``, downstream physics phases
     operating on the same data reproduce the historical record exactly.
+
+    Parameters
+    ----------
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "HISTORICAL_LATENT_DEMAND"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+        """Initialise with an optional schedule."""
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
@@ -356,12 +394,17 @@ class HistoricalODStructurePhase:
     (modulo floating-point error), since the marginal ``O_i`` is recomputed
     from the same ``T_ij`` rather than read from elsewhere — guaranteeing
     self-consistency and parity with the data the next phase will sample.
+
+    Parameters
+    ----------
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "HISTORICAL_OD_STRUCTURE"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+        """Initialise with an optional schedule."""
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
@@ -428,6 +471,20 @@ class DeparturePhysicsPhase:
     The phase publishes ``intermediates["realized_departures"]`` for
     downstream trip sampling and emits ``simulation_lost_demand_log`` rows
     where ``lost > 0``.
+
+    Parameters
+    ----------
+    mode
+        ``"permissive"`` for historical replay (no clipping),
+        ``"strict"`` for predictive scenarios (enforce inventory >= 0).
+        Defaults to ``"permissive"``.
+    schedule
+        Optional execution schedule.  Defaults to every period.
+
+    Raises
+    ------
+    ValueError
+        If *mode* is not one of ``"permissive"`` or ``"strict"``.
     """
 
     name: str = "DEPARTURE_PHYSICS"
@@ -437,16 +494,7 @@ class DeparturePhysicsPhase:
         mode: Literal["permissive", "strict"] = "permissive",
         schedule: Schedule | None = None,
     ) -> None:
-        """Initialise the phase.
-
-        Args:
-            mode: ``"permissive"`` for historical replay (no clipping),
-                ``"strict"`` for predictive scenarios (enforce inventory >= 0).
-            schedule: Optional schedule (default: every period).
-
-        Raises:
-            ValueError: If *mode* is not one of ``"permissive"`` or ``"strict"``.
-        """
+        """Initialise the phase."""
         if mode not in ("permissive", "strict"):
             msg = f"mode must be 'permissive' or 'strict', got {mode!r}"
             raise ValueError(msg)
@@ -558,6 +606,15 @@ class HistoricalTripSamplingPhase:
     Set ``use_durations=False`` to force same-period delivery for every
     row, regardless of the column's presence — matches the pre-extension
     behaviour for callers that explicitly opt out of the duration logic.
+
+    Parameters
+    ----------
+    use_durations
+        When ``True`` (default), compute arrival periods from
+        ``duration_hours`` if available.  When ``False``, force
+        same-period delivery for every row.
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "HISTORICAL_TRIP_SAMPLING"
@@ -630,12 +687,17 @@ class ArrivalsPhase:
     Filters ``state.in_transit`` for shipments whose ``arrival_period`` matches
     the current ``period.period_index``, transfers commodity into target facility
     inventory, and updates resource statuses from IN_TRANSIT to AVAILABLE.
+
+    Parameters
+    ----------
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "ARRIVALS"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+        """Initialise with an optional schedule."""
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
@@ -721,13 +783,15 @@ class LatentDemandInflatorPhase:
     That is intentional: it makes the phase safe to insert unconditionally
     into a pipeline without changing existing behaviour.
 
-    Args:
-        multiplier: Either a scalar ``float`` applied to every facility row,
-            or a ``dict[str, float]`` mapping ``facility_id`` to a per-facility
-            factor.  Facilities absent from the dict receive an implicit
-            multiplier of ``1.0``.
-        schedule: Optional :class:`~gbp.consumers.simulator.phases.Schedule`
-            (default: every period).
+    Parameters
+    ----------
+    multiplier
+        Either a scalar ``float`` applied to every facility row,
+        or a ``dict[str, float]`` mapping ``facility_id`` to a per-facility
+        factor.  Facilities absent from the dict receive an implicit
+        multiplier of ``1.0``.  Defaults to ``1.0``.
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "LATENT_DEMAND_INFLATOR"
@@ -737,13 +801,7 @@ class LatentDemandInflatorPhase:
         multiplier: float | dict[str, float] = 1.0,
         schedule: Schedule | None = None,
     ) -> None:
-        """Initialise with an optional multiplier and schedule.
-
-        Args:
-            multiplier: Scalar float or per-facility dict.  Defaults to
-                ``1.0`` (identity).
-            schedule: Optional schedule (default: every period).
-        """
+        """Initialise with an optional multiplier and schedule."""
         self._multiplier = multiplier
         self._schedule = schedule or Schedule.every()
 
@@ -759,15 +817,20 @@ class LatentDemandInflatorPhase:
     ) -> PhaseResult:
         """Scale ``latent_demand`` in intermediates by the configured multiplier.
 
-        Args:
-            state: Current simulation state.
-            resolved: Resolved model data (unused; required by the Phase protocol).
-            period: Current period descriptor (unused; required by the Phase protocol).
+        Parameters
+        ----------
+        state
+            Current simulation state.
+        resolved
+            Resolved model data (unused; required by the Phase protocol).
+        period
+            Current period descriptor (unused; required by the Phase protocol).
 
-        Returns:
-            A :class:`~gbp.consumers.simulator.phases.PhaseResult` with the
-            updated state.  No events are emitted — this phase only mutates
-            intermediate state.
+        Returns
+        -------
+        PhaseResult
+            Updated state with scaled latent demand.  No events are emitted —
+            this phase only mutates intermediate state.
         """
         latent = state.intermediates.get("latent_demand")
         if latent is None or latent.empty:
@@ -817,12 +880,17 @@ class DockCapacityPhase:
     - ``incoming``  — post-arrivals quantity that approached the dock.
     - ``accepted``  — quantity that fit (= ``min(incoming, capacity)``).
     - ``blocked``   — quantity that could not fit (= ``incoming - accepted``).
+
+    Parameters
+    ----------
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "DOCK_CAPACITY"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+        """Initialise with an optional schedule."""
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
@@ -899,12 +967,17 @@ class OverflowRedirectPhase:
     :class:`DockCapacityPhase` semantics and keeps the canonical replay
     pipeline stable when a fixture lists only a subset of facilities in the
     storage attribute.
+
+    Parameters
+    ----------
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "OVERFLOW_REDIRECT"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule (default: every period)."""
+        """Initialise with an optional schedule."""
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
@@ -1153,6 +1226,17 @@ class EndOfPeriodDeficitPhase:
     scenarios where :class:`LatentDemandInflatorPhase` scales the latent
     marginals above what physical supply can cover.
 
+    Parameters
+    ----------
+    tolerance
+        Absolute floor below which a negative inventory is
+        treated as floating-point noise rather than a real deficit.
+        Defaults to ``1e-9``.
+    schedule
+        Optional execution schedule.  Defaults to every period.
+
+    Notes
+    -----
     Conservation: bikes counted as "lost" never actually left the source
     station — the customer did not find a bike.  To keep
     ``inventory + in_transit`` consistent, the phase removes a matching
@@ -1171,13 +1255,7 @@ class EndOfPeriodDeficitPhase:
         tolerance: float = 1e-9,
         schedule: Schedule | None = None,
     ) -> None:
-        """Initialise with optional tolerance and schedule.
-
-        Args:
-            tolerance: Absolute floor below which a negative inventory is
-                treated as floating-point noise rather than a real deficit.
-            schedule: Optional schedule (default: every period).
-        """
+        """Initialise with optional tolerance and schedule."""
         self._tolerance = tolerance
         self._schedule = schedule or Schedule.every()
 
@@ -1273,6 +1351,19 @@ class EndOfPeriodDeficitPhase:
         Reduces shipment quantities in DataFrame order until *deficit* is
         covered or no candidate shipments remain.  Mutates *in_transit* in
         place — the caller owns the copy.
+
+        Parameters
+        ----------
+        in_transit
+            In-transit DataFrame to mutate (caller-owned copy).
+        facility_id
+            Source facility whose shipments should be reduced.
+        commodity
+            Commodity category to filter by.
+        period_index
+            Current period index to match ``departure_period``.
+        deficit
+            Total quantity to cancel from matching shipments.
         """
         if in_transit.empty:
             return
@@ -1325,6 +1416,23 @@ class InvariantCheckPhase:
     and memoises them on ``self`` so subsequent periods (where
     ``intermediates`` has been wiped by ``advance_period``) still see the
     captured value.  No log row is emitted on capture.
+
+    Parameters
+    ----------
+    baseline
+        Optional per-commodity baseline ``dict[str, float]``.
+        When omitted the first ``execute`` captures the current
+        state as the baseline.
+    fail_on_violation
+        When ``True`` (default for canonical replay), violations raise
+        :class:`InvariantViolationError`.  When ``False`` (treatment
+        scenarios), violations are logged into
+        ``simulation_invariant_violation_log`` and the run continues.
+    tolerance
+        Absolute tolerance for floating-point comparison.
+        Defaults to ``1e-9``.
+    schedule
+        Optional execution schedule.  Defaults to every period.
     """
 
     name: str = "INVARIANT_CHECK"
@@ -1337,20 +1445,7 @@ class InvariantCheckPhase:
         tolerance: float = 1e-9,
         schedule: Schedule | None = None,
     ) -> None:
-        """Initialise the phase.
-
-        Args:
-            baseline: Optional per-commodity baseline ``dict[str, float]``.
-                When omitted the first ``execute`` captures the current
-                state as the baseline.
-            fail_on_violation: When ``True`` (default for canonical
-                replay), violations raise :class:`InvariantViolationError`.
-                When ``False`` (treatment scenarios), violations are
-                logged into ``simulation_invariant_violation_log`` and
-                the run continues.
-            tolerance: Absolute tolerance for floating-point comparison.
-            schedule: Optional schedule (default: every period).
-        """
+        """Initialise the phase."""
         self._baseline: dict[str, float] | None = (
             None if baseline is None else dict(baseline)
         )
@@ -1414,7 +1509,18 @@ class InvariantCheckPhase:
 
 
 def _per_commodity_total(state: SimulationState) -> dict[str, float]:
-    """Sum ``state.inventory + state.in_transit`` per commodity_category."""
+    """Sum ``state.inventory + state.in_transit`` per commodity_category.
+
+    Parameters
+    ----------
+    state
+        Current simulation state.
+
+    Returns
+    -------
+    dict[str, float]
+        Mapping from commodity category to total quantity.
+    """
     if state.inventory.empty:
         inv_totals = pd.Series(dtype=float)
     else:

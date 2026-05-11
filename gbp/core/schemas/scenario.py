@@ -1,4 +1,4 @@
-"""Scenario configuration row schemas."""
+"""Define scenario configuration row schemas."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Scenario(BaseModel):
-    """One planning scenario referencing a planning horizon."""
+    """Represent one planning scenario referencing a planning horizon."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -21,7 +21,7 @@ class Scenario(BaseModel):
 
 
 class ScenarioEdgeRules(BaseModel):
-    """Edge rules scoped to a scenario."""
+    """Represent edge rules scoped to a scenario."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -34,7 +34,7 @@ class ScenarioEdgeRules(BaseModel):
 
 
 class ScenarioManualEdges(BaseModel):
-    """Manual edge triples added for a scenario."""
+    """Represent manual edge triples added for a scenario."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -46,7 +46,7 @@ class ScenarioManualEdges(BaseModel):
 
 
 class ScenarioParameterOverrides(BaseModel):
-    """Scalar overrides for named attributes on entities."""
+    """Represent scalar overrides for named attributes on entities."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

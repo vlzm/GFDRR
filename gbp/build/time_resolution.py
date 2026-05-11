@@ -26,15 +26,24 @@ def build_periods_from_segments(
     assigned globally as ``p0``, ``p1``, ... in segment-order to match the
     convention used by existing loaders and fixtures.
 
-    Args:
-        planning_horizon: Must contain ``planning_horizon_id`` (one row expected).
-        planning_horizon_segments: Must contain ``planning_horizon_id``,
-            ``segment_index``, ``start_date``, ``end_date``, ``period_type``.
+    Parameters
+    ----------
+    planning_horizon
+        Must contain ``planning_horizon_id`` (one row expected).
+    planning_horizon_segments
+        Must contain ``planning_horizon_id``, ``segment_index``,
+        ``start_date``, ``end_date``, ``period_type``.
 
-    Returns:
-        DataFrame with columns ``period_id``, ``planning_horizon_id``,
-        ``segment_index``, ``period_index``, ``period_type``, ``start_date``,
-        ``end_date``.
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``period_id``, ``planning_horizon_id``, ``segment_index``,
+        ``period_index``, ``period_type``, ``start_date``, ``end_date``.
+
+    Raises
+    ------
+    ValueError
+        If a segment has an unsupported ``period_type``.
     """
     horizon_id = str(planning_horizon["planning_horizon_id"].iloc[0])
 
@@ -93,7 +102,20 @@ def build_periods_from_segments(
 
 
 def _advance_period_ends(starts: pd.DatetimeIndex, period_type: str) -> pd.DatetimeIndex:
-    """Compute the exclusive end timestamp for each period start."""
+    """Compute the exclusive end timestamp for each period start.
+
+    Parameters
+    ----------
+    starts
+        Period start timestamps.
+    period_type
+        One of ``"day"``, ``"week"``, ``"month"``.
+
+    Returns
+    -------
+    pd.DatetimeIndex
+        Exclusive end timestamps.
+    """
     if period_type == PeriodType.DAY.value:
         return starts + pd.Timedelta(days=1)
     if period_type == PeriodType.WEEK.value:
@@ -111,25 +133,34 @@ def resolve_to_periods(
 ) -> pd.DataFrame:
     """Map ``date`` rows into ``period_id`` buckets and aggregate values.
 
-    A row's ``date`` falls in period ``p`` when
+    A row's ``date`` falls in period *p* when
     ``p.start_date <= date < p.end_date`` (end exclusive).
 
-    Uses ``pd.merge_asof`` for O(N log N) assignment instead of iterating periods.
+    Uses ``pd.merge_asof`` for O(N log N) assignment instead of iterating
+    periods.
 
-    Args:
-        param_df: Must contain ``date`` plus ``group_grain`` columns.
-        periods: Must contain ``period_id``, ``start_date``, ``end_date``.
-        value_columns: Numeric columns to aggregate.
-        group_grain: Non-time key columns (excluding ``date``).
-        agg_func: Either a single pandas aggregate name applied to every value
-            column (``mean``, ``sum``, ``min``, ``max``), or a mapping
-            ``{value_column: aggregate_name}`` for per-column rules.  The
-            mapping form is required when columns mix semantically (e.g.
-            ``quantity`` summed and ``duration_hours`` averaged in the same
-            ``observed_flow`` resolution).
+    Parameters
+    ----------
+    param_df
+        Must contain ``date`` plus *group_grain* columns.
+    periods
+        Must contain ``period_id``, ``start_date``, ``end_date``.
+    value_columns
+        Numeric columns to aggregate.
+    group_grain
+        Non-time key columns (excluding ``date``).
+    agg_func
+        Either a single pandas aggregate name applied to every value column
+        (``"mean"``, ``"sum"``, ``"min"``, ``"max"``), or a mapping
+        ``{value_column: aggregate_name}`` for per-column rules.  The
+        mapping form is required when columns mix semantically (e.g.
+        ``quantity`` summed and ``duration_hours`` averaged in the same
+        ``observed_flow`` resolution). Default is ``"mean"``.
 
-    Returns:
-        DataFrame with ``group_grain + [period_id] + value_columns``.
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``group_grain + [period_id] + value_columns``.
     """
     empty_cols = list(group_grain) + ["period_id"] + value_columns
     if param_df.empty:
@@ -167,8 +198,17 @@ def resolve_registry_attributes(
 
     Non-time-varying attributes are copied through unchanged.
 
-    Returns:
-        New ``AttributeRegistry`` with resolved data (``period_id`` replaces ``date``).
+    Parameters
+    ----------
+    raw_registry
+        Registry containing raw (date-level) attribute data.
+    periods
+        Period table with ``period_id``, ``start_date``, ``end_date``.
+
+    Returns
+    -------
+    AttributeRegistry
+        New registry with resolved data (``period_id`` replaces ``date``).
     """
     resolved_registry = AttributeRegistry()
 
@@ -208,10 +248,21 @@ def resolve_registry_attributes(
 def resolve_all_time_varying(raw: RawModelData, periods: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Resolve structural time-varying tables from ``raw`` to period grain.
 
-    Returns a dict of table name -> resolved DataFrame. Only includes tables
-    that were present and non-empty in ``raw``.
+    Only includes tables that were present and non-empty in *raw*.
+    Parametric attributes are resolved via
+    :func:`resolve_registry_attributes`.
 
-    Parametric attributes are resolved via ``resolve_registry_attributes()``.
+    Parameters
+    ----------
+    raw
+        Raw model data with date-level tables.
+    periods
+        Period table produced by :func:`build_periods_from_segments`.
+
+    Returns
+    -------
+    dict of str to pd.DataFrame
+        Mapping of table name to its period-resolved DataFrame.
     """
     resolved: dict[str, pd.DataFrame] = {}
 

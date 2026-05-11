@@ -22,9 +22,12 @@ from gbp.core.model import ResolvedModelData
 class Environment:
     """Step-by-step simulation engine.
 
-    Args:
-        resolved: Fully resolved model from ``build_model()``.
-        config: Simulation configuration (phases, seed, scenario_id).
+    Parameters
+    ----------
+    resolved
+        Fully resolved model from ``build_model()``.
+    config
+        Simulation configuration (phases, seed, scenario_id).
     """
 
     def __init__(
@@ -34,10 +37,11 @@ class Environment:
     ) -> None:
         """Initialise the environment from resolved data and config.
 
-        Raises:
-            SimulatorConfigError: When the resolved model carries no demand,
-                supply, and no initial inventory — the simulator has nothing
-                to drive the flow.
+        Raises
+        ------
+        SimulatorConfigError
+            When the resolved model carries no demand, supply, and no initial
+            inventory — the simulator has nothing to drive the flow.
         """
         has_any_flow_input = (
             not resolved.demand.empty
@@ -82,8 +86,10 @@ class Environment:
     def run(self) -> SimulationLog:
         """Run the full simulation through all remaining periods.
 
-        Returns:
-            The accumulated ``SimulationLog``.
+        Returns
+        -------
+        SimulationLog
+            The accumulated simulation log.
         """
         while not self.is_done:
             self.step()
@@ -92,11 +98,15 @@ class Environment:
     def step(self) -> SimulationState:
         """Execute all phases for the current period and advance.
 
-        Returns:
+        Returns
+        -------
+        SimulationState
             The simulation state after this period.
 
-        Raises:
-            StopIteration: If the simulation is already done.
+        Raises
+        ------
+        StopIteration
+            If the simulation is already done.
         """
         if self.is_done:
             raise StopIteration("All periods have been processed.")
@@ -127,15 +137,22 @@ class Environment:
 
         Useful for debugging and testing individual phase behaviour.
 
-        Args:
-            phase_name: The ``name`` attribute of the phase to execute.
+        Parameters
+        ----------
+        phase_name
+            The ``name`` attribute of the phase to execute.
 
-        Returns:
+        Returns
+        -------
+        SimulationState
             The simulation state after executing the phase.
 
-        Raises:
-            StopIteration: If the simulation is already done.
-            ValueError: If no phase with *phase_name* is found.
+        Raises
+        ------
+        StopIteration
+            If the simulation is already done.
+        ValueError
+            If no phase with *phase_name* is found.
         """
         if self.is_done:
             raise StopIteration("All periods have been processed.")

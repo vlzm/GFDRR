@@ -1,3 +1,5 @@
+"""Mock data loader that generates synthetic bike-sharing datasets."""
+
 from __future__ import annotations
 
 import uuid
@@ -11,20 +13,23 @@ COMMODITY_CATEGORIES = ("electric_bike", "classic_bike")
 class DataLoaderMock:
     """Generate Citi Bike-like temporal mock data for rebalancing tests.
 
-    Required by ``BikeShareSourceProtocol``:
-        - df_stations             [station_id, lat, lon]
-        - df_depots               [node_id, lat, lon]
-        - df_resources            [resource_id]
-        - df_station_capacities   [station_id, commodity_category, capacity]
-        - df_depot_capacities     [node_id, commodity_category, capacity]
-        - df_resource_capacities  [resource_id, capacity]
-        - timestamps              DatetimeIndex
-        - inventory_initial       [facility_id, commodity_category, quantity]
-        - df_telemetry_ts         station telemetry (GBFS-like)
-        - df_trips                trip records with rideable_type as commodity
-        - df_station_costs        [station_id, fixed_cost_station]
-        - df_depot_costs          [node_id, fixed_cost_depot]
-        - df_truck_rates          [resource_id, cost_per_km, cost_per_hour, fixed_dispatch_cost]
+    Produces all tables required by ``BikeShareSourceProtocol``:
+    ``df_stations``, ``df_depots``, ``df_resources``, ``df_station_capacities``,
+    ``df_depot_capacities``, ``df_resource_capacities``, ``timestamps``,
+    ``inventory_initial``, ``df_telemetry_ts``, ``df_trips``,
+    ``df_station_costs``, ``df_depot_costs``, ``df_truck_rates``.
+
+    Parameters
+    ----------
+    config
+        Simulation parameters (``n_stations``, ``n_depots``, ``n_timestamps``,
+        ``start_date``, ``seed``, etc.).
+    n_trucks
+        Number of rebalancing trucks to emit. Default is 0 (no trucks), which
+        preserves the pre-truck behaviour of existing tests.
+    truck_capacity_bikes
+        Per-truck bike capacity recorded in ``df_resource_capacities``.
+        Only used when *n_trucks* > 0. Default is 30.
     """
 
     _GROUPS: dict[str, list[str]] = {
@@ -40,23 +45,13 @@ class DataLoaderMock:
         n_trucks: int = 0,
         truck_capacity_bikes: int = 30,
     ) -> None:
-        """Initialise mock loader with optional truck fleet configuration.
-
-        Args:
-            config: Simulation parameters (n_stations, n_depots, n_timestamps, etc.).
-            n_trucks: Number of rebalancing trucks to emit.  Defaults to 0
-                (no trucks), which preserves the pre-truck behaviour of
-                existing tests.  Set to a positive integer to include trucks
-                in the mock fleet.
-            truck_capacity_bikes: Per-truck bike capacity recorded in
-                ``df_resource_capacities``.  Only used when ``n_trucks > 0``.
-        """
         self.config = config
         self.n_trucks = n_trucks
         self.truck_capacity_bikes = truck_capacity_bikes
         self._rng = np.random.default_rng(seed=self.config.get("seed", 42))
 
     def load_data(self) -> None:
+        """Generate all mock DataFrames and store them as instance attributes."""
         n_stations = self.config["n_stations"]
         n_depots = self.config.get("n_depots", 2)
         n_timestamps = self.config.get("n_timestamps", 168)
@@ -137,10 +132,12 @@ class DataLoaderMock:
     # ── display ───────────────────────────────────────────────────────
 
     def _is_loaded(self) -> bool:
+        """Return ``True`` if ``load_data()`` has been called."""
         return getattr(self, "df_stations", None) is not None
 
     @staticmethod
     def _format_columns(df: pd.DataFrame, max_cols: int = 6) -> str:
+        """Format column names into a truncated comma-separated string."""
         if isinstance(df.columns, pd.MultiIndex):
             cols = [str(tuple(c)) for c in df.columns[:max_cols]]
         else:
@@ -151,7 +148,7 @@ class DataLoaderMock:
         return out
 
     def __repr__(self) -> str:
-        """Compact one-line-per-group summary of generated DataFrames."""
+        """Return compact one-line-per-group summary of generated DataFrames."""
         cls_name = type(self).__name__
         if not self._is_loaded():
             return f"{cls_name}(not loaded — call load_data())"
@@ -181,6 +178,7 @@ class DataLoaderMock:
         return header + "\n" + "\n".join(detail_parts) if detail_parts else header
 
     def _repr_html_(self) -> str:
+        """Return HTML table summary for Jupyter display."""
         cls_name = type(self).__name__
         if not self._is_loaded():
             return (
@@ -242,7 +240,7 @@ class DataLoaderMock:
     # ------------------------------------------------------------------
 
     def _generate_stations_full(self, n: int) -> pd.DataFrame:
-        """Generate full station data (internal); public df_stations is slimmed."""
+        """Generate full station data; public ``df_stations`` is a slim subset."""
         station_ids = [f"station_{i + 1}" for i in range(n)]
         street_prefix = np.array(["W", "E"])
         avenues = np.array([
@@ -275,6 +273,7 @@ class DataLoaderMock:
         })
 
     def _generate_depots(self, n: int) -> pd.DataFrame:
+        """Generate *n* depot records with random coordinates."""
         return pd.DataFrame({
             "node_id": [f"depot_{i + 1}" for i in range(n)],
             "lat": self._rng.uniform(40.68, 40.86, size=n),
@@ -290,12 +289,11 @@ class DataLoaderMock:
         depot_ebike_cap: int,
         depot_classic_cap: int,
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Pick a random initial inventory, then generate trips constrained by it.
+        """Pick random initial inventory and generate trips constrained by it.
 
-        Returns ``(inventory_initial, df_telemetry_ts, df_trips)``.  The full
-        hourly inventory matrix is kept as a local numpy array — it is only
-        used to drive the constrained trip generation and to seed the
-        GBFS-like telemetry — and is never exposed publicly.
+        The full hourly inventory matrix is kept as a local numpy array -- it is
+        only used to drive the constrained trip generation and to seed the
+        GBFS-like telemetry -- and is never exposed publicly.
 
         Contract with the downstream simulator (Demand + Arrivals only):
 
@@ -303,7 +301,7 @@ class DataLoaderMock:
            fall within the same calendar day.
         2. No trip event lands in the *first* hour of any day.  This keeps
            the hour-zero inventory equal to the "true start of day" state
-           (nothing applied yet) — ``inventory_initial`` is exactly that
+           (nothing applied yet) -- ``inventory_initial`` is exactly that
            state, which the simulator consumes at init time.
         3. Trip deltas are applied via cumulative broadcast on the local
            numpy matrix (``inv[start_hour:, start_idx] -= 1`` and
@@ -319,8 +317,28 @@ class DataLoaderMock:
            of departure/arrival, so the hourly trajectory stays in
            ``[0, per_commodity_capacity]``.
 
-        Depot inventory is constant in the mock — set to its per-commodity
+        Depot inventory is constant in the mock -- set to its per-commodity
         capacity for both ``inventory_initial`` and the telemetry seed.
+
+        Parameters
+        ----------
+        df_stations
+            Full station DataFrame (includes ``inventory_capacity``).
+        df_depots
+            Depot DataFrame.
+        timestamps
+            Time index for the simulation.
+        ebike_fraction
+            Fraction of capacity allocated to electric bikes.
+        depot_ebike_cap
+            Per-depot electric bike capacity.
+        depot_classic_cap
+            Per-depot classic bike capacity.
+
+        Returns
+        -------
+        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
+            ``(inventory_initial, df_telemetry_ts, df_trips)``.
         """
         total_capacities = df_stations["inventory_capacity"].to_numpy(dtype=int)
         station_ids = df_stations["station_id"].to_numpy()
@@ -530,6 +548,13 @@ class DataLoaderMock:
         df_depots: pd.DataFrame,
         df_resource_capacities: pd.DataFrame,
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """Generate random cost tables for stations, depots, and trucks.
+
+        Returns
+        -------
+        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
+            ``(df_station_costs, df_depot_costs, df_truck_rates)``.
+        """
         station_costs = pd.DataFrame({
             "station_id": df_stations["station_id"],
             "fixed_cost_station": np.round(

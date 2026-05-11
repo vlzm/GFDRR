@@ -1,4 +1,20 @@
-"""Attribute system: specs, grain groups, merge planning, spine builder, and registry."""
+"""Attribute system: specs, grain groups, merge planning, spine builder, and registry.
+
+Modules
+-------
+spec
+    ``AttributeSpec`` dataclass describing one attribute column.
+grain_groups
+    Cluster attributes by grain compatibility.
+merge_plan
+    Compute left-join merge order for spine assembly.
+builder
+    ``AttributeBuilder`` assembles spine tables from base entities.
+registry
+    ``AttributeRegistry`` stores parametric attributes with data.
+defaults
+    Default ``AttributeSpec`` catalog for bike-sharing scenarios.
+"""
 
 from gbp.core.attributes.builder import AttributeBuilder
 from gbp.core.attributes.defaults import (

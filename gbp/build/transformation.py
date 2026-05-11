@@ -13,7 +13,23 @@ def resolve_transformations(
 ) -> pd.DataFrame | None:
     """Return one row per facility x transformation x input x output pair.
 
-    Returns None if any transformation table is missing or transformations empty.
+    Parameters
+    ----------
+    facilities
+        Must contain ``facility_id``.
+    transformations
+        Transformation definitions with ``transformation_id``,
+        ``facility_id``. ``None`` yields an immediate ``None`` return.
+    transformation_inputs
+        Input commodity rows. ``None`` yields ``None``.
+    transformation_outputs
+        Output commodity rows. ``None`` yields ``None``.
+
+    Returns
+    -------
+    pd.DataFrame or None
+        Denormalized join, or ``None`` if any table is missing or
+        *transformations* is empty.
     """
     if (
         transformations is None

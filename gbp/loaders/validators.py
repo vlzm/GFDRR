@@ -15,7 +15,20 @@ def validate_csv_columns(
 ) -> list[str]:
     """Check ``df`` columns against the Pydantic schema for *table_name*.
 
-    Returns a list of error/warning message strings (empty = ok).
+    Parameters
+    ----------
+    table_name
+        Logical table name used to look up the expected schema.
+    df
+        DataFrame whose columns are validated.
+    strict
+        When ``True``, extra columns not in the schema are reported as errors.
+        Default is ``False``.
+
+    Returns
+    -------
+    list[str]
+        Error/warning messages (empty list means validation passed).
     """
     schema_map = RawModelData._SCHEMAS
     if table_name not in schema_map:

@@ -20,6 +20,20 @@ _SKIP_PREFIXES = ("_",)
 
 
 def _is_dataclass_df_field(name: str, obj: object) -> bool:
+    """Check whether a named attribute on *obj* holds a DataFrame.
+
+    Parameters
+    ----------
+    name
+        Attribute name to inspect.
+    obj
+        Object to check.
+
+    Returns
+    -------
+    bool
+        ``True`` if ``getattr(obj, name)`` is a ``pd.DataFrame``.
+    """
     val = getattr(obj, name, None)
     return isinstance(val, pd.DataFrame)
 
@@ -28,7 +42,20 @@ def _save_attribute_registry(
     registry: AttributeRegistry,
     directory: Path,
 ) -> dict[str, Any]:
-    """Serialize attribute registry to an ``attributes/`` sub-directory."""
+    """Serialize attribute registry to an ``attributes/`` sub-directory.
+
+    Parameters
+    ----------
+    registry
+        Attribute registry to persist.
+    directory
+        Parent directory; an ``attributes/`` child is created inside it.
+
+    Returns
+    -------
+    dict[str, Any]
+        Metadata dict with the list of persisted attribute names.
+    """
     if not registry:
         return {}
 
@@ -64,7 +91,18 @@ def _save_attribute_registry(
 
 
 def _load_attribute_registry(directory: Path) -> AttributeRegistry:
-    """Deserialize attribute registry from an ``attributes/`` sub-directory."""
+    """Deserialize attribute registry from an ``attributes/`` sub-directory.
+
+    Parameters
+    ----------
+    directory
+        Parent directory that contains an ``attributes/`` child.
+
+    Returns
+    -------
+    AttributeRegistry
+        Reconstructed registry (empty if no attributes directory exists).
+    """
     registry = AttributeRegistry()
     attr_dir = directory / "attributes"
 
@@ -108,7 +146,17 @@ def _save_tables(
     directory: Path,
     format_name: str,
 ) -> None:
-    """Write all non-None DataFrames as Parquet and produce ``_metadata.json``."""
+    """Write all non-None DataFrames as Parquet and produce ``_metadata.json``.
+
+    Parameters
+    ----------
+    obj
+        ``RawModelData`` or ``ResolvedModelData`` instance.
+    directory
+        Target directory (created if absent).
+    format_name
+        Value written to the ``format`` key in ``_metadata.json``.
+    """
     directory.mkdir(parents=True, exist_ok=True)
     tables: list[str] = []
     spine_meta: dict[str, list[str]] = {}
@@ -159,7 +207,27 @@ def _load_tables(
     cls: type,
     required: frozenset[str],
 ) -> dict[str, Any]:
-    """Read Parquet files back into constructor kwargs for *cls*."""
+    """Read Parquet files back into constructor kwargs for *cls*.
+
+    Parameters
+    ----------
+    directory
+        Directory containing ``_metadata.json`` and ``.parquet`` files.
+    cls
+        Target dataclass type (``RawModelData`` or ``ResolvedModelData``).
+    required
+        Field names that must have a corresponding ``.parquet`` file.
+
+    Returns
+    -------
+    dict[str, Any]
+        Keyword arguments suitable for ``cls(**kwargs)``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``_metadata.json`` is missing or a required Parquet file is absent.
+    """
     meta_path = directory / "_metadata.json"
     if not meta_path.exists():
         raise FileNotFoundError(f"Missing _metadata.json in {directory}")
@@ -215,12 +283,31 @@ def _load_tables(
 
 
 def save_raw_parquet(raw: RawModelData, directory: str | Path) -> None:
-    """Save ``RawModelData`` as a directory of Parquet files."""
+    """Save ``RawModelData`` as a directory of Parquet files.
+
+    Parameters
+    ----------
+    raw
+        Raw model data to persist.
+    directory
+        Target directory (created if absent).
+    """
     _save_tables(raw, Path(directory), "RawModelData")
 
 
 def load_raw_parquet(directory: str | Path) -> RawModelData:
-    """Load ``RawModelData`` from a Parquet directory."""
+    """Load ``RawModelData`` from a Parquet directory.
+
+    Parameters
+    ----------
+    directory
+        Directory previously written by ``save_raw_parquet``.
+
+    Returns
+    -------
+    RawModelData
+        Validated raw model data.
+    """
     kwargs = _load_tables(Path(directory), RawModelData, RawModelData._REQUIRED)
     raw = RawModelData(**kwargs)
     raw.validate()
@@ -228,7 +315,15 @@ def load_raw_parquet(directory: str | Path) -> RawModelData:
 
 
 def save_resolved_parquet(resolved: ResolvedModelData, directory: str | Path) -> None:
-    """Save ``ResolvedModelData`` as a directory of Parquet files."""
+    """Save ``ResolvedModelData`` as a directory of Parquet files.
+
+    Parameters
+    ----------
+    resolved
+        Resolved model data to persist.
+    directory
+        Target directory (created if absent).
+    """
     _save_tables(resolved, Path(directory), "ResolvedModelData")
 
 
@@ -241,6 +336,18 @@ def load_resolved_parquet(
 
     Validation is off by default because resolved tables may have different
     column sets after time resolution (e.g. ``period_id`` replaces ``date``).
+
+    Parameters
+    ----------
+    directory
+        Directory previously written by ``save_resolved_parquet``.
+    validate
+        Run schema validation on the result. Default is ``False``.
+
+    Returns
+    -------
+    ResolvedModelData
+        Reconstructed resolved model data.
     """
     kwargs = _load_tables(
         Path(directory), ResolvedModelData, ResolvedModelData._REQUIRED

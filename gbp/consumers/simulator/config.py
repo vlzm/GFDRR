@@ -13,11 +13,16 @@ if TYPE_CHECKING:
 class EnvironmentConfig:
     """Configuration for a simulation run.
 
-    Attributes:
-        phases: Ordered list of phases to execute each period.
-            Execution order = list order.
-        seed: Optional random seed for reproducibility of stochastic solvers.
-        scenario_id: Identifier for this simulation scenario (used in logs).
+    Attributes
+    ----------
+    phases : list[Phase]
+        Ordered list of phases to execute each period.
+        Execution order = list order.
+    seed : int or None
+        Optional random seed for reproducibility of stochastic solvers.
+    scenario_id : str
+        Identifier for this simulation scenario (used in logs).
+        Defaults to ``"default"``.
     """
 
     phases: list[Phase] = field(default_factory=list)

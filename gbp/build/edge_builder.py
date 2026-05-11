@@ -17,17 +17,26 @@ def build_edges(
     ``edge_rules``, drop self-loops, keep modal_type and commodity_category
     from rules when present.
 
-    Args:
-        facilities: facility_id, facility_type, ...
-        edge_rules: source_type, target_type, optional commodity_category,
-            modal_type, enabled
-        manual_pairs: optional scenario_manual_edges-like frame with
-            source_id, target_id, modal_type, commodity_category
-        distance_matrix: optional columns source_id, target_id, distance, ...
+    Parameters
+    ----------
+    facilities
+        Must contain ``facility_id``, ``facility_type``.
+    edge_rules
+        Must contain ``source_type``, ``target_type``; optional columns
+        ``commodity_category``, ``modal_type``, ``enabled``.
+    manual_pairs
+        Optional scenario_manual_edges-like frame with ``source_id``,
+        ``target_id``, ``modal_type``, ``commodity_category``. Default is
+        ``None`` (no manual pairs).
+    distance_matrix
+        Optional frame with ``source_id``, ``target_id``, ``distance``, etc.
+        Default is ``None`` (no distance merge).
 
-    Returns:
-        DataFrame with at least source_id, target_id, modal_type,
-        commodity_category; distance and other columns if merged.
+    Returns
+    -------
+    pd.DataFrame
+        At least ``source_id``, ``target_id``, ``modal_type``,
+        ``commodity_category``; distance and other columns if merged.
     """
     rules = edge_rules.copy()
     if "enabled" in rules.columns:

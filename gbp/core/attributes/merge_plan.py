@@ -1,4 +1,4 @@
-"""Merge order planning for left-join spine assembly."""
+"""Plan merge order for left-join spine assembly."""
 
 from __future__ import annotations
 
@@ -9,7 +9,20 @@ from gbp.core.attributes.spec import AttributeSpec
 
 @dataclass(frozen=True)
 class MergePlan:
-    """One left-merge step when building a spine."""
+    """Represent one left-merge step when building a spine.
+
+    Parameters
+    ----------
+    attribute_name
+        Name of the attribute being merged.
+    merge_keys
+        Column names used as join keys.
+    causes_expansion
+        Whether the merge introduces new grain dimensions.
+    expansion_dims
+        New dimension columns added by this merge (empty when
+        ``causes_expansion`` is ``False``).
+    """
 
     attribute_name: str
     merge_keys: list[str]
@@ -18,9 +31,23 @@ class MergePlan:
 
 
 def plan_merges(entity_grain: list[str], attributes: list[AttributeSpec]) -> list[MergePlan]:
-    """Compute merge order: free (no new dimensions) merges first, then minimal expansion.
+    """Compute merge order for spine assembly.
 
-    Document §10.4. Uses each attribute's ``resolved_grain``.
+    Free merges (no new dimensions) run first, then merges that introduce
+    the fewest new dimensions. Uses each attribute's ``resolved_grain``
+    (document section 10.4).
+
+    Parameters
+    ----------
+    entity_grain
+        Identity columns for the entity base table.
+    attributes
+        Attribute specs to plan merges for.
+
+    Returns
+    -------
+    list of MergePlan
+        Ordered merge steps, free merges before expanding ones.
     """
     if not attributes:
         return []

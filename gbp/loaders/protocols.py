@@ -1,8 +1,8 @@
 """Structural protocols for the loaders package.
 
-GenericSourceProtocol  — minimal interface for any data source.
-BikeShareSourceProtocol — bike-sharing specific: stations, depots, trips, etc.
-GraphLoaderProtocol    — what any graph loader must expose.
+Defines ``GenericSourceProtocol`` (minimal interface for any data source),
+``BikeShareSourceProtocol`` (bike-sharing specific), and
+``GraphLoaderProtocol`` (graph loader contract).
 """
 
 from __future__ import annotations
@@ -20,11 +20,23 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 class GenericSourceProtocol(Protocol):
-    """Minimal interface: any data source that can produce DataFrames."""
+    """Minimal interface for any data source that can produce DataFrames.
 
-    def load_data(self) -> None: ...
+    Methods
+    -------
+    load_data()
+        Fetch or generate all source DataFrames.
+    get_dataframes()
+        Return a name-to-DataFrame mapping of loaded tables.
+    """
 
-    def get_dataframes(self) -> dict[str, pd.DataFrame]: ...
+    def load_data(self) -> None:
+        """Fetch or generate all source DataFrames."""
+        ...
+
+    def get_dataframes(self) -> dict[str, pd.DataFrame]:
+        """Return a name-to-DataFrame mapping of loaded tables."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -32,14 +44,44 @@ class GenericSourceProtocol(Protocol):
 # ---------------------------------------------------------------------------
 
 class BikeShareSourceProtocol(Protocol):
-    """Bike-sharing data source — stations and trips are required; the rest
-    is optional so a minimal source can be as small as ``df_stations`` +
-    ``df_trips``.
+    """Bike-sharing data source protocol.
 
-    Optional attributes may be set to ``None`` (or missing entirely — loaders
+    ``df_stations`` and ``df_trips`` are required; the rest is optional so a
+    minimal source can be as small as two DataFrames.
+
+    Optional attributes may be set to ``None`` (or missing entirely -- loaders
     look them up via ``getattr(..., None)``).  When an optional source is
     absent the loader skips the corresponding build step and lets
     ``build_model`` derive defaults where possible.
+
+    Attributes
+    ----------
+    df_stations : pd.DataFrame
+        Required. Station locations.
+    df_trips : pd.DataFrame
+        Required. Trip records.
+    df_depots : pd.DataFrame or None
+        Depot locations.
+    df_resources : pd.DataFrame or None
+        Resource (truck) identifiers.
+    df_station_capacities : pd.DataFrame or None
+        Per-station per-commodity capacity.
+    df_depot_capacities : pd.DataFrame or None
+        Per-depot per-commodity capacity.
+    df_resource_capacities : pd.DataFrame or None
+        Per-resource capacity.
+    timestamps : pd.DatetimeIndex or None
+        Time index for the simulation horizon.
+    inventory_initial : pd.DataFrame or None
+        Starting inventory per facility per commodity.
+    df_telemetry_ts : pd.DataFrame or None
+        Station telemetry time series (GBFS-like).
+    df_station_costs : pd.DataFrame or None
+        Station fixed costs.
+    df_depot_costs : pd.DataFrame or None
+        Depot fixed costs.
+    df_truck_rates : pd.DataFrame or None
+        Per-truck cost rates.
     """
 
     df_stations: pd.DataFrame
@@ -57,7 +99,9 @@ class BikeShareSourceProtocol(Protocol):
     df_depot_costs: pd.DataFrame | None
     df_truck_rates: pd.DataFrame | None
 
-    def load_data(self) -> None: ...
+    def load_data(self) -> None:
+        """Fetch or generate all source DataFrames."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -65,19 +109,27 @@ class BikeShareSourceProtocol(Protocol):
 # ---------------------------------------------------------------------------
 
 class GraphLoaderProtocol(Protocol):
-    """Builds a ``RawModelData`` from a data source.
+    """Build ``RawModelData`` from a data source.
 
     Consumers that need a ``ResolvedModelData`` must call
     ``gbp.build.pipeline.build_model(loader.raw)`` themselves.
     """
 
     @property
-    def raw(self) -> RawModelData: ...
+    def raw(self) -> RawModelData:
+        """Return the assembled ``RawModelData``."""
+        ...
 
     @property
-    def source(self) -> BikeShareSourceProtocol: ...
+    def source(self) -> BikeShareSourceProtocol:
+        """Return the underlying data source."""
+        ...
 
     @property
-    def available_dates(self) -> pd.DatetimeIndex: ...
+    def available_dates(self) -> pd.DatetimeIndex:
+        """Return available dates from the source."""
+        ...
 
-    def load(self) -> RawModelData: ...
+    def load(self) -> RawModelData:
+        """Load source data and assemble ``RawModelData``."""
+        ...

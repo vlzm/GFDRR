@@ -1,4 +1,4 @@
-"""Resource compatibility, fleet, and availability row schemas."""
+"""Define resource compatibility, fleet, and availability row schemas."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ResourceCommodityCompatibility(BaseModel):
-    """Which commodities a resource category can carry."""
+    """Define which commodities a resource category can carry."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -18,7 +18,7 @@ class ResourceCommodityCompatibility(BaseModel):
 
 
 class ResourceModalCompatibility(BaseModel):
-    """On which modal types a resource category can operate."""
+    """Define on which modal types a resource category can operate."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -28,7 +28,7 @@ class ResourceModalCompatibility(BaseModel):
 
 
 class ResourceFleet(BaseModel):
-    """Aggregated resource count at a facility (home base)."""
+    """Represent aggregated resource count at a facility (home base)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -38,7 +38,7 @@ class ResourceFleet(BaseModel):
 
 
 class ResourceAvailability(BaseModel):
-    """Per-resource availability (L3, optional)."""
+    """Represent per-resource availability (L3, optional)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

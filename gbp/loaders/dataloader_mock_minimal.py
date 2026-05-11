@@ -27,7 +27,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-
 RIDEABLE_TYPES: tuple[str, ...] = ("electric_bike", "classic_bike")
 MEMBER_CASUAL: tuple[str, ...] = ("member", "casual")
 STATION_NAME_POOL: tuple[str, ...] = (
@@ -64,17 +63,25 @@ STATION_COLUMNS: tuple[str, ...] = ("station_id", "station_name", "lat", "lon")
 
 
 class DataLoaderMockMinimal:
-    """Generate a minimal Citi Bike-style source: stations + trips, nothing else.
+    """Generate a minimal Citi Bike-style source: stations + trips only.
 
-    Config (all optional):
-        - ``n_stations`` — number of stations (default 8)
-        - ``n_trips`` — total trips to generate (default 200)
-        - ``n_days`` — span of the trip history in days (default 3)
-        - ``start_date`` — first day of the history (default ``2025-01-01``)
-        - ``seed`` — RNG seed for reproducibility (default 42)
-        - ``lat_range`` / ``lon_range`` — bounding box for station coordinates
+    All other ``BikeShareSourceProtocol`` fields are ``None`` so
+    ``build_model`` can derive periods, facility_roles, categories,
+    demand/supply, and initial inventory from the generated trips.
+
+    Parameters
+    ----------
+    config
+        All keys are optional:
+
+        - ``n_stations`` -- number of stations (default 8).
+        - ``n_trips`` -- total trips to generate (default 200).
+        - ``n_days`` -- span of the trip history in days (default 3).
+        - ``start_date`` -- first day of the history (default ``"2025-01-01"``).
+        - ``seed`` -- RNG seed for reproducibility (default 42).
+        - ``lat_range`` / ``lon_range`` -- bounding box for station coordinates
           (defaults roughly cover lower Manhattan).
-        - ``min_trip_minutes`` / ``max_trip_minutes`` — trip duration range
+        - ``min_trip_minutes`` / ``max_trip_minutes`` -- trip duration range
           used to synthesize ``ended_at`` (defaults 3 / 45).
     """
 
@@ -101,7 +108,11 @@ class DataLoaderMockMinimal:
         self.df_trips: pd.DataFrame = pd.DataFrame(columns=list(TRIP_COLUMNS))
 
     def load_data(self) -> None:
-        """Generate stations and Citi Bike-shaped trips between them."""
+        """Generate stations and Citi Bike-shaped trips between them.
+
+        Populates ``df_stations``, ``df_trips``, ``df_resources``, and
+        ``df_resource_capacities`` on the instance.
+        """
         n_stations = int(self.config.get("n_stations", 8))
         n_trips = int(self.config.get("n_trips", 200))
         n_days = int(self.config.get("n_days", 3))

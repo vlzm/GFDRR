@@ -1,4 +1,4 @@
-"""Planning horizon, segments, and period row schemas."""
+"""Define planning horizon, segments, and period row schemas."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from gbp.core.enums import PeriodType
 
 
 class PlanningHorizon(BaseModel):
-    """One row of the planning_horizon table."""
+    """Represent one row of the planning_horizon table."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -21,7 +21,7 @@ class PlanningHorizon(BaseModel):
 
 
 class PlanningHorizonSegment(BaseModel):
-    """One row of the planning_horizon_segment table."""
+    """Represent one row of the planning_horizon_segment table."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -33,7 +33,7 @@ class PlanningHorizonSegment(BaseModel):
 
 
 class Period(BaseModel):
-    """One row of the period table."""
+    """Represent one row of the period table."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

@@ -22,6 +22,25 @@ class PeriodRow(NamedTuple):
     Field order must match the DataFrame column order produced by the build
     pipeline (see ``gbp/core/schemas/temporal.py``).  The ``Index`` field is
     injected by ``itertuples()`` and corresponds to the DataFrame integer index.
+
+    Attributes
+    ----------
+    Index : int
+        DataFrame integer index from ``itertuples()``.
+    period_id : str
+        Unique period identifier.
+    planning_horizon_id : str
+        Planning horizon this period belongs to.
+    segment_index : int
+        Segment ordinal within the horizon.
+    period_index : int
+        Global ordinal index.
+    period_type : str
+        Grain of the period (e.g. ``"day"``, ``"week"``).
+    start_date : date
+        Inclusive start date.
+    end_date : date
+        Exclusive end date.
     """
 
     Index: int
@@ -73,21 +92,28 @@ class SimulationState:
     Phases must never mutate DataFrames in place — use the ``with_*`` helpers
     which return a **new** ``SimulationState`` via ``dataclasses.replace``.
 
-    Attributes:
-        period_index: Current period ordinal.
-        period_id: Current period identifier (string).
-        inventory: Commodity stock per facility
-            (columns: facility_id, commodity_category, quantity).
-        in_transit: Shipments currently en route
-            (columns: shipment_id, source_id, target_id, commodity_category,
-            quantity, resource_id, departure_period, arrival_period).
-        resources: Instance-level resource positions and statuses
-            (columns: resource_id, resource_category, home_facility_id,
-            current_facility_id, status, available_at_period).
-        intermediates: Transient per-period cache used to pass intermediate
-            tables (e.g. latent demand marginals, OD probabilities) between
-            phases within a single period.  Wiped automatically by
-            ``advance_period`` so data cannot leak across periods.
+    Attributes
+    ----------
+    period_index : int
+        Current period ordinal.
+    period_id : str
+        Current period identifier (string).
+    inventory : pd.DataFrame
+        Commodity stock per facility
+        (columns: facility_id, commodity_category, quantity).
+    in_transit : pd.DataFrame
+        Shipments currently en route
+        (columns: shipment_id, source_id, target_id, commodity_category,
+        quantity, resource_id, departure_period, arrival_period).
+    resources : pd.DataFrame
+        Instance-level resource positions and statuses
+        (columns: resource_id, resource_category, home_facility_id,
+        current_facility_id, status, available_at_period).
+    intermediates : dict[str, Any]
+        Transient per-period cache used to pass intermediate
+        tables (e.g. latent demand marginals, OD probabilities) between
+        phases within a single period.  Wiped automatically by
+        ``advance_period`` so data cannot leak across periods.
     """
 
     period_index: int
@@ -115,6 +141,16 @@ class SimulationState:
         """Return a new state with *updates* merged into ``intermediates``.
 
         Existing keys are overwritten by *updates*; other keys are preserved.
+
+        Parameters
+        ----------
+        **updates
+            Key-value pairs to merge into ``intermediates``.
+
+        Returns
+        -------
+        SimulationState
+            New state with the merged intermediates.
         """
         merged = {**self.intermediates, **updates}
         return dataclasses.replace(self, intermediates=merged)
@@ -127,6 +163,18 @@ class SimulationState:
         """Return a new state positioned at the next period.
 
         ``intermediates`` is wiped — it is scoped to a single period.
+
+        Parameters
+        ----------
+        next_period_index
+            Ordinal index of the next period.
+        next_period_id
+            String identifier of the next period.
+
+        Returns
+        -------
+        SimulationState
+            New state positioned at the next period with empty intermediates.
         """
         return dataclasses.replace(
             self,
@@ -142,10 +190,14 @@ class SimulationState:
 def init_state(resolved: ResolvedModelData) -> SimulationState:
     """Create the initial ``SimulationState`` from resolved model data.
 
-    Args:
-        resolved: Fully resolved model produced by ``build_model()``.
+    Parameters
+    ----------
+    resolved
+        Fully resolved model produced by ``build_model()``.
 
-    Returns:
+    Returns
+    -------
+    SimulationState
         A ``SimulationState`` positioned at the first period with inventory,
         in-transit, and resource DataFrames initialised from *resolved*.
     """
@@ -207,11 +259,15 @@ def _init_in_transit_from_supply(resolved: ResolvedModelData) -> pd.DataFrame:
     Source shipments carry ``source_id="EXT"`` and ``resource_id=None`` so
     ``ArrivalsPhase`` treats them as organic (non-resource-backed) flow.
 
-    Args:
-        resolved: Fully resolved model.  ``resolved.supply`` may be empty,
-            in which case an empty frame is returned.
+    Parameters
+    ----------
+    resolved
+        Fully resolved model.  ``resolved.supply`` may be empty,
+        in which case an empty frame is returned.
 
-    Returns:
+    Returns
+    -------
+    pd.DataFrame
         DataFrame with columns matching ``IN_TRANSIT_COLUMNS``.  Empty when
         no supply is present.
     """
@@ -253,10 +309,14 @@ def _init_resources(resolved: ResolvedModelData) -> pd.DataFrame:
     Otherwise generate individual resource instances from
     ``resolved.resource_fleet`` (facility_id x resource_category x count).
 
-    Args:
-        resolved: Fully resolved model.
+    Parameters
+    ----------
+    resolved
+        Fully resolved model.
 
-    Returns:
+    Returns
+    -------
+    pd.DataFrame
         DataFrame with columns defined by ``RESOURCE_COLUMNS``.
     """
     if not resolved.resources.empty:
@@ -281,10 +341,14 @@ def _generate_resources_from_fleet(fleet: pd.DataFrame) -> pd.DataFrame:
 
     Uses vectorized repeat + cumcount to avoid iterrows.
 
-    Args:
-        fleet: DataFrame with columns (facility_id, resource_category, count).
+    Parameters
+    ----------
+    fleet
+        DataFrame with columns (facility_id, resource_category, count).
 
-    Returns:
+    Returns
+    -------
+    pd.DataFrame
         DataFrame with one row per resource instance, columns per
         ``RESOURCE_COLUMNS``.
     """

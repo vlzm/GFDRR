@@ -1,4 +1,4 @@
-"""Entity table row schemas (facilities, commodities, resources)."""
+"""Define entity table row schemas (facilities, commodities, resources)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Facility(BaseModel):
-    """One row of the facility table."""
+    """Represent one row of the facility table."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -18,7 +18,7 @@ class Facility(BaseModel):
 
 
 class CommodityCategory(BaseModel):
-    """One row of the commodity_category table."""
+    """Represent one row of the commodity_category table."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -29,7 +29,7 @@ class CommodityCategory(BaseModel):
 
 
 class ResourceCategory(BaseModel):
-    """One row of the resource_category table."""
+    """Represent one row of the resource_category table."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -40,7 +40,7 @@ class ResourceCategory(BaseModel):
 
 
 class Resource(BaseModel):
-    """One row of the resource table (L3, optional instance-level resource)."""
+    """Represent one row of the resource table (L3, optional instance-level resource)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -52,7 +52,7 @@ class Resource(BaseModel):
 
 
 class Commodity(BaseModel):
-    """One row of the commodity table (L3, optional instance-level commodity)."""
+    """Represent one row of the commodity table (L3, optional instance-level commodity)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

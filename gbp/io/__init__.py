@@ -1,4 +1,12 @@
-"""I/O for RawModelData and ResolvedModelData (Parquet and dict/JSON)."""
+"""I/O for RawModelData and ResolvedModelData (Parquet and dict/JSON).
+
+Modules
+-------
+dict_io
+    Dict/JSON round-trip for ``RawModelData`` and ``ResolvedModelData``.
+parquet
+    Parquet directory round-trip for ``RawModelData`` and ``ResolvedModelData``.
+"""
 
 from gbp.io.dict_io import (
     raw_from_dict,

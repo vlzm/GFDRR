@@ -16,15 +16,6 @@ The core concept is **Environment** — a step-by-step simulation/digital twin. 
 # Install (uses uv)
 uv pip install -e ".[dev]"
 
-# Run all tests
-pytest
-
-# Run a single test file
-pytest tests/unit/build/test_pipeline.py
-
-# Run a single test by name
-pytest -k "test_name"
-
 # Lint
 ruff check gbp/ tests/
 
@@ -34,61 +25,6 @@ mypy gbp/
 # Format
 ruff format gbp/ tests/
 ```
-
-pytest is configured with `asyncio_mode = "auto"`, `testpaths = ["tests"]`, and `--cov=src --cov-report=term-missing`.
-
-## Architecture
-
-```
-gbp/
-├── core/              # Data model + schemas + attribute system
-│   ├── model.py       # RawModelData & ResolvedModelData (_ModelDataMixin, ~46/~52 DataFrame fields)
-│   ├── schemas/       # Pydantic row schemas per table (entity, edge, temporal, etc.)
-│   ├── attributes/    # AttributeRegistry, AttributeSpec, grain groups, spine assembly
-│   ├── columns.py     # Centralized column-name constants
-│   ├── enums.py       # All enumerations (FacilityType, ModalType, etc.)
-│   ├── roles.py       # FacilityType → FacilityRole derivation
-│   └── factory.py     # Model factory utilities
-├── build/             # Build pipeline: raw → resolved (stateless, deterministic)
-│   ├── pipeline.py    # Orchestrator: build_model(raw) runs all steps; BuildError
-│   ├── validation.py  # Unit consistency, referential integrity, graph connectivity (BFS)
-│   ├── time_resolution.py  # date → period_id with aggregation (merge_asof)
-│   ├── edge_builder.py     # Edge materialization from rules + manual pairs
-│   ├── lead_time.py        # hours → periods per edge × period (searchsorted)
-│   ├── transformation.py   # N→M commodity conversion
-│   ├── fleet_capacity.py   # count × base_capacity per facility × resource_category
-│   └── spine.py            # Grain-grouped attribute DataFrames for vectorized lookups
-├── loaders/           # Source data → RawModelData + CSV loading
-│   ├── dataloader_graph.py  # Bike-sharing loader (main loader)
-│   ├── dataloader_mock.py   # Mock data for tests
-│   ├── csv_loader.py        # CsvLoader, load_csv_folder
-│   ├── validators.py        # CSV column validation
-│   ├── contracts.py         # GraphLoaderConfig, pandera source schemas
-│   └── protocols.py         # BikeShareSourceProtocol
-├── consumers/         # Consumers of ResolvedModelData
-│   └── simulator/     # Environment — step-by-step simulation engine
-│       ├── state.py          # SimulationState (frozen), PeriodRow, init_state()
-│       ├── phases.py         # Phase Protocol, PhaseResult, Schedule
-│       ├── log.py            # SimulationLog (5 output tables), RejectReason
-│       ├── built_in_phases.py # DemandPhase, ArrivalsPhase
-│       ├── dispatch_phase.py  # DispatchPhase (5 validators + apply + auto-assign)
-│       ├── task.py           # Task Protocol, DISPATCH_COLUMNS
-│       ├── engine.py         # Environment class (run, step, step_phase)
-│       ├── config.py         # EnvironmentConfig
-│       └── tasks/            # Task implementations (noop.py, rebalancer.py)
-└── io/                # Serialization (raw_to_dict / dict_to_raw, parquet)
-```
-
-**Test structure** mirrors source: `tests/unit/core/`, `tests/unit/build/`, `tests/unit/consumers/simulator/`, `tests/unit/test_io/`, `tests/integration/`, plus top-level `tests/test_graph_loader.py`.
-
-## Data Model Invariants (NEVER VIOLATE)
-
-1. **Nullable = LP-compatible.** Discrete parameters (min_shipment, batch_size) are nullable. Null → LP mode (continuous relaxation). Set → MILP mode. `solver_config.solver_type` controls the mode.
-2. **Absolute units + resolution pattern.** Time values stored in absolute units (hours, dates). Resolution to period_id happens in build pipeline via `ceil(hours / period_duration)`.
-3. **Orthogonal dimensions.** FacilityType, OperationType, FacilityRole are independent axes. Roles derived from type + operations.
-4. **Expanded PK for edges.** Edge identity = `source_id × target_id × modal_type`.
-5. **AttributeRegistry with explicit grain.** Parametric data registered with grain tuple. Grain determines grouping into spines during build.
-6. **One ResolvedModelData for all consumers.** Environment, Optimizer, Analytics all consume the same resolved model.
 
 ## Code Style
 
@@ -125,14 +61,3 @@ gbp/
 - **Verify direction of derivation against code, not memory.** Any phrase like "X is derived from Y", "X comes from Y", "X is computed from Y" is a concrete claim about specific lines of code. Before writing it — re-open the function and check the actual generation order. The risk is highest in summary tables and minimalist diagrams, where 3-step dependency chains get silently compressed into 2-step ones and lose correctness. If you have not just looked at the code, say so explicitly ("по памяти, надо проверить") rather than asserting confidently.
 - **Compactness must not cost correctness.** When the user asks for a minimalist or short answer, fewer rows/columns is fine — but each remaining cell must be exact. If precision cannot fit in the requested format, flag the conflict ("в таком формате точно не получится, вот более полная версия") instead of silently dropping fidelity.
 - **Cite code for derivation claims.** When asserting that one entity is derived from another, include the `file:line` where the derivation happens. This forces verification before the claim is written and gives the user a place to check.
-
-## Key Reference Documents
-
-- **Data model:** `gbp/core/model.py` + `gbp/core/schemas/`
-- **Build pipeline:** `gbp/build/pipeline.py`
-- **Attribute system:** `docs/design/attribute_system.md` + `gbp/core/attributes/`
-- **Environment:** `docs/design/environment_design.md` + `gbp/consumers/simulator/`
-- **Architecture diagrams:** `docs/architecture_diagrams.md`
-- **Storytelling guides:** `docs/story_telling/` (onboarding-friendly overviews of each design doc)
-- **Current project state:** `PROJECT_STATE.md`
-- **Design rationale:** `docs/design/graph_data_model.md`

@@ -47,13 +47,20 @@ def derive_roles(
 ) -> set[FacilityRole]:
     """Derive facility roles from type, enabled operations, and optional overrides.
 
-    Args:
-        facility_type: Facility type string (e.g. ``station``, ``depot``).
-        operations: Set of enabled operation type values (e.g. ``{"receiving", "dispatch"}``).
-        role_overrides: If set, returned as-is (manual override).
+    Parameters
+    ----------
+    facility_type
+        Facility type string (e.g. ``"station"``, ``"depot"``).
+    operations
+        Set of enabled operation type values
+        (e.g. ``{"receiving", "dispatch"}``).
+    role_overrides
+        If provided, returned as-is (manual override).
 
-    Returns:
-        Derived or overridden set of ``FacilityRole`` values.
+    Returns
+    -------
+    set[FacilityRole]
+        Derived or overridden set of facility roles.
     """
     if role_overrides is not None:
         return set(role_overrides)

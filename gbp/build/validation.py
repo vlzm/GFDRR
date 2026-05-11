@@ -12,7 +12,19 @@ from gbp.core.model import RawModelData
 
 @dataclass
 class ValidationError:
-    """Single validation issue."""
+    """Represent a single validation issue.
+
+    Attributes
+    ----------
+    level : str
+        Severity: ``"error"`` (blocks build) or ``"warning"``.
+    category : str
+        Validation category (e.g. ``"referential"``, ``"temporal"``).
+    entity : str
+        Name of the entity or table involved.
+    message : str
+        Human-readable description of the issue.
+    """
 
     level: str  # "error" or "warning"
     category: str
@@ -22,22 +34,44 @@ class ValidationError:
 
 @dataclass
 class ValidationResult:
-    """Aggregated validation outcome."""
+    """Aggregate validation outcome.
+
+    Attributes
+    ----------
+    errors : list of ValidationError
+        All collected issues. Default is an empty list.
+    """
 
     errors: list[ValidationError] = field(default_factory=list)
 
     @property
     def is_valid(self) -> bool:
-        """True if there are no blocking errors."""
+        """Return ``True`` if there are no blocking errors.
+
+        Returns
+        -------
+        bool
+        """
         return not any(e.level == "error" for e in self.errors)
 
     @property
     def has_warnings(self) -> bool:
-        """True if any warning-level issues exist."""
+        """Return ``True`` if any warning-level issues exist.
+
+        Returns
+        -------
+        bool
+        """
         return any(e.level == "warning" for e in self.errors)
 
     def raise_if_invalid(self) -> None:
-        """Raise ValueError if any error-level issues exist."""
+        """Raise ``ValueError`` if any error-level issues exist.
+
+        Raises
+        ------
+        ValueError
+            With a semicolon-joined summary of all blocking errors.
+        """
         blocking = [e for e in self.errors if e.level == "error"]
         if blocking:
             msg = "; ".join(f"{e.category}: {e.message}" for e in blocking)
@@ -45,7 +79,7 @@ class ValidationResult:
 
 
 def _facility_roles_map(facility_roles: pd.DataFrame) -> dict[str, set[str]]:
-    """Map facility_id -> set of role value strings."""
+    """Build a mapping from facility_id to its set of role strings."""
     return (
         facility_roles
         .assign(
@@ -59,7 +93,7 @@ def _facility_roles_map(facility_roles: pd.DataFrame) -> dict[str, set[str]]:
 
 
 def _check_referential_integrity(raw: RawModelData, result: ValidationResult) -> None:
-    """Roles and foreign keys for facilities and edges."""
+    """Validate roles and foreign keys for facilities and edges."""
     facilities = set(raw.facilities["facility_id"].astype(str))
     roles_map = _facility_roles_map(raw.facility_roles)
 
@@ -110,7 +144,7 @@ def _check_referential_integrity(raw: RawModelData, result: ValidationResult) ->
 
 
 def _check_resource_completeness(raw: RawModelData, result: ValidationResult) -> None:
-    """Warn if edge x commodity has no compatible resource."""
+    """Warn if an edge-commodity pair has no compatible resource."""
     if (
         raw.edges is None
         or raw.edge_commodities is None
@@ -169,7 +203,7 @@ def _check_resource_completeness(raw: RawModelData, result: ValidationResult) ->
 
 
 def _check_temporal_coverage(raw: RawModelData, result: ValidationResult) -> None:
-    """Warn if demand/supply dates do not span planning horizon."""
+    """Warn if demand or supply dates do not span the planning horizon."""
     if raw.planning_horizon is None or raw.planning_horizon.empty:
         return
     start = pd.to_datetime(raw.planning_horizon.iloc[0]["start_date"]).normalize()
@@ -194,7 +228,7 @@ def _check_temporal_coverage(raw: RawModelData, result: ValidationResult) -> Non
 
 
 def _check_graph_connectivity(raw: RawModelData, result: ValidationResult) -> None:
-    """Warn if a SINK is unreachable from any SOURCE via enabled edge commodities."""
+    """Warn if a SINK facility is unreachable from any SOURCE via enabled edges."""
     roles_map = _facility_roles_map(raw.facility_roles)
     sinks = {fid for fid, rs in roles_map.items() if FacilityRole.SINK.value in rs}
     sources = {fid for fid, rs in roles_map.items() if FacilityRole.SOURCE.value in rs}
@@ -239,7 +273,7 @@ def _check_graph_connectivity(raw: RawModelData, result: ValidationResult) -> No
 
 
 def _check_transformation_consistency(raw: RawModelData, result: ValidationResult) -> None:
-    """Transformation inputs/outputs appear on edge commodities for the facility."""
+    """Verify transformation inputs and outputs appear on edge commodities."""
     if (
         raw.transformations is None
         or raw.transformation_inputs is None
@@ -299,7 +333,7 @@ def _check_transformation_consistency(raw: RawModelData, result: ValidationResul
 
 
 def _check_observations(raw: RawModelData, result: ValidationResult) -> None:
-    """FK checks for observed_flow and observed_inventory (warnings only)."""
+    """Check foreign keys for observed_flow and observed_inventory (warnings only)."""
     facilities = set(raw.facilities["facility_id"].astype(str))
     cat_ids = set(raw.commodity_categories["commodity_category_id"].astype(str))
 
@@ -356,7 +390,20 @@ def _check_observations(raw: RawModelData, result: ValidationResult) -> None:
 
 
 def validate_raw_model(raw: RawModelData) -> ValidationResult:
-    """Run all validation checks on ``raw`` (errors block build; warnings do not)."""
+    """Run all validation checks on *raw*.
+
+    Errors block the build; warnings do not.
+
+    Parameters
+    ----------
+    raw
+        Raw model data to validate.
+
+    Returns
+    -------
+    ValidationResult
+        Aggregated errors and warnings.
+    """
     result = ValidationResult()
     _check_referential_integrity(raw, result)
     _check_resource_completeness(raw, result)

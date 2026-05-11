@@ -1,4 +1,4 @@
-"""Edge and edge-related attribute row schemas."""
+"""Define edge and edge-related attribute row schemas."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Edge(BaseModel):
-    """One row of the edge table (PK: source_id, target_id, modal_type)."""
+    """Represent one row of the edge table (PK: source_id, target_id, modal_type)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -21,7 +21,7 @@ class Edge(BaseModel):
 
 
 class EdgeCommodity(BaseModel):
-    """Allowed commodity on an edge."""
+    """Represent an allowed commodity on an edge."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -33,7 +33,7 @@ class EdgeCommodity(BaseModel):
 
 
 class EdgeCapacity(BaseModel):
-    """Shared edge capacity over time (raw date)."""
+    """Represent shared edge capacity over time (raw date)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -45,7 +45,7 @@ class EdgeCapacity(BaseModel):
 
 
 class EdgeCommodityCapacity(BaseModel):
-    """Per-commodity min/max shipment on an edge (raw date)."""
+    """Represent per-commodity min/max shipment on an edge (raw date)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -59,7 +59,7 @@ class EdgeCommodityCapacity(BaseModel):
 
 
 class EdgeVehicle(BaseModel):
-    """Discrete vehicle trips on an edge."""
+    """Represent discrete vehicle trips on an edge."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -72,9 +72,9 @@ class EdgeVehicle(BaseModel):
 
 
 class DistanceMatrix(BaseModel):
-    """Pairwise distance / travel duration between facilities.
+    """Represent pairwise distance and travel duration between facilities.
 
-    Declarative fact table: the loader computes distances (haversine, OSRM, …)
+    Declarative fact table: the loader computes distances (haversine, OSRM, ...)
     and ``build_model()`` merges them onto materialized edges.
     """
 
@@ -87,7 +87,7 @@ class DistanceMatrix(BaseModel):
 
 
 class EdgeLeadTimeResolved(BaseModel):
-    """Generated: lead time in periods from departure period (edge x period_id)."""
+    """Represent generated lead time in periods from departure period (edge x period_id)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

@@ -24,10 +24,19 @@ if TYPE_CHECKING:
 
 
 class DispatchPhase:
-    """Phase that runs a Task and feeds its output to the dispatch lifecycle.
+    """Run a Task and feed its output to the dispatch lifecycle.
 
-    Attributes:
-        name: Phase name, auto-derived as ``DISPATCH_{task.name}``.
+    Parameters
+    ----------
+    task
+        Domain-specific task that produces dispatches.
+    schedule
+        Optional execution schedule.  Defaults to every period.
+
+    Attributes
+    ----------
+    name : str
+        Phase name, auto-derived as ``DISPATCH_{task.name}``.
     """
 
     def __init__(
