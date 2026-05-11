@@ -1,8 +1,0 @@
-facility_id,role
-d1,storage
-d1,transshipment
-s1,sink
-s1,storage
-s1,source
-s2,sink
-s2,storage

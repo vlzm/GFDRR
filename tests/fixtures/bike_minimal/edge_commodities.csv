@@ -1,3 +1,0 @@
-source_id,target_id,modal_type,commodity_category,enabled,capacity_consumption
-d1,s1,road,working_bike,True,1.0
-d1,s2,road,working_bike,True,1.0

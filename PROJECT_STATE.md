@@ -4,38 +4,38 @@
 
 ## Vision
 
-Платформа для моделирования и оптимизации логистических сетей. Ядро — **Environment**: пространство, в котором commodity (велосипеды, товары, деньги) перемещаются через сеть объектов по периодам времени. Внутри Environment работают задачи (ребалансировка, ремонт, диспатч), принимаются решения, обновляется состояние мира.
+A platform for modeling and optimizing logistics networks. The core is **Environment**: a space where commodities (bikes, goods, money) move through a network of facilities across time periods. Inside the Environment, tasks run (rebalancing, repair, dispatch), decisions are made, and the world state is updated.
 
-Модель данных — domain-agnostic, построена на multi-commodity flow формулировке (Williamson). Табличные структуры для pandas/PySpark. Первый домен — велошеринг (Citi Bike-style).
+The data model is domain-agnostic, built on a multi-commodity flow formulation (Williamson). Tabular structures for pandas/PySpark. The first domain is bike-sharing (Citi Bike-style).
 
-### Два уровня задач
+### Two Levels of Tasks
 
-**Операционный (Environment)** — пошаговая симуляция. Environment идёт по периодам: period 0 → 1 → 2... На каждом шаге: происходят поездки, обновляется inventory, запускаются задачи (ребалансировщик ночью, ремонт утром). Состояние мира меняется после каждого шага. Это digital twin.
+**Operational (Environment)** — step-by-step simulation. The Environment advances through periods: period 0 → 1 → 2... At each step: trips occur, inventory is updated, tasks run (rebalancer at night, repair in the morning). The world state changes after each step. This is a digital twin.
 
-**Стратегический (Optimizer)** — решение "за один раз". Берёт данные за год, формулирует LP/MILP, солвер минимизирует cost function. Все периоды видны сразу, нет пошагового процесса. Отдельный потребитель, не часть Environment.
+**Strategic (Optimizer)** — a one-shot solve. Takes a year of data, formulates an LP/MILP, and the solver minimizes the cost function. All periods are visible at once — no step-by-step process. A separate consumer, not part of the Environment.
 
-Оба уровня используют один и тот же `ResolvedModelData`, но обрабатывают его по-разному.
+Both levels use the same `ResolvedModelData` but process it differently.
 
 ---
 
 ## Roadmap
 
-1. ~~**Foundation** — модель данных, build pipeline, loader~~ ✓
+1. ~~**Foundation** — data model, build pipeline, loader~~ ✓
 2. ~~**Environment** — step-by-step engine, state management~~ ✓
-3. ~~**Rebalancer** — первая задача внутри Environment (multi-stop PDP)~~ ✓
-4. **Trip Generator** — синтетический поток поездок для симуляции ← СЛЕДУЮЩАЯ ФАЗА
-5. **UI** — визуализация Environment (Streamlit)
-6. **Strategic Optimizer** — LP/MILP на горизонт (отдельный потребитель)
+3. ~~**Rebalancer** — first task inside Environment (multi-stop PDP)~~ ✓
+4. **Trip Generator** — synthetic trip stream for simulation ← NEXT PHASE
+5. **UI** — Environment visualization (Streamlit)
+6. **Strategic Optimizer** — LP/MILP over the planning horizon (separate consumer)
 7. **Infrastructure** — DB, API, Docker, CI/CD
 8. **Cloud** — Azure deployment
 
-Каждая фаза начинается с design doc.
+Each phase starts with a design doc.
 
 ---
 
 ## Current Phase: Trip Generator (not started)
 
-Следующий шаг — синтетический поток поездок поверх существующего историзма (`HistoricalLatentDemandPhase`/`HistoricalODStructurePhase`). Начинается с design doc.
+The next step is a synthetic trip stream on top of the existing historical replay (`HistoricalLatentDemandPhase`/`HistoricalODStructurePhase`). Starts with a design doc.
 
 ---
 
@@ -140,7 +140,7 @@ Core library `gbp` with data model, build pipeline, bike-sharing loader. All ref
 
 ### Environment
 
-Step-by-step simulation engine поверх `ResolvedModelData`. Design doc: `docs/design/environment_design.md`.
+Step-by-step simulation engine on top of `ResolvedModelData`. Design doc: `docs/design/environment_design.md`.
 
 **What was built:**
 - `gbp/consumers/simulator/state.py` — `SimulationState` (frozen dataclass), `PeriodRow`, `init_state()`, vectorized resource generation from fleet

@@ -1,3 +1,0 @@
-source_id,target_id,modal_type,distance,distance_unit,lead_time_hours,reliability
-d1,s1,road,1.0,km,24.0,0.99
-d1,s2,road,2.0,km,48.0,0.99
