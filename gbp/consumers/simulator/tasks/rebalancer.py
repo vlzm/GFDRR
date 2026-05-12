@@ -26,11 +26,14 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import pandas as pd
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from gbp.consumers.simulator._period_helpers import period_duration_hours
+from gbp.consumers.simulator.distance import (
+    build_edge_distance_map,
+    build_node_distance_matrix,
+)
 from gbp.consumers.simulator.task import DISPATCH_COLUMNS
 from gbp.consumers.simulator.tasks.rebalancer_planner import (
     IntervalOverlapPlanner,
@@ -569,8 +572,8 @@ def _build_pdp_model(
 
         pickups_deliveries.append((pickup_idx, delivery_idx))
 
-    edge_distances = _build_edge_distance_map(distance_matrix)
-    matrix = _create_distance_matrix(locations, graph_node_ids, edge_distances)
+    edge_distances = build_edge_distance_map(distance_matrix)
+    matrix = build_node_distance_matrix(locations, graph_node_ids, edge_distances)
 
     return {
         "distance_matrix": matrix,
@@ -583,103 +586,6 @@ def _build_pdp_model(
         "graph_node_ids": graph_node_ids,
     }
 
-
-def _build_edge_distance_map(
-    distance_matrix: pd.DataFrame | None,
-) -> dict[tuple[str, str], float]:
-    """Convert ``distance_matrix`` DataFrame to an edge-keyed dict.
-
-    Parameters
-    ----------
-    distance_matrix
-        Optional DataFrame with ``source_id``, ``target_id``, and
-        ``distance`` columns.
-
-    Returns
-    -------
-    dict of (str, str) to float
-        Mapping ``{(source_id, target_id): distance_km}``.
-        Empty dict when the input is ``None`` or empty.
-    """
-    if distance_matrix is None or distance_matrix.empty:
-        return {}
-    return {
-        (str(row["source_id"]), str(row["target_id"])): float(row["distance"])
-        for _, row in distance_matrix.iterrows()
-    }
-
-
-def _create_distance_matrix(
-    locations: list[tuple[float, float]],
-    graph_node_ids: list[str | None],
-    edge_distances: dict[tuple[str, str], float],
-) -> np.ndarray:
-    """Build an NxN integer distance matrix in metres.
-
-    Uses ``edge_distances`` (km) when available; falls back to Haversine.
-
-    Parameters
-    ----------
-    locations
-        List of ``(latitude, longitude)`` tuples for each node.
-    graph_node_ids
-        Parallel list of graph node ids (may contain ``None`` entries).
-    edge_distances
-        Pre-computed edge distances in km, keyed by ``(source, target)``.
-
-    Returns
-    -------
-    np.ndarray
-        Integer distance matrix of shape ``(N, N)`` in metres.
-    """
-    n = len(locations)
-    matrix = np.zeros((n, n), dtype=int)
-    for i in range(n):
-        for j in range(n):
-            if i == j:
-                continue
-            sni = graph_node_ids[i]
-            snj = graph_node_ids[j]
-            km: float | None = None
-            if sni is not None and snj is not None:
-                km = edge_distances.get((sni, snj))
-            if km is not None:
-                matrix[i, j] = int(round(km * 1000.0))
-            else:
-                matrix[i, j] = int(round(
-                    _haversine_distance_m(locations[i], locations[j])
-                ))
-    return matrix
-
-
-def _haversine_distance_m(
-    a: tuple[float, float], b: tuple[float, float],
-) -> float:
-    """Compute great-circle distance in metres between two points.
-
-    Parameters
-    ----------
-    a
-        First point as ``(latitude, longitude)`` in degrees.
-    b
-        Second point as ``(latitude, longitude)`` in degrees.
-
-    Returns
-    -------
-    float
-        Distance in metres.
-    """
-    lat1 = math.radians(a[0])
-    lon1 = math.radians(a[1])
-    lat2 = math.radians(b[0])
-    lon2 = math.radians(b[1])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    s = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    )
-    return 6_371_000.0 * 2.0 * math.atan2(math.sqrt(s), math.sqrt(1.0 - s))
 
 
 def _solve_pdp(

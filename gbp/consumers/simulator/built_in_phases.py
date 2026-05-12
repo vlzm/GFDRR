@@ -20,7 +20,6 @@ from gbp.consumers.simulator.inventory import (
     to_inventory_delta,
 )
 from gbp.consumers.simulator.phases import PhaseResult, Schedule
-from gbp.consumers.simulator.tasks.rebalancer import _haversine_distance_m
 from gbp.core.enums import ResourceStatus
 
 if TYPE_CHECKING:
@@ -58,9 +57,7 @@ class DemandPhase:
     ) -> PhaseResult:
         """Apply demand for the current period to inventory."""
         # 1. Filter demand for this period
-        period_demand = resolved.demand[
-            resolved.demand["period_id"] == period.period_id
-        ].copy()
+        period_demand = resolved.demand[resolved.demand["period_id"] == period.period_id].copy()
 
         if period_demand.empty:
             return PhaseResult.empty(state)
@@ -83,24 +80,28 @@ class DemandPhase:
 
         # 5. Flow events (only rows where something was consumed)
         consumed = merged[merged["fulfilled"] > 0]
-        flow_events = pd.DataFrame({
-            "source_id": "EXT",
-            "target_id": consumed["facility_id"].values,
-            "commodity_category": consumed["commodity_category"].values,
-            "modal_type": None,
-            "quantity": consumed["fulfilled"].values,
-            "resource_id": None,
-        })
+        flow_events = pd.DataFrame(
+            {
+                "source_id": "EXT",
+                "target_id": consumed["facility_id"].values,
+                "commodity_category": consumed["commodity_category"].values,
+                "modal_type": None,
+                "quantity": consumed["fulfilled"].values,
+                "resource_id": None,
+            }
+        )
 
         # 6. Unmet demand (only rows with deficit > 0)
         unmet_rows = merged[merged["deficit"] > 0]
-        unmet_demand = pd.DataFrame({
-            "facility_id": unmet_rows["facility_id"].values,
-            "commodity_category": unmet_rows["commodity_category"].values,
-            "requested": unmet_rows["demand_qty"].values,
-            "fulfilled": unmet_rows["fulfilled"].values,
-            "deficit": unmet_rows["deficit"].values,
-        })
+        unmet_demand = pd.DataFrame(
+            {
+                "facility_id": unmet_rows["facility_id"].values,
+                "commodity_category": unmet_rows["commodity_category"].values,
+                "requested": unmet_rows["demand_qty"].values,
+                "fulfilled": unmet_rows["fulfilled"].values,
+                "deficit": unmet_rows["deficit"].values,
+            }
+        )
 
         # 7. Return result
         events: dict[str, pd.DataFrame] = {}
@@ -141,9 +142,7 @@ def _period_flows(
     """
     if resolved.observed_flow.empty:
         return None
-    flows = resolved.observed_flow[
-        resolved.observed_flow["period_id"] == period.period_id
-    ]
+    flows = resolved.observed_flow[resolved.observed_flow["period_id"] == period.period_id]
     if flows.empty:
         return None
     return flows
@@ -191,13 +190,12 @@ class OrganicDeparturePhase:
         outflow = to_inventory_delta(flows, facility_col="source_id")
         new_inv = apply_delta(state.inventory, outflow, op="subtract")
 
-        flow_events = pd.DataFrame({
-            col: (
-                flows[col].values if col in flows.columns
-                else [None] * len(flows)
-            )
-            for col in _FLOW_EVENT_COLUMNS
-        })
+        flow_events = pd.DataFrame(
+            {
+                col: (flows[col].values if col in flows.columns else [None] * len(flows))
+                for col in _FLOW_EVENT_COLUMNS
+            }
+        )
 
         return PhaseResult(
             state=state.with_inventory(new_inv),
@@ -342,27 +340,34 @@ class HistoricalLatentDemandPhase:
         departures = (
             flows.groupby(["source_id", "commodity_category"], as_index=False)["quantity"]
             .sum()
-            .rename(columns={
-                "source_id": "facility_id",
-                "quantity": "latent_departures",
-            })
+            .rename(
+                columns={
+                    "source_id": "facility_id",
+                    "quantity": "latent_departures",
+                }
+            )
         )
         arrivals = (
             flows.groupby(["target_id", "commodity_category"], as_index=False)["quantity"]
             .sum()
-            .rename(columns={
-                "target_id": "facility_id",
-                "quantity": "latent_arrivals",
-            })
+            .rename(
+                columns={
+                    "target_id": "facility_id",
+                    "quantity": "latent_arrivals",
+                }
+            )
         )
 
         latent = departures.merge(
-            arrivals, on=["facility_id", "commodity_category"], how="outer",
+            arrivals,
+            on=["facility_id", "commodity_category"],
+            how="outer",
         )
         latent["latent_departures"] = latent["latent_departures"].fillna(0.0)
         latent["latent_arrivals"] = latent["latent_arrivals"].fillna(0.0)
         latent = latent.sort_values(
-            ["facility_id", "commodity_category"], kind="stable",
+            ["facility_id", "commodity_category"],
+            kind="stable",
         ).reset_index(drop=True)
 
         return PhaseResult(
@@ -424,7 +429,8 @@ class HistoricalODStructurePhase:
 
         joint = (
             flows.groupby(
-                ["source_id", "target_id", "commodity_category"], as_index=False,
+                ["source_id", "target_id", "commodity_category"],
+                as_index=False,
             )["quantity"]
             .sum()
             .rename(columns={"quantity": "joint"})
@@ -436,12 +442,15 @@ class HistoricalODStructurePhase:
         )
 
         od = joint.merge(
-            origin_total, on=["source_id", "commodity_category"], how="left",
+            origin_total,
+            on=["source_id", "commodity_category"],
+            how="left",
         )
         od["probability"] = od["joint"] / od["origin_total"]
         od = od[["source_id", "target_id", "commodity_category", "probability"]]
         od = od.sort_values(
-            ["source_id", "commodity_category", "target_id"], kind="stable",
+            ["source_id", "commodity_category", "target_id"],
+            kind="stable",
         ).reset_index(drop=True)
 
         return PhaseResult(
@@ -524,7 +533,9 @@ class DeparturePhysicsPhase:
             return PhaseResult.empty(state)
 
         merged = merge_with_inventory(
-            state.inventory, dep, value_col="latent_departures",
+            state.inventory,
+            dep,
+            value_col="latent_departures",
         )
 
         if self._mode == "permissive":
@@ -548,18 +559,18 @@ class DeparturePhysicsPhase:
         )
 
         lost_rows = merged[merged["lost"] > 0]
-        lost_log = pd.DataFrame({
-            "facility_id": lost_rows["facility_id"].values,
-            "commodity_category": lost_rows["commodity_category"].values,
-            "latent": lost_rows["latent_departures"].values,
-            "realized": lost_rows["realized"].values,
-            "lost": lost_rows["lost"].values,
-        })
+        lost_log = pd.DataFrame(
+            {
+                "facility_id": lost_rows["facility_id"].values,
+                "commodity_category": lost_rows["commodity_category"].values,
+                "latent": lost_rows["latent_departures"].values,
+                "realized": lost_rows["realized"].values,
+                "lost": lost_rows["lost"].values,
+            }
+        )
 
-        new_state = (
-            state
-            .with_inventory(new_inv)
-            .with_intermediates(realized_departures=realized_dep)
+        new_state = state.with_inventory(new_inv).with_intermediates(
+            realized_departures=realized_dep
         )
         events = {"lost_demand": lost_log} if not lost_log.empty else {}
         return PhaseResult(state=new_state, events=events)
@@ -646,9 +657,7 @@ class HistoricalTripSamplingPhase:
         n = len(flows)
         if self._use_durations and "duration_hours" in flows.columns:
             period_dur_h = period_duration_hours(resolved)
-            duration_filled = (
-                flows["duration_hours"].fillna(0.0).to_numpy(dtype=float)
-            )
+            duration_filled = flows["duration_hours"].fillna(0.0).to_numpy(dtype=float)
             # ``floor`` matches the doc's "if t_arr <= t+1: same period"
             # semantics: trips with duration <= one period stay in-period;
             # only durations exceeding a full period bump the arrival forward.
@@ -658,24 +667,25 @@ class HistoricalTripSamplingPhase:
         else:
             arrival_periods = np.full(n, period.period_index, dtype=int)
 
-        new_trips = pd.DataFrame({
-            "shipment_id": [
-                f"organic_trip_{period.period_index}_{i}" for i in range(n)
-            ],
-            "source_id": flows["source_id"].to_numpy(),
-            "target_id": flows["target_id"].to_numpy(),
-            "commodity_category": flows["commodity_category"].to_numpy(),
-            "quantity": flows["quantity"].to_numpy(),
-            "resource_id": [None] * n,
-            "departure_period": [period.period_index] * n,
-            "arrival_period": arrival_periods,
-        })
+        new_trips = pd.DataFrame(
+            {
+                "shipment_id": [f"organic_trip_{period.period_index}_{i}" for i in range(n)],
+                "source_id": flows["source_id"].to_numpy(),
+                "target_id": flows["target_id"].to_numpy(),
+                "commodity_category": flows["commodity_category"].to_numpy(),
+                "quantity": flows["quantity"].to_numpy(),
+                "resource_id": [None] * n,
+                "departure_period": [period.period_index] * n,
+                "arrival_period": arrival_periods,
+            }
+        )
 
         if state.in_transit.empty:
             new_in_transit = new_trips
         else:
             new_in_transit = pd.concat(
-                [state.in_transit, new_trips], ignore_index=True,
+                [state.in_transit, new_trips],
+                ignore_index=True,
             )
 
         return PhaseResult(state=state.with_in_transit(new_in_transit))
@@ -728,37 +738,36 @@ class ArrivalsPhase:
 
         # 4. Update resources for arriving shipments
         resources = state.resources.copy()
-        arriving_resources = arriving[
-            arriving["resource_id"].notna()
-        ][["resource_id", "target_id"]].drop_duplicates(subset=["resource_id"])
+        arriving_resources = arriving[arriving["resource_id"].notna()][
+            ["resource_id", "target_id"]
+        ].drop_duplicates(subset=["resource_id"])
 
         if not arriving_resources.empty:
             res_map = arriving_resources.set_index("resource_id")["target_id"]
             mask = resources["resource_id"].isin(res_map.index)
             resources.loc[mask, "status"] = ResourceStatus.AVAILABLE.value
             resources.loc[mask, "available_at_period"] = None
-            resources.loc[mask, "current_facility_id"] = (
-                resources.loc[mask, "resource_id"].map(res_map)
+            resources.loc[mask, "current_facility_id"] = resources.loc[mask, "resource_id"].map(
+                res_map
             )
 
         # 5. Build flow events (one row per arriving shipment)
-        flow_events = pd.DataFrame({
-            "source_id": arriving["source_id"].values,
-            "target_id": arriving["target_id"].values,
-            "commodity_category": arriving["commodity_category"].values,
-            "modal_type": arriving.get("modal_type", pd.Series(dtype=str)).values
+        flow_events = pd.DataFrame(
+            {
+                "source_id": arriving["source_id"].values,
+                "target_id": arriving["target_id"].values,
+                "commodity_category": arriving["commodity_category"].values,
+                "modal_type": arriving.get("modal_type", pd.Series(dtype=str)).values
                 if "modal_type" in arriving.columns
                 else [None] * len(arriving),
-            "quantity": arriving["quantity"].values,
-            "resource_id": arriving["resource_id"].values,
-        })
+                "quantity": arriving["quantity"].values,
+                "resource_id": arriving["resource_id"].values,
+            }
+        )
 
         # 6. Return updated state
         new_state = (
-            state
-            .with_inventory(new_inv)
-            .with_in_transit(remaining)
-            .with_resources(resources)
+            state.with_inventory(new_inv).with_in_transit(remaining).with_resources(resources)
         )
         events = {"flow_events": flow_events} if not flow_events.empty else {}
         return PhaseResult(state=new_state, events=events)
@@ -916,7 +925,9 @@ class DockCapacityPhase:
             return PhaseResult.empty(state)
 
         merged = state.inventory.merge(
-            storage, on=["facility_id", "commodity_category"], how="left",
+            storage,
+            on=["facility_id", "commodity_category"],
+            how="left",
         )
         bounded = merged["capacity"].notna()
         merged["accepted"] = merged["quantity"].where(
@@ -929,279 +940,18 @@ class DockCapacityPhase:
         new_inv["quantity"] = merged["accepted"]
 
         overflow = merged[merged["blocked"] > 0]
-        dock_log = pd.DataFrame({
-            "facility_id": overflow["facility_id"].values,
-            "commodity_category": overflow["commodity_category"].values,
-            "incoming": overflow["quantity"].values,
-            "accepted": overflow["accepted"].values,
-            "blocked": overflow["blocked"].values,
-        })
+        dock_log = pd.DataFrame(
+            {
+                "facility_id": overflow["facility_id"].values,
+                "commodity_category": overflow["commodity_category"].values,
+                "incoming": overflow["quantity"].values,
+                "accepted": overflow["accepted"].values,
+                "blocked": overflow["blocked"].values,
+            }
+        )
 
         events = {"dock_blocking": dock_log} if not dock_log.empty else {}
         return PhaseResult(state=state.with_inventory(new_inv), events=events)
-
-
-class OverflowRedirectPhase:
-    """Redirect overflow inventory to nearest facility with free capacity.
-
-    ORDERING CONTRACT: Must run immediately after :class:`ArrivalsPhase`.
-    ``ArrivalsPhase`` writes the period's incoming inventory into
-    ``state.inventory``; this phase inspects the resulting inventory against
-    ``operation_capacity[storage]`` and redirects any overflow per
-    ``(facility_id, commodity_category)``.  Inserting other inventory-mutating
-    phases between ``ArrivalsPhase`` and this one breaks redirect accounting.
-
-    On the canonical historical replay where ``observed_flow.target_id`` is
-    already post-redirect (spec Constraint 3), this phase is a no-op:
-    capacity is never violated by construction, so no redirects are emitted.
-    Treatment scenarios with inflated demand may legitimately trigger
-    redirects.
-
-    Per :data:`gbp.consumers.simulator.log.LOG_TABLES`, redirect events flow
-    into ``simulation_redirected_flow_log`` with columns
-    ``[period_index, period_id, phase_name, source_id, original_target_id,
-    redirected_target_id, commodity_category, quantity]``.
-
-    Facilities lacking an ``operation_capacity[storage]`` row are treated as
-    unbounded: no overflow is recorded for them.  This mirrors
-    :class:`DockCapacityPhase` semantics and keeps the canonical replay
-    pipeline stable when a fixture lists only a subset of facilities in the
-    storage attribute.
-
-    Parameters
-    ----------
-    schedule
-        Optional execution schedule.  Defaults to every period.
-    """
-
-    name: str = "OVERFLOW_REDIRECT"
-
-    def __init__(self, schedule: Schedule | None = None) -> None:
-        """Initialise with an optional schedule."""
-        self._schedule = schedule or Schedule.every()
-
-    def should_run(self, period: PeriodRow) -> bool:
-        """Delegate to schedule."""
-        return self._schedule.should_run(period)
-
-    def execute(
-        self,
-        state: SimulationState,
-        resolved: ResolvedModelData,
-        period: PeriodRow,
-    ) -> PhaseResult:
-        """Detect and redirect over-capacity inventory per commodity."""
-        # 1. Read per-(facility, commodity) capacity from the storage attribute.
-        if "operation_capacity" not in resolved.attributes:
-            return PhaseResult.empty(state)
-        cap_data = resolved.attributes.get("operation_capacity").data
-        storage = cap_data.loc[
-            cap_data["operation_type"] == "storage",
-            ["facility_id", "commodity_category", "capacity"],
-        ]
-        if storage.empty:
-            return PhaseResult.empty(state)
-
-        # 2. Compute overflow and free capacity per (facility, commodity).
-        # Facilities without a storage row are unbounded — no overflow there
-        # and effectively infinite free capacity (mirrors DockCapacityPhase).
-        merged = state.inventory.merge(
-            storage, on=["facility_id", "commodity_category"], how="left",
-        )
-        bounded = merged["capacity"].notna()
-        merged["overflow"] = 0.0
-        merged["free_capacity"] = np.inf
-        merged.loc[bounded, "overflow"] = (
-            merged.loc[bounded, "quantity"] - merged.loc[bounded, "capacity"]
-        ).clip(lower=0.0)
-        merged.loc[bounded, "free_capacity"] = (
-            merged.loc[bounded, "capacity"] - merged.loc[bounded, "quantity"]
-        ).clip(lower=0.0)
-
-        if not (merged["overflow"] > 0).any():
-            return PhaseResult.empty(state)
-
-        # 3. Build a sorted facility list for deterministic argmin tie-break
-        # (ADR Sec. 7.6) and the corresponding distance matrix.  Distance
-        # source preference: resolved.distance_matrix > Haversine fallback.
-        facility_ids = sorted(merged["facility_id"].astype(str).unique().tolist())
-        n_fac = len(facility_ids)
-        fac_to_idx = {fid: i for i, fid in enumerate(facility_ids)}
-
-        edge_distances: dict[tuple[str, str], float] = {}
-        dm = resolved.distance_matrix
-        if dm is not None and not dm.empty:
-            for _, dm_row in dm.iterrows():
-                edge_distances[
-                    (str(dm_row["source_id"]), str(dm_row["target_id"]))
-                ] = float(dm_row["distance"])
-
-        lat_lookup: dict[str, float] = {}
-        lon_lookup: dict[str, float] = {}
-        if (
-            resolved.facilities is not None
-            and not resolved.facilities.empty
-            and "lat" in resolved.facilities.columns
-            and "lon" in resolved.facilities.columns
-        ):
-            facs = resolved.facilities.dropna(subset=["lat", "lon"])
-            for _, fac_row in facs.iterrows():
-                fid = str(fac_row["facility_id"])
-                lat_lookup[fid] = float(fac_row["lat"])
-                lon_lookup[fid] = float(fac_row["lon"])
-
-        distance = np.full((n_fac, n_fac), np.inf, dtype=float)
-        for i, fi in enumerate(facility_ids):
-            for j, fj in enumerate(facility_ids):
-                if i == j:
-                    continue
-                d_km = edge_distances.get((fi, fj))
-                if d_km is None and fi in lat_lookup and fj in lat_lookup:
-                    d_km = _haversine_distance_m(
-                        (lat_lookup[fi], lon_lookup[fi]),
-                        (lat_lookup[fj], lon_lookup[fj]),
-                    ) / 1000.0
-                if d_km is not None:
-                    distance[i, j] = float(d_km)
-
-        # 4. Process per commodity_category.  Each commodity has its own
-        # capacity table; redirects respect commodity isolation (a
-        # working_bike overflow only goes to a station with free working_bike
-        # capacity).
-        redirect_rows: list[dict[str, object]] = []
-        new_inventory = state.inventory.copy()
-
-        for commodity in (
-            merged.loc[merged["overflow"] > 0, "commodity_category"]
-            .astype(str).unique()
-        ):
-            slice_ = merged[merged["commodity_category"] == commodity]
-            overflow_by_fac = (
-                slice_.set_index("facility_id")["overflow"]
-                .reindex(facility_ids, fill_value=0.0)
-                .to_numpy(dtype=float)
-            )
-            free_by_fac = (
-                slice_.set_index("facility_id")["free_capacity"]
-                .reindex(facility_ids, fill_value=0.0)
-                .to_numpy(dtype=float)
-            )
-
-            source_idx = np.flatnonzero(overflow_by_fac > 1e-9)
-            if source_idx.size == 0:
-                continue
-
-            # 5. Vectorised nearest-with-capacity argmin.  D[source, target]
-            # is restricted to candidate columns where free capacity > 0,
-            # excluding the source itself.  np.argmin returns the first
-            # minimum, which combined with the lexicographic facility_ids
-            # ordering yields a deterministic lexicographic tie-break.
-            distance_view = distance[source_idx, :]
-            available = np.broadcast_to(
-                free_by_fac > 1e-9, distance_view.shape,
-            ).copy()
-            available[np.arange(source_idx.size), source_idx] = False
-            masked = np.where(available, distance_view, np.inf)
-
-            if not np.isfinite(masked).any():
-                continue
-            winners = masked.argmin(axis=1)
-            has_winner = np.isfinite(
-                masked[np.arange(source_idx.size), winners],
-            )
-            if not has_winner.any():
-                continue
-            valid_sources = source_idx[has_winner]
-            valid_winners = winners[has_winner]
-            desired = overflow_by_fac[valid_sources]
-
-            # 6. Resolve target oversubscription: aggregate desired demand
-            # per winner, clamp to that winner's free capacity, distribute
-            # the accepted amount proportionally back to each source.
-            demand_df = pd.DataFrame({
-                "winner": valid_winners,
-                "desired": desired,
-            })
-            per_winner = demand_df.groupby("winner", as_index=False)["desired"].sum()
-            per_winner["capacity"] = free_by_fac[per_winner["winner"].to_numpy()]
-            per_winner["accepted"] = np.minimum(
-                per_winner["desired"], per_winner["capacity"],
-            )
-            per_winner["scale"] = np.where(
-                per_winner["desired"] > 1e-9,
-                per_winner["accepted"] / per_winner["desired"],
-                0.0,
-            )
-            scale_lookup = dict(
-                zip(
-                    per_winner["winner"].to_numpy(),
-                    per_winner["scale"].to_numpy(),
-                    strict=True,
-                )
-            )
-            scaled_amounts = desired * np.array(
-                [scale_lookup[w] for w in valid_winners], dtype=float,
-            )
-
-            # 7. Apply redirects.  The loop iterates over redirect events
-            # (one per overflowing source × commodity), not per inventory
-            # row — the inner hot path (argmin) was already vectorised.
-            for src_idx, tgt_idx, amount in zip(
-                valid_sources, valid_winners, scaled_amounts, strict=True,
-            ):
-                if amount <= 1e-9:
-                    continue
-                src_id = facility_ids[int(src_idx)]
-                tgt_id = facility_ids[int(tgt_idx)]
-                amount_f = float(amount)
-
-                src_mask = (
-                    (new_inventory["facility_id"] == src_id)
-                    & (new_inventory["commodity_category"] == commodity)
-                )
-                new_inventory.loc[src_mask, "quantity"] -= amount_f
-
-                tgt_mask = (
-                    (new_inventory["facility_id"] == tgt_id)
-                    & (new_inventory["commodity_category"] == commodity)
-                )
-                if tgt_mask.any():
-                    new_inventory.loc[tgt_mask, "quantity"] += amount_f
-                else:
-                    new_inventory = pd.concat(
-                        [
-                            new_inventory,
-                            pd.DataFrame([{
-                                "facility_id": tgt_id,
-                                "commodity_category": commodity,
-                                "quantity": amount_f,
-                            }]),
-                        ],
-                        ignore_index=True,
-                    )
-
-                redirect_rows.append({
-                    "source_id": src_id,
-                    "original_target_id": src_id,
-                    "redirected_target_id": tgt_id,
-                    "commodity_category": commodity,
-                    "quantity": amount_f,
-                })
-
-        if not redirect_rows:
-            return PhaseResult.empty(state)
-
-        redirect_df = pd.DataFrame(
-            redirect_rows,
-            columns=[
-                "source_id", "original_target_id", "redirected_target_id",
-                "commodity_category", "quantity",
-            ],
-        )
-        new_state = state.with_inventory(new_inventory.reset_index(drop=True))
-        return PhaseResult(
-            state=new_state, events={"redirected_flow": redirect_df},
-        )
 
 
 class EndOfPeriodDeficitPhase:
@@ -1277,111 +1027,128 @@ class EndOfPeriodDeficitPhase:
         if not deficit_mask.any():
             return PhaseResult.empty(state)
 
-        latent_lookup: dict[tuple[str, str], float] = {}
+        # --- build deficits table (one row per facility+commodity) ----------
+        new_inventory = state.inventory.copy()
+        deficits = new_inventory.loc[
+            deficit_mask, ["facility_id", "commodity_category", "quantity"]
+        ].copy()
+        deficits["deficit"] = -deficits["quantity"]
+
+        # clip all deficit inventory rows to zero in one shot
+        new_inventory.loc[deficit_mask, "quantity"] = 0.0
+
+        # --- build lost_demand DataFrame via merge with latent demand ------
         latent = state.intermediates.get("latent_demand")
         if latent is not None and not latent.empty:
-            for _, lat_row in latent.iterrows():
-                latent_lookup[
-                    (str(lat_row["facility_id"]),
-                     str(lat_row["commodity_category"]))
-                ] = float(lat_row.get("latent_departures", float("nan")))
+            latent_cols = latent[["facility_id", "commodity_category", "latent_departures"]]
+            lost = deficits[["facility_id", "commodity_category", "deficit"]].merge(
+                latent_cols,
+                on=["facility_id", "commodity_category"],
+                how="left",
+            )
+            lost = lost.rename(columns={"latent_departures": "latent", "deficit": "lost"})
+            lost["realized"] = lost["latent"] - lost["lost"]
+        else:
+            lost = deficits[["facility_id", "commodity_category", "deficit"]].rename(
+                columns={"deficit": "lost"},
+            )
+            lost["latent"] = float("nan")
+            lost["realized"] = float("nan")
 
-        new_inventory = state.inventory.copy()
+        # --- vectorised in-transit reduction --------------------------------
         new_in_transit = state.in_transit.copy()
-        lost_rows: list[dict[str, object]] = []
-
-        deficits = state.inventory.loc[deficit_mask]
-        for _, row in deficits.iterrows():
-            facility_id = str(row["facility_id"])
-            commodity = str(row["commodity_category"])
-            deficit = -float(row["quantity"])
-
-            self._reduce_in_transit(
-                new_in_transit, facility_id, commodity,
-                period.period_index, deficit,
-            )
-
-            inv_mask = (
-                (new_inventory["facility_id"] == facility_id)
-                & (new_inventory["commodity_category"] == commodity)
-            )
-            new_inventory.loc[inv_mask, "quantity"] = 0.0
-
-            latent_value = latent_lookup.get(
-                (facility_id, commodity), float("nan"),
-            )
-            realized = (
-                latent_value - deficit
-                if not pd.isna(latent_value)
-                else float("nan")
-            )
-            lost_rows.append({
-                "facility_id": facility_id,
-                "commodity_category": commodity,
-                "latent": latent_value,
-                "realized": realized,
-                "lost": deficit,
-            })
-
         if not new_in_transit.empty:
-            new_in_transit = new_in_transit[
-                new_in_transit["quantity"] > self._tolerance
-            ].reset_index(drop=True)
+            new_in_transit = self._reduce_in_transit_vec(
+                new_in_transit,
+                deficits,
+                period.period_index,
+                self._tolerance,
+            )
 
-        new_state = (
-            state
-            .with_inventory(new_inventory.reset_index(drop=True))
-            .with_in_transit(new_in_transit)
+        new_state = state.with_inventory(new_inventory.reset_index(drop=True)).with_in_transit(
+            new_in_transit
         )
         return PhaseResult(
             state=new_state,
-            events={"lost_demand": pd.DataFrame(lost_rows)},
+            events={
+                "lost_demand": lost[
+                    ["facility_id", "commodity_category", "latent", "realized", "lost"]
+                ].reset_index(drop=True),
+            },
         )
 
     @staticmethod
-    def _reduce_in_transit(
+    def _reduce_in_transit_vec(
         in_transit: pd.DataFrame,
-        facility_id: str,
-        commodity: str,
+        deficits: pd.DataFrame,
         period_index: int,
-        deficit: float,
-    ) -> None:
-        """Best-effort cancel current-period shipments from *facility_id*.
+        tolerance: float,
+    ) -> pd.DataFrame:
+        """Vectorised best-effort cancellation of current-period shipments.
 
-        Reduces shipment quantities in DataFrame order until *deficit* is
-        covered or no candidate shipments remain.  Mutates *in_transit* in
-        place — the caller owns the copy.
+        For each deficit ``(facility_id, commodity_category)``, reduces
+        matching shipment quantities in DataFrame order until the deficit is
+        covered or no candidates remain.
 
         Parameters
         ----------
         in_transit
-            In-transit DataFrame to mutate (caller-owned copy).
-        facility_id
-            Source facility whose shipments should be reduced.
-        commodity
-            Commodity category to filter by.
+            In-transit DataFrame (caller-owned copy, will not be mutated).
+        deficits
+            DataFrame with columns ``facility_id``, ``commodity_category``,
+            ``deficit`` (positive quantities to cancel).
         period_index
-            Current period index to match ``departure_period``.
-        deficit
-            Total quantity to cancel from matching shipments.
+            Current period index — only shipments with
+            ``departure_period == period_index`` are candidates.
+        tolerance
+            Rows with ``quantity <= tolerance`` are dropped from the result.
+
+        Returns
+        -------
+        pd.DataFrame
+            Updated in-transit DataFrame with shipment quantities reduced
+            and near-zero rows removed.
         """
-        if in_transit.empty:
-            return
-        candidates = in_transit.index[
-            (in_transit["source_id"] == facility_id)
-            & (in_transit["commodity_category"] == commodity)
-            & (in_transit["departure_period"] == period_index)
-        ]
-        remaining = deficit
-        for idx in candidates:
-            if remaining <= 0:
-                break
-            qty = float(in_transit.at[idx, "quantity"])
-            if qty <= 0:
-                continue
-            reduction = min(qty, remaining)
-            in_transit.at[idx, "quantity"] = qty - reduction
-            remaining -= reduction
+        cand_mask = in_transit["departure_period"] == period_index
+        if not cand_mask.any():
+            return in_transit
+
+        # tag original positions so DataFrame order is preserved
+        candidates = in_transit.loc[cand_mask].copy()
+        candidates["_orig_idx"] = candidates.index
+
+        merged = candidates.merge(
+            deficits[["facility_id", "commodity_category", "deficit"]],
+            left_on=["source_id", "commodity_category"],
+            right_on=["facility_id", "commodity_category"],
+            how="inner",
+        )
+        if merged.empty:
+            return in_transit
+
+        # preserve original DataFrame order for deterministic cancellation
+        merged = merged.sort_values("_orig_idx")
+
+        # cumsum within each (source, commodity) group
+        grouped_cum = merged.groupby(
+            ["source_id", "commodity_category"],
+            sort=False,
+        )["quantity"].cumsum()
+        prev_cumsum = grouped_cum - merged["quantity"]
+
+        # per-row reduction: min(qty, max(0, deficit - cumsum_before_this_row))
+        reduction = np.minimum(
+            merged["quantity"].to_numpy(),
+            np.maximum(0.0, merged["deficit"].to_numpy() - prev_cumsum.to_numpy()),
+        )
+
+        # aggregate reductions back to original indices
+        reductions = pd.Series(reduction, index=merged["_orig_idx"]).groupby(level=0).sum()
+
+        result = in_transit.copy()
+        result.loc[reductions.index, "quantity"] -= reductions
+        result = result[result["quantity"] > tolerance].reset_index(drop=True)
+        return result
 
 
 class InvariantViolationError(RuntimeError):
@@ -1446,9 +1213,7 @@ class InvariantCheckPhase:
         schedule: Schedule | None = None,
     ) -> None:
         """Initialise the phase."""
-        self._baseline: dict[str, float] | None = (
-            None if baseline is None else dict(baseline)
-        )
+        self._baseline: dict[str, float] | None = None if baseline is None else dict(baseline)
         self._fail_on_violation = fail_on_violation
         self._tolerance = tolerance
         self._schedule = schedule or Schedule.every()
@@ -1480,12 +1245,14 @@ class InvariantCheckPhase:
             observed = float(current.get(commodity, 0.0))
             delta = observed - baseline
             if abs(delta) > self._tolerance:
-                violations.append({
-                    "commodity_category": commodity,
-                    "baseline": baseline,
-                    "current": observed,
-                    "delta": delta,
-                })
+                violations.append(
+                    {
+                        "commodity_category": commodity,
+                        "baseline": baseline,
+                        "current": observed,
+                        "delta": delta,
+                    }
+                )
 
         if not violations:
             return PhaseResult.empty(state)
@@ -1497,14 +1264,13 @@ class InvariantCheckPhase:
                 f"delta={v['delta']})"
                 for v in violations
             )
-            msg = (
-                f"Invariant violated at period {period.period_id}: {offending}"
-            )
+            msg = f"Invariant violated at period {period.period_id}: {offending}"
             raise InvariantViolationError(msg)
 
         violation_df = pd.DataFrame(violations)
         return PhaseResult(
-            state=state, events={"invariant_violation": violation_df},
+            state=state,
+            events={"invariant_violation": violation_df},
         )
 
 
@@ -1524,14 +1290,10 @@ def _per_commodity_total(state: SimulationState) -> dict[str, float]:
     if state.inventory.empty:
         inv_totals = pd.Series(dtype=float)
     else:
-        inv_totals = (
-            state.inventory.groupby("commodity_category")["quantity"].sum()
-        )
+        inv_totals = state.inventory.groupby("commodity_category")["quantity"].sum()
     if state.in_transit.empty:
         transit_totals = pd.Series(dtype=float)
     else:
-        transit_totals = (
-            state.in_transit.groupby("commodity_category")["quantity"].sum()
-        )
+        transit_totals = state.in_transit.groupby("commodity_category")["quantity"].sum()
     combined = inv_totals.add(transit_totals, fill_value=0.0)
     return {str(k): float(v) for k, v in combined.items()}
