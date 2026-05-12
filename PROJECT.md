@@ -1,52 +1,36 @@
-# Graph-Based Logistics Platform
+# Citi Bike Simulation Platform
 
 ## Vision
 
-A platform for modeling and optimizing logistics networks. The core is **Environment**: a space where commodities (bikes, goods, money) move through a network of facilities across time periods. Inside the Environment, tasks run (rebalancing, repair, dispatch), decisions are made, and the world state is updated.
+A bike-sharing simulation platform built vertically on the Citi Bike domain. The core is **Environment**: bikes move through a network of stations across time periods. Trips occur, inventory changes, rebalancing tasks run.
 
-The data model is domain-agnostic, built on a multi-commodity flow formulation (Williamson, Ahuja/Magnanti/Orlin). Tabular structures for pandas/PySpark. Parameters are managed via `AttributeRegistry` with custom grains.
+The platform is developed **vertically**: one domain at a time. Citi Bike is the first domain. Everything in the codebase must serve this domain. Expansion to other domains (gas logistics, block logistics, etc.) will happen later, as separate verticals.
 
-The first domain is bike-sharing (Citi Bike-style).
-
-### Two Levels of Tasks
-
-**Operational (Environment)** — step-by-step simulation. The Environment advances through periods: period 0 → 1 → 2... At each step: trips occur, inventory is updated, tasks run (rebalancer at night, repair in the morning). The world state changes after each step. This is a digital twin: "what happens each day".
-
-**Strategic (Optimizer)** — a one-shot solve. Takes a year of data (all potential trips, all costs), formulates an LP/MILP, and the solver minimizes the cost function. No step-by-step process — all periods are visible at once. This is strategic planning: "how many trucks to buy, where to place depots".
-
-Both levels use the same `ResolvedModelData` but process it differently.
+**Pipeline:** Raw Citi Bike data → `DataLoaderGraph` → `RawModelData` → `build_model()` → `ResolvedModelData` → `Environment` → `SimulationLog`.
 
 ---
 
-## Roadmap
+## Current Goal
 
-1. **Foundation** — data model, build pipeline, loader
-2. **Environment** — step-by-step engine, state management
-3. **Rebalancer** — first task inside Environment (VRP)
-4. **Implement real data instead of mock data** — at this stage we take real data from "data\raw\202602-citibike-tripdata_1.csv" and create dataloader_raw and dataloader_graph for real data
-5. **Create FastAPI for future UI** — first we need to define what we want to see in the UI, then build the FastAPI based on that understanding
-6. **UI** — Environment visualization (Streamlit or Gradio or React)
-7. **Infrastructure** — DB, API, Docker, CI/CD
-8. **Cloud** — Azure deployment
+**Minimal working scenario.** The codebase must contain exactly what is needed to run `notebooks/canonical_scenario.ipynb` — nothing more, nothing less. Every module, class, function, schema field, and table that is not exercised by the canonical scenario should be removed.
 
-Each phase starts with a design doc. Current progress is in `PROJECT_STATE.md`.
+This is a cleanup phase. The repository was previously built horizontally (domain-agnostic), which led to unused abstractions, dead code, and untested paths. The cleanup reduces the codebase to a verified, working vertical slice.
 
 ---
 
 ## Principles
 
-**Minimalism (Nano-style).** Code must be hackable. No model factories, heavy DI containers, or hidden magic. Every file should be understandable in 5 minutes.
-**Vectorization first.** All math via pandas/NumPy. No `for` loops over data in hot paths.
-**Design doc before code.** Every new subsystem starts with a design doc, discussion, and only then — implementation.
-**Strict typing.** Pydantic for all contracts. Type hints on all public functions.
-**English in code, Russian in chat.** Code, comments, docstrings — English only. Communication with the user — in Russian.
-
+- **Vertical, not horizontal.** No "domain-agnostic" abstractions. If Citi Bike doesn't need it, delete it.
+- **Minimalism.** Code must be hackable. No factories, heavy DI containers, or hidden magic.
+- **Vectorization first.** All math via pandas/NumPy. No `for` loops over data in hot paths.
+- **Strict typing.** Pydantic for all contracts. Type hints on all public functions.
 ---
 
 ## Key Documents
 
-| Document | Purpose | Update Frequency |
-|----------|---------|------------------|
-| `PROJECT.md` | Vision, roadmap, principles | Rarely (when the vision changes) |
-| `PROJECT_STATE.md` | Current phase, progress, "not now" | At phase transitions and within phases |
-| `docs/design/` | Design docs per subsystem | One per phase |
+| Document | Purpose |
+|----------|---------|
+| `PROJECT.md` | Vision and principles |
+| `PROJECT_STATE.md` | Current phase and progress |
+| `notebooks/canonical_scenario.ipynb` | The reference scenario — source of truth for what must work |
+| `CLAUDE.md` | AI collaboration rules |

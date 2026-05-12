@@ -16,16 +16,11 @@ from gbp.build.defaults import (
     derive_supply_from_flow,
 )
 from gbp.build.edge_builder import build_edges
-from gbp.build.fleet_capacity import compute_fleet_capacity
-from gbp.build.lead_time import resolve_lead_times
-from gbp.build.report import BuildReport
-from gbp.build.spine import assemble_spines
 from gbp.build.time_resolution import (
     build_periods_from_segments,
     resolve_all_time_varying,
     resolve_registry_attributes,
 )
-from gbp.build.transformation import resolve_transformations
 from gbp.build.validation import validate_raw_model
 from gbp.core.model import RawModelData, ResolvedModelData
 
@@ -103,8 +98,8 @@ def _ensure_edges_and_commodities(
     return edges_df, ec
 
 
-def _apply_derivations(raw: RawModelData, report: BuildReport) -> RawModelData:
-    """Fill in derivable tables on a copy of *raw*, recording reasons in *report*.
+def _apply_derivations(raw: RawModelData) -> RawModelData:
+    """Fill in derivable tables on a copy of *raw*.
 
     Derivation is a strict no-op when the user-provided table is not ``None``.
     An explicitly empty DataFrame is treated as a user choice of "no rows" and
@@ -114,8 +109,6 @@ def _apply_derivations(raw: RawModelData, report: BuildReport) -> RawModelData:
     ----------
     raw
         Original raw model data.
-    report
-        Mutable report where derivation reasons are recorded.
 
     Returns
     -------
@@ -129,11 +122,9 @@ def _apply_derivations(raw: RawModelData, report: BuildReport) -> RawModelData:
         updates["periods"] = build_periods_from_segments(
             raw.planning_horizon, raw.planning_horizon_segments,
         )
-        report.add("periods", "built from planning_horizon_segments")
 
     if raw.commodity_categories is None:
         updates["commodity_categories"] = default_commodity_categories()
-        report.add("commodity_categories", "synthesized default single category")
 
     if raw.resource_categories is None:
         has_resource_data = (
@@ -142,41 +133,25 @@ def _apply_derivations(raw: RawModelData, report: BuildReport) -> RawModelData:
         )
         if has_resource_data:
             updates["resource_categories"] = default_resource_categories()
-            report.add("resource_categories", "synthesized default single category")
 
     if raw.facility_roles is None:
         updates["facility_roles"] = derive_facility_roles(
             raw.facilities, raw.facility_operations,
         )
-        report.add(
-            "facility_roles",
-            "derived from facility_type + facility_operations via derive_roles()",
-        )
 
     if raw.demand is None and raw.observed_flow is not None and not raw.observed_flow.empty:
         updates["demand"] = derive_demand_from_flow(raw.observed_flow)
-        report.add("demand", "derived from observed_flow (groupby source_id × date × cc)")
 
     if raw.supply is None and raw.observed_flow is not None and not raw.observed_flow.empty:
         updates["supply"] = derive_supply_from_flow(raw.observed_flow)
-        report.add("supply", "derived from observed_flow (groupby target_id × date × cc)")
 
     if raw.inventory_initial is None:
         if raw.observed_inventory is not None and not raw.observed_inventory.empty:
             updates["inventory_initial"] = derive_inventory_initial(raw.observed_inventory)
-            report.add(
-                "inventory_initial",
-                "derived from first observed snapshot per facility × commodity_category",
-            )
         elif raw.observed_flow is not None and not raw.observed_flow.empty:
             seeded = derive_inventory_from_flow(raw.observed_flow)
             if not seeded.empty:
                 updates["inventory_initial"] = seeded
-                report.add(
-                    "inventory_initial",
-                    "seeded from first-day outflow in observed_flow "
-                    "(no observed_inventory telemetry)",
-                )
 
     if not updates:
         return raw
@@ -212,9 +187,7 @@ def build_model(raw: RawModelData) -> ResolvedModelData:
 
     Before validation the pipeline fills in derivable tables that the user
     did not supply (periods, facility_roles, default categories, demand/supply
-    from observed flow, inventory_initial from observed inventory).  The
-    resulting :class:`BuildReport` is attached to the returned model as
-    ``ResolvedModelData.build_report``.
+    from observed flow, inventory_initial from observed inventory).
 
     Parameters
     ----------
@@ -224,7 +197,7 @@ def build_model(raw: RawModelData) -> ResolvedModelData:
     Returns
     -------
     ResolvedModelData
-        Fully resolved model with spines and build report.
+        Fully resolved model ready for simulation.
 
     Raises
     ------
@@ -233,8 +206,7 @@ def build_model(raw: RawModelData) -> ResolvedModelData:
     BuildError
         If any pipeline step raises an exception.
     """
-    report = BuildReport()
-    raw = _apply_derivations(raw, report)
+    raw = _apply_derivations(raw)
 
     validate_raw_model(raw).raise_if_invalid()
 
@@ -253,44 +225,11 @@ def build_model(raw: RawModelData) -> ResolvedModelData:
 
     edges_df, ec_df = _step("edges", _ensure_edges_and_commodities, raw)
 
-    edge_lead_time_resolved: pd.DataFrame | None = None
-    if edges_df is not None and not edges_df.empty:
-        elt = _step("lead_times", resolve_lead_times, edges_df, periods)
-        edge_lead_time_resolved = elt if not elt.empty else None
-
-    transformation_resolved = _step(
-        "transformations",
-        resolve_transformations,
-        raw.facilities,
-        raw.transformations,
-        raw.transformation_inputs,
-        raw.transformation_outputs,
-    )
-
-    fleet_capacity = _step(
-        "fleet_capacity",
-        compute_fleet_capacity,
-        raw.resource_fleet,
-        raw.resource_categories,
-        raw.resources,
-    )
-
-    resolved = ResolvedModelData.from_raw(
+    return ResolvedModelData.from_raw(
         raw,
         periods=periods,
         resolved_time=resolved_time,
         resolved_attrs=resolved_attrs,
         edges=edges_df,
         edge_commodities=ec_df,
-        edge_lead_time_resolved=edge_lead_time_resolved,
-        transformation_resolved=transformation_resolved,
-        fleet_capacity=fleet_capacity,
     )
-
-    spines = _step("spine_assembly", assemble_spines, resolved)
-    resolved.facility_spines = spines["facility"] or None
-    resolved.edge_spines = spines["edge"] or None
-    resolved.resource_spines = spines["resource"] or None
-
-    resolved.build_report = report
-    return resolved

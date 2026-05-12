@@ -13,57 +13,37 @@ Groups (in reading order):
     entity       — what exists in the network (3 required + 2 optional)
     temporal     — planning horizon and period grid (3 required)
     behavior     — roles, operations, availability, edge rules (4, 3 req.)
-    edge         — edge identity and attributes (5 optional)
+    edge         — edge identity and attributes (4 optional)
     flow_data    — demand, supply, inventory (4 optional)
     observations  — historical flow and inventory (2 optional)
     transformation — N:M commodity conversion (3 optional)
-    resource     — fleet, compatibility, availability (4 optional)
-    hierarchy    — facility + commodity hierarchies (8 optional)
-    scenario     — run configuration and overrides (4 optional)
+    resource     — fleet, compatibility, availability (3 optional)
+    scenario     — manual edges for scenario (1 optional)
 
 Parametric data (costs, capacities, pricing) lives in ``attributes``
 (``AttributeRegistry``), accessible via ``parameter_tables``.
-
-ResolvedModelData adds:
-    generated    — edge_lead_time_resolved, transformation_resolved, fleet_capacity
-    spines       — assembled attribute spines per entity type
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 import pandas as pd
 from pydantic import BaseModel
 
 from gbp.core.attributes.registry import AttributeRegistry
-
-if TYPE_CHECKING:
-    from gbp.build.report import BuildReport
-
 from gbp.core.schemas import (
-    Commodity,
     CommodityCategory,
-    DistanceMatrix,
-    CommodityHierarchyLevel,
-    CommodityHierarchyMembership,
-    CommodityHierarchyNode,
-    CommodityHierarchyType,
     Demand,
+    DistanceMatrix,
     Edge,
     EdgeCapacity,
     EdgeCommodity,
     EdgeCommodityCapacity,
-    EdgeLeadTimeResolved,
     EdgeRule,
-    EdgeVehicle,
     Facility,
     FacilityAvailability,
-    FacilityHierarchyLevel,
-    FacilityHierarchyMembership,
-    FacilityHierarchyNode,
-    FacilityHierarchyType,
     FacilityOperation,
     FacilityRoleRecord,
     InventoryInitial,
@@ -74,21 +54,16 @@ from gbp.core.schemas import (
     PlanningHorizon,
     PlanningHorizonSegment,
     Resource,
-    ResourceAvailability,
     ResourceCategory,
     ResourceCommodityCompatibility,
     ResourceFleet,
     ResourceModalCompatibility,
-    Scenario,
-    ScenarioEdgeRules,
     ScenarioManualEdges,
-    ScenarioParameterOverrides,
     Supply,
     Transformation,
     TransformationInput,
     TransformationOutput,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -357,7 +332,7 @@ class _ModelDataMixin:
 
     @property
     def edge_tables(self) -> dict[str, pd.DataFrame]:
-        """Edge identity, commodities, capacities, vehicles."""
+        """Edge identity, commodities, and capacities."""
         return _collect_group(self, self._GROUPS["edge"])
 
     @property
@@ -386,13 +361,8 @@ class _ModelDataMixin:
         return self.attributes.to_dict()
 
     @property
-    def hierarchy_tables(self) -> dict[str, pd.DataFrame]:
-        """Facility and commodity hierarchy trees."""
-        return _collect_group(self, self._GROUPS["hierarchy"])
-
-    @property
     def scenario_tables(self) -> dict[str, pd.DataFrame]:
-        """Scenario configuration and overrides."""
+        """Scenario manual edges."""
         return _collect_group(self, self._GROUPS["scenario"])
 
     # ── navigation helpers ────────────────────────────────────────────
@@ -473,7 +443,7 @@ class _ModelDataMixin:
 class _TabularModelBase(_ModelDataMixin):
     """Fields, groups, schemas, and required-set shared by Raw and Resolved.
 
-    Both ``RawModelData`` and ``ResolvedModelData`` hold the same 40 logical
+    Both ``RawModelData`` and ``ResolvedModelData`` hold the same logical
     tables (facilities, edges, demand, etc.); the only structural difference
     is that ``ResolvedModelData`` also carries build artifacts (lead-time
     resolution, transformation, fleet capacity) and assembled spines.
@@ -486,7 +456,6 @@ class _TabularModelBase(_ModelDataMixin):
     facilities: pd.DataFrame
     commodity_categories: pd.DataFrame | None = None
     resource_categories: pd.DataFrame | None = None
-    commodities: pd.DataFrame | None = None
     resources: pd.DataFrame | None = None
 
     # ── temporal: planning horizon and period grid ────────────────────
@@ -505,7 +474,6 @@ class _TabularModelBase(_ModelDataMixin):
     edge_commodities: pd.DataFrame | None = None
     edge_capacities: pd.DataFrame | None = None
     edge_commodity_capacities: pd.DataFrame | None = None
-    edge_vehicles: pd.DataFrame | None = None
     distance_matrix: pd.DataFrame | None = None
 
     # ── flow data: demand, supply, inventory ──────────────────────────
@@ -527,23 +495,9 @@ class _TabularModelBase(_ModelDataMixin):
     resource_commodity_compatibility: pd.DataFrame | None = None
     resource_modal_compatibility: pd.DataFrame | None = None
     resource_fleet: pd.DataFrame | None = None
-    resource_availability: pd.DataFrame | None = None
 
-    # ── hierarchy: facility + commodity trees ─────────────────────────
-    facility_hierarchy_types: pd.DataFrame | None = None
-    facility_hierarchy_levels: pd.DataFrame | None = None
-    facility_hierarchy_nodes: pd.DataFrame | None = None
-    facility_hierarchy_memberships: pd.DataFrame | None = None
-    commodity_hierarchy_types: pd.DataFrame | None = None
-    commodity_hierarchy_levels: pd.DataFrame | None = None
-    commodity_hierarchy_nodes: pd.DataFrame | None = None
-    commodity_hierarchy_memberships: pd.DataFrame | None = None
-
-    # ── scenario: run configuration ───────────────────────────────────
-    scenarios: pd.DataFrame | None = None
-    scenario_edge_rules: pd.DataFrame | None = None
+    # ── scenario: manual edges ────────────────────────────────────────
     scenario_manual_edges: pd.DataFrame | None = None
-    scenario_parameter_overrides: pd.DataFrame | None = None
 
     # ── parametric attribute system ───────────────────────────────────
     attributes: AttributeRegistry = field(default_factory=AttributeRegistry)
@@ -555,7 +509,7 @@ class _TabularModelBase(_ModelDataMixin):
     _GROUPS: ClassVar[dict[str, list[str]]] = {
         "entity": [
             "facilities", "commodity_categories", "resource_categories",
-            "commodities", "resources",
+            "resources",
         ],
         "temporal": [
             "planning_horizon", "planning_horizon_segments", "periods",
@@ -566,7 +520,7 @@ class _TabularModelBase(_ModelDataMixin):
         ],
         "edge": [
             "edges", "edge_commodities", "edge_capacities",
-            "edge_commodity_capacities", "edge_vehicles", "distance_matrix",
+            "edge_commodity_capacities", "distance_matrix",
         ],
         "flow_data": [
             "demand", "supply", "inventory_initial", "inventory_in_transit",
@@ -579,17 +533,10 @@ class _TabularModelBase(_ModelDataMixin):
         ],
         "resource": [
             "resource_commodity_compatibility", "resource_modal_compatibility",
-            "resource_fleet", "resource_availability",
-        ],
-        "hierarchy": [
-            "facility_hierarchy_types", "facility_hierarchy_levels",
-            "facility_hierarchy_nodes", "facility_hierarchy_memberships",
-            "commodity_hierarchy_types", "commodity_hierarchy_levels",
-            "commodity_hierarchy_nodes", "commodity_hierarchy_memberships",
+            "resource_fleet",
         ],
         "scenario": [
-            "scenarios", "scenario_edge_rules",
-            "scenario_manual_edges", "scenario_parameter_overrides",
+            "scenario_manual_edges",
         ],
     }
 
@@ -597,7 +544,6 @@ class _TabularModelBase(_ModelDataMixin):
         "facilities": Facility,
         "commodity_categories": CommodityCategory,
         "resource_categories": ResourceCategory,
-        "commodities": Commodity,
         "resources": Resource,
         "planning_horizon": PlanningHorizon,
         "planning_horizon_segments": PlanningHorizonSegment,
@@ -610,7 +556,6 @@ class _TabularModelBase(_ModelDataMixin):
         "edge_commodities": EdgeCommodity,
         "edge_capacities": EdgeCapacity,
         "edge_commodity_capacities": EdgeCommodityCapacity,
-        "edge_vehicles": EdgeVehicle,
         "distance_matrix": DistanceMatrix,
         "demand": Demand,
         "supply": Supply,
@@ -624,19 +569,7 @@ class _TabularModelBase(_ModelDataMixin):
         "resource_commodity_compatibility": ResourceCommodityCompatibility,
         "resource_modal_compatibility": ResourceModalCompatibility,
         "resource_fleet": ResourceFleet,
-        "resource_availability": ResourceAvailability,
-        "facility_hierarchy_types": FacilityHierarchyType,
-        "facility_hierarchy_levels": FacilityHierarchyLevel,
-        "facility_hierarchy_nodes": FacilityHierarchyNode,
-        "facility_hierarchy_memberships": FacilityHierarchyMembership,
-        "commodity_hierarchy_types": CommodityHierarchyType,
-        "commodity_hierarchy_levels": CommodityHierarchyLevel,
-        "commodity_hierarchy_nodes": CommodityHierarchyNode,
-        "commodity_hierarchy_memberships": CommodityHierarchyMembership,
-        "scenarios": Scenario,
-        "scenario_edge_rules": ScenarioEdgeRules,
         "scenario_manual_edges": ScenarioManualEdges,
-        "scenario_parameter_overrides": ScenarioParameterOverrides,
     }
 
     _REQUIRED: ClassVar[frozenset[str]] = frozenset({
@@ -668,53 +601,16 @@ class RawModelData(_TabularModelBase):
 
 @dataclass(kw_only=True)
 class ResolvedModelData(_TabularModelBase):
-    """Tables after time resolution (``period_id``) plus generated artifacts.
+    """Tables after time resolution (``period_id``), ready for simulation.
 
-    Inherits all 40 tabular fields from ``_TabularModelBase`` and adds:
-
-    - **generated**: ``edge_lead_time_resolved``, ``transformation_resolved``,
-      ``fleet_capacity`` — produced by ``build_model()``
-    - **spines**: assembled attribute DataFrames per entity type
+    Inherits all tabular fields from ``_TabularModelBase``.  Time-varying
+    tables have ``date`` replaced with ``period_id`` after resolution.
     """
-
-    # ── generated by build_model() ────────────────────────────────────
-    edge_lead_time_resolved: pd.DataFrame | None = None
-    transformation_resolved: pd.DataFrame | None = None
-    fleet_capacity: pd.DataFrame | None = None
-
-    # ── assembled spines ──────────────────────────────────────────────
-    facility_spines: dict[str, pd.DataFrame] | None = None
-    edge_spines: dict[str, pd.DataFrame] | None = None
-    resource_spines: dict[str, pd.DataFrame] | None = None
-
-    # ── diagnostics ────────────────────────────────────────────────────
-    build_report: BuildReport | None = None
-
-    # ── class-level metadata ──────────────────────────────────────────
-
-    _GROUPS: ClassVar[dict[str, list[str]]] = {
-        **_TabularModelBase._GROUPS,
-        "generated": [
-            "edge_lead_time_resolved", "transformation_resolved",
-            "fleet_capacity",
-        ],
-    }
-
-    _SCHEMAS: ClassVar[dict[str, type[BaseModel]]] = {
-        **_TabularModelBase._SCHEMAS,
-        "edge_lead_time_resolved": EdgeLeadTimeResolved,
-    }
-
-    _NON_TABLE_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {"attributes", "build_report"}
-    )
 
     # Tables consumers (Environment, Optimizer, Analytics) read directly.
     # Normalized in ``__post_init__`` from ``None`` to an empty DataFrame so
     # call sites can use a single ``.empty`` check instead of
-    # ``is None or .empty``.  Build-time-only fields (e.g. spines, generated
-    # artifacts) stay outside this set: there ``None`` carries the meaningful
-    # "not produced" signal.
+    # ``is None or .empty``.
     _CONSUMER_NORMALIZED_TABLES: ClassVar[frozenset[str]] = frozenset({
         "demand",
         "supply",
@@ -745,15 +641,9 @@ class ResolvedModelData(_TabularModelBase):
     def __post_init__(self) -> None:
         """Replace ``None``/empty consumer-facing tables with column-aware empties.
 
-        Build-time tables (where ``None`` drives derivation) are not touched —
-        this only normalizes the output side of the build pipeline so that
+        This normalizes the output side of the build pipeline so that
         consumers can rely on every listed table being a real DataFrame with
         the right columns.
-
-        Empty DataFrames are also re-normalized: round-trips through
-        ``dict_io`` / parquet collapse empty tables to a frame with no columns,
-        which would surprise consumers that expect ``period_id``/``source_id``
-        to be addressable even on empty data.
         """
         for name in self._CONSUMER_NORMALIZED_TABLES:
             df = getattr(self, name)
@@ -776,23 +666,6 @@ class ResolvedModelData(_TabularModelBase):
             cols = ["period_id" if c == "date" else c for c in cols]
         return cols
 
-    # ── Resolved-only group access properties ───────────────────────────
-
-    @property
-    def generated_tables(self) -> dict[str, pd.DataFrame]:
-        """Tables produced by build_model(): lead times, transformations, fleet."""
-        return _collect_group(self, self._GROUPS["generated"])
-
-    @property
-    def spine_tables(self) -> dict[str, dict[str, pd.DataFrame]]:
-        """Assembled attribute spines per entity type."""
-        result: dict[str, dict[str, pd.DataFrame]] = {}
-        for name in ("facility_spines", "edge_spines", "resource_spines"):
-            val = getattr(self, name, None)
-            if val is not None:
-                result[name] = val
-        return result
-
     # ── factory ────────────────────────────────────────────────────────
 
     @classmethod
@@ -805,9 +678,6 @@ class ResolvedModelData(_TabularModelBase):
         resolved_attrs: AttributeRegistry,
         edges: pd.DataFrame | None,
         edge_commodities: pd.DataFrame | None,
-        edge_lead_time_resolved: pd.DataFrame | None,
-        transformation_resolved: pd.DataFrame | None,
-        fleet_capacity: pd.DataFrame | None,
     ) -> ResolvedModelData:
         """Build ``ResolvedModelData`` from raw tables and build artifacts.
 
@@ -830,12 +700,6 @@ class ResolvedModelData(_TabularModelBase):
             Edge table (from raw or ``build_edges``).
         edge_commodities
             Edge-commodity table (from raw or built).
-        edge_lead_time_resolved
-            Lead-time resolution output.
-        transformation_resolved
-            N:M transformation output.
-        fleet_capacity
-            Fleet capacity output.
 
         Returns
         -------
@@ -860,7 +724,6 @@ class ResolvedModelData(_TabularModelBase):
             facility_operations=raw.facility_operations,
             edge_rules=raw.edge_rules,
             resources=raw.resources,
-            commodities=raw.commodities,
             facility_availability=_coalesce(
                 "facility_availability", raw.facility_availability,
             ),
@@ -870,7 +733,6 @@ class ResolvedModelData(_TabularModelBase):
             resource_commodity_compatibility=raw.resource_commodity_compatibility,
             resource_modal_compatibility=raw.resource_modal_compatibility,
             resource_fleet=raw.resource_fleet,
-            resource_availability=raw.resource_availability,
             edges=edges,
             edge_commodities=(
                 edge_commodities if edge_commodities is not None
@@ -880,11 +742,7 @@ class ResolvedModelData(_TabularModelBase):
             edge_commodity_capacities=_coalesce(
                 "edge_commodity_capacities", raw.edge_commodity_capacities,
             ),
-            edge_vehicles=raw.edge_vehicles,
             distance_matrix=raw.distance_matrix,
-            edge_lead_time_resolved=edge_lead_time_resolved,
-            transformation_resolved=transformation_resolved,
-            fleet_capacity=fleet_capacity,
             demand=_coalesce("demand", raw.demand),
             supply=_coalesce("supply", raw.supply),
             inventory_initial=raw.inventory_initial,
@@ -893,18 +751,7 @@ class ResolvedModelData(_TabularModelBase):
             observed_inventory=_coalesce(
                 "observed_inventory", raw.observed_inventory,
             ),
-            facility_hierarchy_types=raw.facility_hierarchy_types,
-            facility_hierarchy_levels=raw.facility_hierarchy_levels,
-            facility_hierarchy_nodes=raw.facility_hierarchy_nodes,
-            facility_hierarchy_memberships=raw.facility_hierarchy_memberships,
-            commodity_hierarchy_types=raw.commodity_hierarchy_types,
-            commodity_hierarchy_levels=raw.commodity_hierarchy_levels,
-            commodity_hierarchy_nodes=raw.commodity_hierarchy_nodes,
-            commodity_hierarchy_memberships=raw.commodity_hierarchy_memberships,
-            scenarios=raw.scenarios,
-            scenario_edge_rules=raw.scenario_edge_rules,
             scenario_manual_edges=raw.scenario_manual_edges,
-            scenario_parameter_overrides=raw.scenario_parameter_overrides,
             attributes=resolved_attrs,
         )
 

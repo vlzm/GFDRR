@@ -1,7 +1,6 @@
 """Structural protocols for the loaders package.
 
-Defines ``GenericSourceProtocol`` (minimal interface for any data source),
-``BikeShareSourceProtocol`` (bike-sharing specific), and
+Defines ``BikeShareSourceProtocol`` (bike-sharing specific) and
 ``GraphLoaderProtocol`` (graph loader contract).
 """
 
@@ -13,30 +12,6 @@ import pandas as pd
 
 if TYPE_CHECKING:
     from gbp.core.model import RawModelData
-
-
-# ---------------------------------------------------------------------------
-# Generic (aspirational — for future domain-agnostic loaders)
-# ---------------------------------------------------------------------------
-
-class GenericSourceProtocol(Protocol):
-    """Minimal interface for any data source that can produce DataFrames.
-
-    Methods
-    -------
-    load_data()
-        Fetch or generate all source DataFrames.
-    get_dataframes()
-        Return a name-to-DataFrame mapping of loaded tables.
-    """
-
-    def load_data(self) -> None:
-        """Fetch or generate all source DataFrames."""
-        ...
-
-    def get_dataframes(self) -> dict[str, pd.DataFrame]:
-        """Return a name-to-DataFrame mapping of loaded tables."""
-        ...
 
 
 # ---------------------------------------------------------------------------

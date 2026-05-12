@@ -10,25 +10,17 @@ Review all code changes made in this conversation. For each documentation file b
 
 ### 1. PROJECT_STATE.md
 Update if:
-- A roadmap item was completed or started
-- New architecture decisions were made
-- File map changed (new directories, renamed files)
-- Current phase status changed
+- Cleanup progress changed (modules removed, simplified)
+- New issues discovered during cleanup
+- The list of what canonical scenario uses changed
 
 Do NOT update just because code was edited — only if the *project state* actually changed.
 
 ### 2. CLAUDE.md
 Update if:
 - New commands were added (build, test, lint)
-- Architecture tree changed (new packages, directories, key files)
-- New data model invariants were established
+- Architecture tree changed (packages removed or restructured)
 - Code style rules changed
-- New key reference documents were created
-
-### 3. docs/architecture_diagrams.md
-Update if:
-- New components or modules were added that should appear in diagrams
-- Relationships between components changed
 
 ## Rules
 

@@ -1,28 +1,20 @@
-"""Graph-Based Logistics Platform — universal network flow modelling.
+"""Graph-Based Logistics Platform — vertical bike-sharing simulation.
 
 Top-level convenience imports so users can write::
 
-    from gbp import RawModelData, build_model, make_raw_model, Environment
-
-For the full set of schemas and enums, import from subpackages::
-
-    from gbp.core import Facility, FacilityRole, AttributeRegistry
-    from gbp.consumers.simulator import DemandPhase, ArrivalsPhase
-    from gbp.io import save_raw_parquet, load_raw_parquet
+    from gbp import RawModelData, build_model, Environment
 """
 
 # ── Data model ───────────────────────────────────────────────────────
-from gbp.core.model import RawModelData, ResolvedModelData
-
 # ── Build pipeline ───────────────────────────────────────────────────
 from gbp.build.pipeline import build_model
-
-# ── Quick-start factory ──────────────────────────────────────────────
-from gbp.core.factory import make_raw_model
+from gbp.consumers.simulator.config import EnvironmentConfig
 
 # ── Simulation engine ────────────────────────────────────────────────
 from gbp.consumers.simulator.engine import Environment
-from gbp.consumers.simulator.config import EnvironmentConfig
+
+# ── Attribute system ─────────────────────────────────────────────────
+from gbp.core.attributes.registry import AttributeRegistry
 
 # ── Key enums ────────────────────────────────────────────────────────
 from gbp.core.enums import (
@@ -33,9 +25,7 @@ from gbp.core.enums import (
     OperationType,
     PeriodType,
 )
-
-# ── Attribute system ─────────────────────────────────────────────────
-from gbp.core.attributes.registry import AttributeRegistry
+from gbp.core.model import RawModelData, ResolvedModelData
 
 __all__ = [
     "AttributeKind",
@@ -45,7 +35,6 @@ __all__ = [
     "EnvironmentConfig",
     "FacilityRole",
     "FacilityType",
-    "make_raw_model",
     "ModalType",
     "OperationType",
     "PeriodType",

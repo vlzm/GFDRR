@@ -84,16 +84,3 @@ class DistanceMatrix(BaseModel):
     target_id: str
     distance: float = Field(ge=0)
     duration: float = Field(ge=0)
-
-
-class EdgeLeadTimeResolved(BaseModel):
-    """Represent generated lead time in periods from departure period (edge x period_id)."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    source_id: str
-    target_id: str
-    modal_type: str
-    period_id: str
-    lead_time_periods: int = Field(ge=0)
-    arrival_period_id: str | None = None

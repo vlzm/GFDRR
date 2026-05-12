@@ -362,12 +362,6 @@ class DataLoaderGraph:
             "name": [cc.replace("_", " ").capitalize() for cc in commodity_cats],
             "unit": ["unit"] * len(commodity_cats),
         })
-        tables["commodities"] = pd.DataFrame({
-            "commodity_id": list(commodity_cats),
-            "commodity_category": list(commodity_cats),
-            "description": [""] * len(commodity_cats),
-        })
-
         res_caps = _nonempty_df(self._source, "df_resource_capacities")
         if res_caps is not None:
             tables["resource_categories"] = pd.DataFrame({
