@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1778328785466,
+  "lastScanned": 1778610925435,
   "projectRoot": "e:\\Documents\\vlzm\\GFDRR",
   "techStack": {
     "languages": [
@@ -56,27 +56,24 @@
       "path": "data",
       "purpose": "Data files",
       "fileCount": 0,
-      "lastAccessed": 1778328785448,
+      "lastAccessed": 1778610925417,
       "keyFiles": []
     },
     "docs": {
       "path": "docs",
       "purpose": "Documentation",
-      "fileCount": 7,
-      "lastAccessed": 1778328785449,
+      "fileCount": 2,
+      "lastAccessed": 1778610925418,
       "keyFiles": [
-        "architecture_diagrams.md",
-        "ARCHITECTURE_MAP.md",
-        "build_docs.sh",
-        "conf.py",
-        "DATA_JOURNEY.md"
+        "architecture_deepening.md",
+        "cleanup_plan.md"
       ]
     },
     "gbp": {
       "path": "gbp",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1778328785450,
+      "lastAccessed": 1778610925418,
       "keyFiles": [
         "__init__.py"
       ]
@@ -84,67 +81,33 @@
     "notebooks": {
       "path": "notebooks",
       "purpose": null,
-      "fileCount": 5,
-      "lastAccessed": 1778328785450,
+      "fileCount": 1,
+      "lastAccessed": 1778610925419,
       "keyFiles": [
-        "01_test_graph_api.ipynb",
-        "02_test_graph_loader.ipynb",
-        "04_graph_model_playground.ipynb",
-        "05_pipeline_walkthrough.ipynb",
-        "mvp_flat.ipynb"
-      ]
-    },
-    "reference": {
-      "path": "reference",
-      "purpose": null,
-      "fileCount": 4,
-      "lastAccessed": 1778328785451,
-      "keyFiles": [
-        "costs.md",
-        "current_graph_model.py",
-        "data_optimizer.md",
-        "data_raw.md"
+        "canonical_scenario.ipynb"
       ]
     },
     "tests": {
       "path": "tests",
       "purpose": "Test files",
-      "fileCount": 3,
-      "lastAccessed": 1778328785451,
+      "fileCount": 4,
+      "lastAccessed": 1778610925419,
       "keyFiles": [
-        "conftest.py",
-        "test_graph_loader.py",
+        "test_build_pipeline.py",
+        "test_canonical_scenario.py",
+        "test_dispatch_lifecycle.py",
         "__init__.py"
       ]
     },
     "gbp\\build": {
       "path": "gbp\\build",
       "purpose": "Build output",
-      "fileCount": 12,
-      "lastAccessed": 1778328785452,
+      "fileCount": 7,
+      "lastAccessed": 1778610925420,
       "keyFiles": [
         "defaults.py",
         "edge_builder.py",
-        "fleet_capacity.py"
-      ]
-    },
-    "notebooks\\utils": {
-      "path": "notebooks\\utils",
-      "purpose": "Utility functions",
-      "fileCount": 2,
-      "lastAccessed": 1778328785452,
-      "keyFiles": [
-        "download_gbfs.ipynb",
-        "load_trips_data.ipynb"
-      ]
-    },
-    "tests\\fixtures": {
-      "path": "tests\\fixtures",
-      "purpose": "Test fixtures",
-      "fileCount": 1,
-      "lastAccessed": 1778328785453,
-      "keyFiles": [
-        "__init__.py"
+        "pipeline.py"
       ]
     }
   },
@@ -288,6 +251,12 @@
       "type": "file"
     },
     {
+      "path": "CLAUDE.md",
+      "accessCount": 3,
+      "lastAccessed": 1778611571574,
+      "type": "file"
+    },
+    {
       "path": "gbp\\core\\schemas\\demand_supply.py",
       "accessCount": 2,
       "lastAccessed": 1777838968597,
@@ -394,12 +363,6 @@
       "accessCount": 1,
       "lastAccessed": 1777838968208,
       "type": "directory"
-    },
-    {
-      "path": "CLAUDE.md",
-      "accessCount": 1,
-      "lastAccessed": 1777838970700,
-      "type": "file"
     },
     {
       "path": "notebooks\\verify\\02_environment_skeleton.ipynb",

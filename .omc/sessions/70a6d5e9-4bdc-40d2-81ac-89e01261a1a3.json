@@ -1,0 +1,12 @@
+{
+  "session_id": "70a6d5e9-4bdc-40d2-81ac-89e01261a1a3",
+  "ended_at": "2026-05-12T18:48:00.856Z",
+  "reason": "other",
+  "agents_spawned": 0,
+  "agents_completed": 0,
+  "modes_used": [
+    "autopilot",
+    "ralplan",
+    "deep-interview"
+  ]
+}
