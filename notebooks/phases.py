@@ -1,13 +1,31 @@
-# ===========================================================================
-# Phases. Each phase reads the state and returns a new state plus the events it
-# emitted. The six canonical phases split a period into: dock earlier arrivals
-# -> (redirect) -> form departures -> (sample extra trips) -> dock same-period
-# arrivals -> (redirect).
-#
-# Fully implemented (the replay core): ArrivalsPreviousPhase, FormDeparturesPhase,
-# ArrivalsPhase. TODO skeletons (only bite above the historical baseline): the
-# two OverflowRedirect phases and FormPotentialTripsPhase.
-# ===========================================================================
+"""Simulation phases.
+
+Each phase reads the state and returns a new state plus the events it emitted.
+The six canonical phases split a period into: dock earlier arrivals ->
+(redirect) -> form departures -> (sample extra trips) -> dock same-period
+arrivals -> (redirect).
+
+Fully implemented (the replay core): ArrivalsPreviousPhase, FormDeparturesPhase,
+ArrivalsPhase. TODO skeletons (only bite above the historical baseline): the
+two OverflowRedirect phases and FormPotentialTripsPhase.
+"""
+
+import pandas as pd
+
+from dataloader_graph import ResolvedModelData
+from state import (
+    PeriodRow,
+    PhaseResult,
+    Schedule,
+    SimulationState,
+    adjust_inventory,
+    arrival_deltas,
+    arrived_events,
+    departed_events,
+    departure_deltas,
+)
+
+
 class Phase:
     name = "phase"
 
@@ -25,7 +43,7 @@ class Phase:
 def dock_arrivals(state: SimulationState, due: pd.DataFrame, period_id: int):
     """Dock the in-transit flows ``due`` this period: +inventory, drop, emit arrived."""
     events = arrived_events(due, period_id)
-    inventory = adjust_inventory(state.inventory, arrival_deltas(due))
+    inventory = adjust_inventory(state.state_inventory_df, arrival_deltas(due))
     in_transit = state.in_transit.drop(due.index)
     return state.with_inventory(inventory).with_in_transit(in_transit), events
 
@@ -51,7 +69,7 @@ class OverflowRedirectPreviousPhase(Phase):
     def execute(self, state, resolved, period):
         # TODO(core algorithm): if a station's docks are full when bikes arrive,
         # redirect the overflow to the nearest station with a free dock
-        # (capacity = resolved.facilities_capacities, distance = resolved.facilities_geo),
+        # (capacity = resolved.facilities_capacities_df, distance = resolved.facilities_geo_df),
         # emit `redirected` events and set realized_target_id / realized_end_period.
         # Dormant in the historical replay (dock capacity is not binding there).
         return PhaseResult.empty(state)
@@ -64,7 +82,7 @@ class FormDeparturesPhase(Phase):
 
     def execute(self, state, resolved, period):
         t = period.period_id
-        trips_now = resolved.potential_trips[resolved.potential_trips["start_period"] == t]
+        trips_now = resolved.potential_trips_df[resolved.potential_trips_df["start_period"] == t]
         if trips_now.empty:
             return PhaseResult.empty(state)
 
@@ -73,7 +91,7 @@ class FormDeparturesPhase(Phase):
         # stock for its commodity becomes `lost` (reason="stockout") instead of
         # `departed`. Only bites once demand exceeds the historical baseline.
         events = departed_events(trips_now)
-        inventory = adjust_inventory(state.inventory, departure_deltas(trips_now))
+        inventory = adjust_inventory(state.state_inventory_df, departure_deltas(trips_now))
         in_transit = pd.concat([state.in_transit, events], ignore_index=True)
         new_state = state.with_inventory(inventory).with_in_transit(in_transit)
         return PhaseResult(new_state, events)
@@ -114,17 +132,6 @@ class OverflowRedirectPhase(Phase):
         # TODO(core algorithm): same redirect rule as OverflowRedirectPreviousPhase,
         # for bikes that departed and arrived within the same period.
         return PhaseResult.empty(state)
-
-
-def build_potential_trips(historical_flows_df: pd.DataFrame) -> pd.DataFrame:
-    """Replay demand: one concrete desired trip per historical departure.
-
-    Carries the real target and duration of every trip, which is what makes the
-    base run reproduce history exactly instead of resampling it.
-    """
-    cols = ["flow_id", "source_id", "planned_target_id",
-            "commodity_category", "start_period", "planned_end_period"]
-    return historical_flows_df.query("event_type == 'departed'")[cols].reset_index(drop=True)
 
 
 def _period_flows(resolved: ResolvedModelData, period: PeriodRow):

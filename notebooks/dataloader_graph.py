@@ -1,38 +1,24 @@
-FLOW_EVENT_COLUMNS = [
-    "event_id", "period_id", "flow_id", "flow_type", "event_type", "commodity_category",
-    "source_id", "planned_target_id", "realized_target_id",
-    "start_period", "planned_end_period", "realized_end_period",
-    "resource_id", "quantity", "reason",
-]
+"""Graph (resolved) model data: the period grid, the historical flow log, the
+graph entities/attributes, and the replay demand the engine consumes.
 
-FLOW_EVENT_DTYPES = {
-    "period_id": "Int64",
-    "flow_id": "string",
-    "flow_type": "string",
-    "event_type": "string",
-    "commodity_category": "string",
-    "source_id": "string",
-    "planned_target_id": "string",
-    "realized_target_id": "string",
-    "start_period": "Int64",
-    "planned_end_period": "Int64",
-    "realized_end_period": "Int64",
-    "resource_id": "string",
-    "quantity": "Int64",
-    "reason": "string",
-}
+``ResolvedModelData`` is built once per scenario from a :class:`RawModelData`
+and exposes the graph tables. The :class:`~engine.Environment` reads a narrow
+subset of them: ``periods_df``, ``initial_inventory_df``, ``potential_trips_df``,
+``facilities_capacities_df`` and ``facilities_geo_df``.
+"""
 
+import pandas as pd
 
+from dataloader_raw import RawModelData, get_initial_inventory_df
+from state import (
+    FLOW_EVENT_COLUMNS,
+    FLOW_EVENT_DTYPES,
+    flows_to_arrivals,
+    flows_to_departures,
+    flows_to_od_matrix,
+    get_inventory_df,
+)
 
-@dataclasses.dataclass
-class ResolvedModelData:
-    """Everything the engine reads, built once per scenario from the graph data."""
-
-    periods: pd.DataFrame                 # period_id, start_timestamp, end_timestamp
-    inventory_initial: pd.DataFrame       # facility_id, commodity_category, quantity
-    potential_trips: pd.DataFrame         # the demand: concrete desired trips
-    facilities_capacities: pd.DataFrame   # facility_id, capacity   (redirect only)
-    facilities_geo: pd.DataFrame          # facility_id, lat, lng   (redirect only)
 
 # ---------------------------------------------------------------------------
 # Period grid (the simulation clock)
@@ -186,76 +172,132 @@ def get_resources_additional_attributes_df(trucks_df: pd.DataFrame) -> pd.DataFr
 
 
 # ---------------------------------------------------------------------------
-# Marginals derived from the flow log
+# Resource observations
 # ---------------------------------------------------------------------------
-def get_historical_departures_df(historical_flows_df: pd.DataFrame) -> pd.DataFrame:
-    return (
-        historical_flows_df.query("event_type == 'departed'")
-        .groupby(["period_id", "source_id", "commodity_category"], as_index=False)["quantity"].sum()
-        .rename(columns={"source_id": "facility_id", "commodity_category": "commodity_category"})
+RESOURCE_OBS_COLUMNS = ["period_id", "resource_id", "facility_id", "load"]
+
+
+def empty_resources_obs_df() -> pd.DataFrame:
+    """Empty resource-observation table (trucks are idle in the replay)."""
+    return pd.DataFrame({
+        "period_id":   pd.Series(dtype="Int64"),
+        "resource_id": pd.Series(dtype="string"),
+        "facility_id": pd.Series(dtype="string"),
+        "load":        pd.Series(dtype="Int64"),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Replay demand
+# ---------------------------------------------------------------------------
+def build_potential_trips(historical_flows_df: pd.DataFrame) -> pd.DataFrame:
+    """Replay demand: one concrete desired trip per historical departure.
+
+    Carries the real target and duration of every trip, which is what makes the
+    base run reproduce history exactly instead of resampling it.
+    """
+    cols = ["flow_id", "source_id", "planned_target_id",
+            "commodity_category", "start_period", "planned_end_period"]
+    return historical_flows_df.query("event_type == 'departed'")[cols].reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Resolved model data container
+# ---------------------------------------------------------------------------
+class ResolvedModelData:
+    """Graph data for one scenario, built from a :class:`RawModelData`.
+
+    Exposes the rich graph tables (entities, attributes, historical
+    observations). The engine reads directly: ``periods_df``,
+    ``initial_inventory_df``, ``potential_trips_df``,
+    ``facilities_capacities_df`` and ``facilities_geo_df``.
+
+    Parameters
+    ----------
+    raw : RawModelData
+        The loaded raw entity tables.
+    period_len : pandas.Timedelta, optional
+        Length of a single simulation period. Defaults to one hour.
+    """
+
+    def __init__(self, raw: RawModelData, period_len: pd.Timedelta = pd.Timedelta(hours=1)) -> None:
+        # Entities
+        self.facilities_df = get_facilities_df(raw.stations_df, raw.depots_df)
+        self.resources_df = get_resources_df(raw.trucks_df)
+        self.commodities_categories_df = get_commodities_categories_df()
+
+        # Attributes
+        self.facilities_geo_df = get_facilities_geo_df(raw.stations_df, raw.depots_df)
+        self.facilities_capacities_df = get_facilities_capacities_df(
+            raw.stations_capacities_df, raw.depot_capacities_df
+        )
+        self.resources_capacities_df = get_resources_capacities_df(raw.trucks_capacities_df)
+        self.facilities_costs_df = get_facilities_costs_df(raw.stations_costs_df, raw.depot_costs_df)
+        self.resources_rates_df = get_resources_rates_df(raw.trucks_rates_df)
+        self.commodities_categories_rates_df = get_commodities_categories_rates_df(raw.bike_rates_df)
+
+        # Time grid
+        self.period_len = period_len
+        self.t0 = raw.trips_df["started_at"].min().floor("h")
+        self.periods_df = get_periods_df(raw.trips_df, self.t0, period_len)
+
+        # Initial inventory
+        self.initial_inventory_df = get_initial_inventory_df(raw.gbfs_raw_df, raw.stations_df)
+
+        # Historical observations -- general
+        self.historical_flows_df = get_historical_flows_df(raw.trips_df, self.t0, period_len)
+        self.historical_resources_df = empty_resources_obs_df()
+        self.historical_inventory_df = get_inventory_df(self.historical_flows_df, self.initial_inventory_df)
+        self.historical_demand_df = flows_to_departures(self.historical_flows_df)
+
+        # Historical observations -- additional (marginals of the flow log)
+        self.historical_departures_df = flows_to_departures(self.historical_flows_df)
+        self.historical_arrivals_df = flows_to_arrivals(self.historical_flows_df)
+        self.historical_od_matrix_df = flows_to_od_matrix(self.historical_flows_df)
+
+        # Simulated observations -- filled by attach_simulation after a run
+        self.simulated_flows_df: pd.DataFrame | None = None
+        self.simulated_resources_df: pd.DataFrame | None = None
+        self.simulated_inventory_df: pd.DataFrame | None = None
+        self.simulated_demand_df: pd.DataFrame | None = None
+        self.simulated_departures_df: pd.DataFrame | None = None
+        self.simulated_arrivals_df: pd.DataFrame | None = None
+        self.simulated_od_matrix_df: pd.DataFrame | None = None
+
+        # Replay demand: one concrete desired trip per historical departure
+        self.potential_trips_df = build_potential_trips(self.historical_flows_df)
+
+
+# ---------------------------------------------------------------------------
+# Wiring a finished run back into the resolved container
+# ---------------------------------------------------------------------------
+def attach_simulation(
+    resolved: ResolvedModelData,
+    simulated_flows_df: pd.DataFrame,
+    simulated_resources_df: pd.DataFrame | None = None,
+) -> None:
+    """Populate the ``simulated_*`` observation slots from a finished run.
+
+    All simulated marginals are derived from the finalized flow journal with the
+    same functions used for the historical ones, so the two sets are directly
+    comparable (in the base scenario they are equal).
+
+    Parameters
+    ----------
+    resolved : ResolvedModelData
+        Container to fill in place.
+    simulated_flows_df : pandas.DataFrame
+        Finalized simulated flow journal (e.g. ``Environment.simulated_flows_df``).
+    simulated_resources_df : pandas.DataFrame, optional
+        Resource observations from the run. Defaults to an empty table (trucks
+        are idle in the historical replay).
+    """
+    resolved.simulated_flows_df = simulated_flows_df
+    resolved.simulated_resources_df = (
+        simulated_resources_df if simulated_resources_df is not None else empty_resources_obs_df()
     )
-
-
-def get_historical_arrivals_df(historical_flows_df: pd.DataFrame) -> pd.DataFrame:
-    return (
-        historical_flows_df.query("event_type == 'arrived'")
-        .groupby(["period_id", "realized_target_id", "commodity_category"], as_index=False)["quantity"].sum()
-        .rename(columns={"realized_target_id": "facility_id", "commodity_category": "commodity_category"})
-    )
-
-
-# ---------------------------------------------------------------------------
-# Execution
-# ---------------------------------------------------------------------------
-
-# Entities
-facilities_df = get_facilities_df(stations_df, depots_df)
-resources_df = get_resources_df(trucks_df)
-commodities_categories_df = get_commodities_categories_df()
-
-facilities_geo_df = get_facilities_geo_df(stations_df, depots_df)
-facilities_capacities_df = get_facilities_capacities_df(stations_capacities_df, depot_capacities_df)
-resources_capacities_df = get_resources_capacities_df(trucks_capacities_df)
-
-facilities_costs_df = get_facilities_costs_df(stations_costs_df, depot_costs_df)
-resources_rates_df = get_resources_rates_df(trucks_rates_df)
-commodities_categories_rates_df = get_commodities_categories_rates_df(bike_rates_df)
-
-
-# ---------------------------------------------------------------------------
-# Возможно, тут надо разделить. Так как то что ДО - это общая часть. А то что после. - это уже про конкретные flow.
-# А может и не нужно...
-# Скорее всего это может быть оправдано. Напримери у меня есть исторический сценарий.
-# А могут быть разные эксперименты. И каждый из них - это отдельный экземпляр класса.
-# И потом можно будет легче сделать логику в рамках которой будут происходить сравнения экспериментов.
-# ---------------------------------------------------------------------------
-
-# Period grid
-# Это надо потом будет в конфиг как то грамотно записать. И чтобы автоматически пересчитывалось.
-PERIOD_LEN = pd.Timedelta(hours=1)
-t0 = trips_df["started_at"].min().floor("h")
-periods_df = get_periods_df(trips_df, t0, PERIOD_LEN)
-
-initial_inventory_df = get_initial_inventory_df(gbfs_raw_df, stations_df)
-
-# Historical observations
-## General:
-historical_flows_df = get_historical_flows_df(trips_df, t0, PERIOD_LEN)
-historical_inventory_df = None
-historical_resources_df = None
-historical_demand_df = get_historical_arrivals_df(historical_flows_df)
-## Additionall
-historical_departures_df = get_historical_departures_df(historical_flows_df)
-historical_arrivals_df = historical_demand_df.copy()
-historical_od_matrix_df = None
-
-# Simulator observations declarations
-## General:
-simulated_flows_df = None
-simulated_inventory_df = None
-simulated_resources_df = None
-simulated_demand_df = None
-## Additionall:
-simulated_departures_df = None
-simulated_arrivals_df = None
-simulated_od_matrix_df = None
+    resolved.simulated_inventory_df = get_inventory_df(simulated_flows_df, resolved.initial_inventory_df)
+    resolved.simulated_demand_df = flows_to_departures(simulated_flows_df)
+    resolved.simulated_departures_df = flows_to_departures(simulated_flows_df)
+    resolved.simulated_arrivals_df = flows_to_arrivals(simulated_flows_df)
+    resolved.simulated_od_matrix_df = flows_to_od_matrix(simulated_flows_df)

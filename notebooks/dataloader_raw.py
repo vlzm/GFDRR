@@ -1,5 +1,13 @@
-import pandas as pd
+"""Raw Citi Bike loaders and the ``RawModelData`` container.
+
+Reads the raw trip CSV and the live GBFS station feed, then derives the raw
+entity tables (stations, depots, trucks, bikes) with their capacities, costs
+and rates. ``RawModelData`` runs all of this once and exposes the results as
+attributes; ``ResolvedModelData`` (in :mod:`dataloader_graph`) consumes it.
+"""
+
 import numpy as np
+import pandas as pd
 import requests
 
 
@@ -145,42 +153,61 @@ def get_bike_rates_df(electric_bike_rate: float, classic_bike_rate: float) -> pd
 
 
 # ---------------------------------------------------------------------------
-# Config + execution
+# Raw model data container
 # ---------------------------------------------------------------------------
-trips_path = "/Users/vladislav/Documents/vlzm/GFDRR/data/raw/202601-citibike-tripdata_1.csv"
-# trips_path = '/mnt/outer/Documents/vlzm/GFDRR/data/raw/202602-citibike-tripdata_1.csv'
-# trips_path = 'D:/Users/vladislav/Documents/vlzm/GFDRR/data/raw/202601-citibike-tripdata_1.csv'
+class RawModelData:
+    """Raw entity tables for one scenario, loaded once from data sources.
 
-config = {
-    "gbfs_base": "https://gbfs.citibikenyc.com/gbfs/en",
-    "trips_path": trips_path,
-    "seed": 42,
-    "n_depots": 10,
-    "depot_capacity": 9000,
-    "n_trucks": 5,
-    "truck_capacity_bikes": 20,
-    "truck_rate": 50.0,
-    "electric_bike_rate": 5,
-    "classic_bike_rate": 3,
-}
-_rng = np.random.default_rng(seed=config["seed"])
-config["rng"] = _rng
+    Parameters
+    ----------
+    gbfs_base : str
+        Base URL of the GBFS feed (``station_information``/``station_status``).
+    trips_path : str
+        Path to the raw Citi Bike trip CSV.
+    seed : int
+        Seed for the random generator used to synthesize depots and trucks.
+    n_depots, depot_capacity, n_trucks, truck_capacity_bikes : int
+        Sizing of the synthetic depot and truck fleet.
+    truck_rate, electric_bike_rate, classic_bike_rate : float
+        Per-unit rates for trucks and the two bike commodities.
+    """
 
-trips_raw_df = load_trips_raw_df(config["trips_path"])
-gbfs_raw_df = load_gbfs_raw_df(config["gbfs_base"])
+    def __init__(
+        self,
+        gbfs_base: str,
+        trips_path: str,
+        seed: int,
+        n_depots: int,
+        depot_capacity: int,
+        n_trucks: int,
+        truck_capacity_bikes: int,
+        truck_rate: float,
+        electric_bike_rate: float,
+        classic_bike_rate: float,
+    ) -> None:
+        self.rng = np.random.default_rng(seed=seed)
 
-stations_df = get_stations(trips_raw_df)
-stations_capacities_df = get_stations_capacities(gbfs_raw_df, stations_df)
-stations_costs_df = get_stations_costs(stations_df)
+        # Raw sources
+        self.trips_raw_df = load_trips_raw_df(trips_path)
+        self.gbfs_raw_df = load_gbfs_raw_df(gbfs_base)
 
-depots_df = get_depots(config["rng"], config["n_depots"])
-depot_capacities_df = get_depots_capacities(config["rng"], config["depot_capacity"], depots_df)
-depot_costs_df = get_depots_costs(config["rng"], depots_df)
+        # Stations
+        self.stations_df = get_stations(self.trips_raw_df)
+        self.stations_capacities_df = get_stations_capacities(self.gbfs_raw_df, self.stations_df)
+        self.stations_costs_df = get_stations_costs(self.stations_df)
 
-trips_df = get_trips_df(trips_raw_df)
+        # Depots
+        self.depots_df = get_depots(self.rng, n_depots)
+        self.depot_capacities_df = get_depots_capacities(self.rng, depot_capacity, self.depots_df)
+        self.depot_costs_df = get_depots_costs(self.rng, self.depots_df)
 
-trucks_df = get_trucks_df(config["n_trucks"])
-trucks_rates_df = get_trucks_rates_df(config["truck_rate"], trucks_df)
-trucks_capacities_df = get_trucks_capacities_df(config["truck_capacity_bikes"], trucks_df)
+        # Trips
+        self.trips_df = get_trips_df(self.trips_raw_df)
 
-bike_rates_df = get_bike_rates_df(config["electric_bike_rate"], config["classic_bike_rate"])
+        # Trucks
+        self.trucks_df = get_trucks_df(n_trucks)
+        self.trucks_rates_df = get_trucks_rates_df(truck_rate, self.trucks_df)
+        self.trucks_capacities_df = get_trucks_capacities_df(truck_capacity_bikes, self.trucks_df)
+
+        # Bikes
+        self.bike_rates_df = get_bike_rates_df(electric_bike_rate, classic_bike_rate)
