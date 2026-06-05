@@ -12,8 +12,9 @@ import dataclasses
 
 import pandas as pd
 
-from dataloader_graph import ResolvedModelData
-from state import (
+from gbp.loaders.dataloader_graph import ResolvedModelData
+
+from .state import (
     PeriodRow,
     SimulationState,
     SimulatorConfigError,

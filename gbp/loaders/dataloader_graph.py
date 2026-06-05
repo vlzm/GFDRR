@@ -1,860 +1,354 @@
-"""Assemble ``RawModelData`` from a ``BikeShareSourceProtocol``.
+"""Graph (resolved) model data: the period grid, the historical flow log, the
+graph entities/attributes, and the replay demand the engine consumes.
 
-Trips and telemetry from the source are mapped to ``observed_flow`` and
-``observed_inventory`` tables in the model.  Other wide tables (hourly
-inventory matrix) remain on ``loader.source``.
-
-Usage::
-
-    from gbp.build.pipeline import build_model
-    from gbp.loaders import DataLoaderGraph, DataLoaderMock, GraphLoaderConfig
-
-    mock = DataLoaderMock({"n_stations": 10})
-    loader = DataLoaderGraph(mock, GraphLoaderConfig())
-    raw = loader.load()
-    resolved = build_model(raw)
+``ResolvedModelData`` is built once per scenario from a :class:`RawModelData`
+and exposes the graph tables. The :class:`~engine.Environment` reads a narrow
+subset of them: ``periods_df``, ``initial_inventory_df``, ``potential_trips_df``,
+``facilities_capacities_df`` and ``facilities_geo_df``.
 """
 
-from __future__ import annotations
-
-import math
-from typing import NamedTuple
-
 import pandas as pd
-import structlog
 
-from gbp.build.defaults import DEFAULT_COMMODITY_CATEGORY_ID
-from gbp.core.attributes.registry import AttributeRegistry
-from gbp.core.enums import AttributeKind, ModalType, PeriodType
-from gbp.core.model import RawModelData
-
-from .contracts import (
-    DepotsSourceSchema,
-    GraphLoaderConfig,
-    ResourcesSourceSchema,
-    StationsSourceSchema,
-    TripsSourceSchema,
+from gbp.consumers.simulator.state import (
+    arrived_events,
+    departed_events,
+    finalize_flows,
+    flows_to_arrivals,
+    flows_to_departures,
+    flows_to_od_matrix,
+    get_inventory_df,
 )
-from .protocols import BikeShareSourceProtocol
-
-log = structlog.get_logger()
-
-# Bike-share canonical commodity categories used by ``DataLoaderMock``.
-# ``DataLoaderGraph`` itself discovers categories from trips via
-# ``_commodity_categories()``; this tuple exists for tests and documentation
-# that reference the canonical bike-share taxonomy.
-COMMODITY_CATEGORIES = ("electric_bike", "classic_bike")
-RESOURCE_CATEGORY = "rebalancing_truck"
+from gbp.loaders.dataloader_raw import RawModelData, get_initial_inventory_df
 
 
-def _nonempty_df(source: BikeShareSourceProtocol, attr: str) -> pd.DataFrame | None:
-    """Return ``getattr(source, attr)`` if it is a non-empty DataFrame.
+# ---------------------------------------------------------------------------
+# Period grid (the simulation clock)
+# ---------------------------------------------------------------------------
+def to_period_id(ts: pd.Series, t0: pd.Timestamp, period_len: pd.Timedelta) -> pd.Series:
+    return ((ts - t0) // period_len).astype("int64")
 
-    Optional source tables are allowed to be ``None`` *or* missing entirely;
-    empty DataFrames are treated as "no rows" and collapsed to ``None`` so
-    downstream code can use a single ``is None`` check.
+
+def get_periods_df(trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta) -> pd.DataFrame:
+    n_periods = int(to_period_id(trips_df["ended_at"], t0, period_len).max()) + 1
+    periods_df = pd.DataFrame({"period_id": range(n_periods)})
+    periods_df["start_timestamp"] = t0 + periods_df["period_id"] * period_len
+    periods_df["end_timestamp"] = periods_df["start_timestamp"] + period_len
+    return periods_df
+
+
+# ---------------------------------------------------------------------------
+# Flow event log
+# ---------------------------------------------------------------------------
+def get_historical_flows_df(trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta) -> pd.DataFrame:
+    """Expand each historical trip into a realized-flow event log.
+
+    Ground-truth history contains only flows that actually happened, so each
+    completed trip is one flow that emits two events in order: ``departed`` at
+    the start period and ``arrived`` at the end period. The lifecycle states
+    that exist only under simulation (``requested``, ``lost``, ``redirected``,
+    ``cancelled``) are intentionally absent here — this is a representation of
+    input data, not the simulator's own journal. Each field is filled only by
+    the event that determines it (e.g. ``realized_end_period`` is null until
+    ``arrived``); the full picture of a flow is recovered by stitching its rows
+    on ``flow_id``.
+
+    ``flow_id`` is namespaced with a ``hist_`` prefix so it cannot collide with
+    flows the simulator generates and appends to the same journal.
+
+    The rows are built with the shared :func:`~state.departed_events` /
+    :func:`~state.arrived_events` builders and ordered by
+    :func:`~state.finalize_flows` -- the same primitives the simulator uses --
+    so a base replay's finalized journal is identical to this log by
+    construction.
 
     Parameters
     ----------
-    source
-        Data source implementing ``BikeShareSourceProtocol``.
-    attr
-        Attribute name to look up on *source*.
+    trips_df : pandas.DataFrame
+        Trips with ``started_at``, ``ended_at``, ``start_station_id``,
+        ``end_station_id`` and ``rideable_type``. The row index seeds ``flow_id``.
+    t0 : pandas.Timestamp
+        Origin of the period grid.
+    period_len : pandas.Timedelta
+        Length of a single period.
 
     Returns
     -------
-    pd.DataFrame or None
-        The DataFrame when present and non-empty, otherwise ``None``.
+    pandas.DataFrame
+        Event log with columns :data:`FLOW_EVENT_COLUMNS`, sorted by
+        ``period_id`` then ``flow_id``, with a monotonic ``event_id``.
     """
-    val = getattr(source, attr, None)
-    if val is None:
-        return None
-    if isinstance(val, pd.DataFrame) and val.empty:
-        return None
-    return val
+    trips = pd.DataFrame({
+        "flow_id":            "hist_" + trips_df.index.astype("string"),
+        "source_id":          trips_df["start_station_id"],
+        "planned_target_id":  trips_df["end_station_id"],
+        "commodity_category": trips_df["rideable_type"],
+        "start_period":       to_period_id(trips_df["started_at"], t0, period_len),
+        "planned_end_period": to_period_id(trips_df["ended_at"], t0, period_len),
+    })
+    departed = departed_events(trips)
+    arrived = arrived_events(trips, trips["planned_end_period"])
+    return finalize_flows(pd.concat([departed, arrived], ignore_index=True))
 
 
 # ---------------------------------------------------------------------------
-# Geometry helpers
+# Entity definitions
 # ---------------------------------------------------------------------------
-
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Compute great-circle distance between two points in kilometres."""
-    rlat1, rlon1 = math.radians(lat1), math.radians(lon1)
-    rlat2, rlon2 = math.radians(lat2), math.radians(lon2)
-    dlat, dlon = rlat2 - rlat1, rlon2 - rlon1
-    h = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
-    return 2 * 6_371.0 * math.asin(min(1.0, math.sqrt(h)))
+def get_facilities_df(stations_df: pd.DataFrame, depots_df: pd.DataFrame) -> pd.DataFrame:
+    return pd.concat([
+        stations_df[['station_id']].rename(columns={"station_id": "facility_id"}).assign(facility_category="station"),
+        depots_df[['depot_id']].rename(columns={"depot_id": "facility_id"}).assign(facility_category="depot"),
+    ], ignore_index=True)
 
 
-def _euclidean_latlon_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Compute approximate Euclidean distance between two lat/lon points in kilometres."""
-    km_per_deg_lat = 111.0
-    km_per_deg_lon = 111.0 * math.cos(math.radians((lat1 + lat2) / 2))
-    dx = (lon2 - lon1) * km_per_deg_lon
-    dy = (lat2 - lat1) * km_per_deg_lat
-    return math.sqrt(dx * dx + dy * dy)
+def get_resources_df(trucks_df: pd.DataFrame) -> pd.DataFrame:
+    return pd.concat([
+        trucks_df[['truck_id']].rename(columns={"truck_id": "resource_id"}).assign(resource_category="truck"),
+    ], ignore_index=True)
 
 
-def _pair_distance_km(
-    lat1: float, lon1: float, lat2: float, lon2: float, backend: str,
-) -> float:
-    """Dispatch pairwise distance calculation to the chosen backend."""
-    if backend == "euclidean":
-        return _euclidean_latlon_km(lat1, lon1, lat2, lon2)
-    return _haversine_km(lat1, lon1, lat2, lon2)
+def get_commodities_categories_df() -> pd.DataFrame:
+    return pd.DataFrame({
+        "commodity_category": ["classic_bike", "electric_bike"],
+    })
+
+
+def get_facilities_geo_df(stations_df: pd.DataFrame, depots_df: pd.DataFrame) -> pd.DataFrame:
+    """Geographical attributes: facility_id, lat, lng."""
+    return pd.concat([
+        stations_df[["station_id", "lat", "lng"]].rename(columns={"station_id": "facility_id"}),
+        depots_df[["depot_id", "lat", "lng"]].rename(columns={"depot_id": "facility_id"}),
+    ], ignore_index=True)
+
+
+def get_facilities_capacities_df(stations_capacities_df: pd.DataFrame, depot_capacities_df: pd.DataFrame) -> pd.DataFrame:
+    """Capacities: facility_id, capacity."""
+    return pd.concat([
+        stations_capacities_df.rename(columns={"station_id": "facility_id"}),
+        depot_capacities_df.rename(columns={"depot_id": "facility_id"}),
+    ], ignore_index=True)
+
+
+def get_resources_capacities_df(trucks_capacities_df: pd.DataFrame) -> pd.DataFrame:
+    """resource_id, capacity."""
+    return trucks_capacities_df.rename(columns={"truck_id": "resource_id"})
+
+
+def get_facilities_costs_df(stations_costs_df: pd.DataFrame, depot_costs_df: pd.DataFrame) -> pd.DataFrame:
+    """Costs: facility_id, fixed_cost."""
+    return pd.concat([
+        stations_costs_df.rename(columns={"station_id": "facility_id", "fixed_cost_station": "fixed_cost"}),
+        depot_costs_df.rename(columns={"depot_id": "facility_id", "fixed_cost_depot": "fixed_cost"}),
+    ], ignore_index=True)
+
+
+def get_resources_rates_df(trucks_rates_df: pd.DataFrame) -> pd.DataFrame:
+    return trucks_rates_df.rename(columns={"truck_id": "resource_id"})
+
+
+def get_commodities_categories_rates_df(bike_rates_df: pd.DataFrame) -> pd.DataFrame:
+    return bike_rates_df.rename(columns={"rideable_type": "commodity_category"})
+
+
+def get_resources_additional_attributes_df(trucks_df: pd.DataFrame) -> pd.DataFrame:
+    """Additional attributes: resource_id, home_facility_id."""
+    return (
+        trucks_df.rename(columns={"truck_id": "resource_id"}).assign(home_facility_id="depot_1")
+    )
 
 
 # ---------------------------------------------------------------------------
-# Internal data carrier for intermediate entity results
+# Resource observations
 # ---------------------------------------------------------------------------
+RESOURCE_OBS_COLUMNS = ["period_id", "resource_id", "facility_id", "load"]
 
-class _EntityResult(NamedTuple):
-    """Intermediate result from ``_build_entities`` used by downstream builders."""
 
-    tables: dict[str, pd.DataFrame]
-    station_ids: list[str]
-    depot_ids: list[str]
+def empty_resources_obs_df() -> pd.DataFrame:
+    """Empty resource-observation table (trucks are idle in the replay)."""
+    return pd.DataFrame({
+        "period_id":   pd.Series(dtype="Int64"),
+        "resource_id": pd.Series(dtype="string"),
+        "facility_id": pd.Series(dtype="string"),
+        "load":        pd.Series(dtype="Int64"),
+    })
 
 
 # ---------------------------------------------------------------------------
-# DataLoaderGraph
+# Replay demand
 # ---------------------------------------------------------------------------
+def build_potential_trips(historical_flows_df: pd.DataFrame) -> pd.DataFrame:
+    """Replay demand: one concrete desired trip per historical departure.
 
-class DataLoaderGraph:
-    """Assemble ``RawModelData`` from a ``BikeShareSourceProtocol``.
+    Carries the real target and duration of every trip, which is what makes the
+    base run reproduce history exactly instead of resampling it.
+    """
+    cols = ["flow_id", "source_id", "planned_target_id",
+            "commodity_category", "start_period", "planned_end_period"]
+    return historical_flows_df.query("event_type == 'departed'")[cols].reset_index(drop=True)
 
-    The loader covers only the source-to-raw transition.  Call
-    ``gbp.build.pipeline.build_model`` explicitly to produce the resolved model.
+
+# ---------------------------------------------------------------------------
+# Saturated (artificial) initial state for the base replay
+# ---------------------------------------------------------------------------
+def get_saturated_inventory_df(
+    facilities_df: pd.DataFrame,
+    commodities_categories_df: pd.DataFrame,
+    quantity: int = 1_000_000,
+) -> pd.DataFrame:
+    """Artificial initial inventory: every station stocked with ``quantity`` bikes
+    of each commodity.
+
+    Used by the base scenario instead of the GBFS snapshot. The snapshot is a
+    *current* observation, unrelated to the historical start state, so gating
+    demand against it starves the replay (most departures lose to a stockout that
+    never happened historically). With stock far above any period's demand the
+    gate never binds, every historical departure departs, and the run reproduces
+    the historical departures exactly even though demand is still gated and trips
+    are still formed from the OD matrix.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``facility_id``, ``commodity_category``, ``quantity`` for every
+        ``(station, commodity)``.
+    """
+    stations = facilities_df.loc[facilities_df["facility_category"] == "station", ["facility_id"]]
+    inv = stations.merge(commodities_categories_df[["commodity_category"]], how="cross")
+    inv["quantity"] = quantity
+    return inv.reset_index(drop=True)
+
+
+def get_saturated_capacities_df(facilities_df: pd.DataFrame, capacity: int = 1_000_000) -> pd.DataFrame:
+    """Artificial dock capacities: every facility gets ``capacity`` slots.
+
+    Pairs with :func:`get_saturated_inventory_df` so the overflow-redirect rule
+    never binds in the base scenario.
+    """
+    out = facilities_df[["facility_id"]].copy()
+    out["capacity"] = capacity
+    return out.reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Resolved model data container
+# ---------------------------------------------------------------------------
+class ResolvedModelData:
+    """Graph data for one scenario, built from a :class:`RawModelData`.
+
+    Exposes the rich graph tables (entities, attributes, historical
+    observations). The engine reads directly: ``periods_df``,
+    ``initial_inventory_df``, ``potential_trips_df``,
+    ``facilities_capacities_df`` and ``facilities_geo_df``.
 
     Parameters
     ----------
-    source
-        Bike-sharing data source that satisfies ``BikeShareSourceProtocol``.
-    config
-        Loader configuration. When ``None``, defaults from
-        ``GraphLoaderConfig`` are used.
+    raw : RawModelData
+        The loaded raw entity tables.
+    period_len : pandas.Timedelta, optional
+        Length of a single simulation period. Defaults to one hour.
+    saturate_stock : bool, optional
+        If True, replace the GBFS initial inventory and the dock capacities with
+        artificial saturated ones (every station stocked far above demand, every
+        facility with effectively unbounded docks). This is the base-replay setup:
+        demand gating and overflow redirect stay in the pipeline but never bind,
+        so the run reproduces the historical departures exactly. Defaults to False.
+    saturation_quantity : int, optional
+        The per-station stock and per-facility capacity used when
+        ``saturate_stock`` is True. Defaults to one million.
     """
 
     def __init__(
         self,
-        source: BikeShareSourceProtocol,
-        config: GraphLoaderConfig | None = None,
+        raw: RawModelData,
+        period_len: pd.Timedelta = pd.Timedelta(hours=1),
+        saturate_stock: bool = False,
+        saturation_quantity: int = 1_000_000,
     ) -> None:
-        self._source = source
-        self._config = config or GraphLoaderConfig()
-        self._log = log.bind(loader="graph_core")
-        self._raw: RawModelData | None = None
+        # Entities
+        self.facilities_df = get_facilities_df(raw.stations_df, raw.depots_df)
+        self.resources_df = get_resources_df(raw.trucks_df)
+        self.commodities_categories_df = get_commodities_categories_df()
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def load(self) -> RawModelData:
-        """Load source tables and assemble ``RawModelData``.
-
-        Validation and derivation of optional tables happen later, inside
-        ``build_model``.  The returned raw model is cached on the loader and
-        also accessible via the ``raw`` property.
-
-        Returns
-        -------
-        RawModelData
-            Assembled raw model data.
-        """
-        self._log.info("load_start")
-        self._source.load_data()
-        self._validate_source()
-
-        self._raw = self._build_raw_model()
-        self._log.info("load_done", facilities=len(self._raw.facilities))
-        return self._raw
-
-    @property
-    def raw(self) -> RawModelData:
-        """Return cached ``RawModelData``.
-
-        Raises
-        ------
-        ValueError
-            If ``load()`` has not been called yet.
-        """
-        if self._raw is None:
-            raise ValueError("Data is not loaded. Call load() first.")
-        return self._raw
-
-    @property
-    def available_dates(self) -> pd.DatetimeIndex:
-        """Return the timestamp index from the underlying source."""
-        return self._source.timestamps
-
-    @property
-    def source(self) -> BikeShareSourceProtocol:
-        """Return the underlying data source (raw DataFrames, including non-core tables)."""
-        return self._source
-
-    # ------------------------------------------------------------------
-    # Internal — validation
-    # ------------------------------------------------------------------
-
-    def _validate_source(self) -> None:
-        """Validate source shape with Pandera schemas."""
-        StationsSourceSchema.validate(self._source.df_stations)
-        if self._config.build_observations:
-            TripsSourceSchema.validate(self._source.df_trips)
-
-        depots = _nonempty_df(self._source, "df_depots")
-        if depots is not None:
-            DepotsSourceSchema.validate(depots)
-
-        resources = _nonempty_df(self._source, "df_resources")
-        if resources is not None:
-            ResourcesSourceSchema.validate(resources)
-
-        self._log.debug("source_validated")
-
-    # ------------------------------------------------------------------
-    # Internal — raw model assembly (orchestrator + focused builders)
-    # ------------------------------------------------------------------
-
-    def _build_raw_model(self) -> RawModelData:
-        """Assemble ``RawModelData`` from source DataFrames.
-
-        Returns
-        -------
-        RawModelData
-            Fully assembled (but not yet resolved) model data.
-        """
-        temporal = self._build_temporal()
-        entities = self._build_entities()
-        behavior = self._build_behavior(entities)
-        distance_data = self._build_distance_matrix(entities) if self._config.build_edges else {}
-        resources = self._build_resources(entities)
-
-        observations: dict[str, pd.DataFrame | None] = {}
-        if self._config.build_observations:
-            observations = self._build_observations(entities)
-
-        registry = AttributeRegistry()
-        node_params = self._build_node_parameters(registry)
-        self._register_facility_costs(registry, temporal)
-        self._register_resource_costs(registry, entities)
-
-        all_tables = {
-            **temporal,
-            **entities.tables,
-            **behavior,
-            **distance_data,
-            **node_params,
-            **resources,
-            **{k: v for k, v in observations.items() if v is not None},
-        }
-        return RawModelData(
-            **{k: v for k, v in all_tables.items() if v is not None},
-            attributes=registry,
+        # Attributes
+        self.facilities_geo_df = get_facilities_geo_df(raw.stations_df, raw.depots_df)
+        self.facilities_capacities_df = get_facilities_capacities_df(
+            raw.stations_capacities_df, raw.depot_capacities_df
         )
+        self.resources_capacities_df = get_resources_capacities_df(raw.trucks_capacities_df)
+        self.facilities_costs_df = get_facilities_costs_df(raw.stations_costs_df, raw.depot_costs_df)
+        self.resources_rates_df = get_resources_rates_df(raw.trucks_rates_df)
+        self.commodities_categories_rates_df = get_commodities_categories_rates_df(raw.bike_rates_df)
 
-    def _build_temporal(self) -> dict[str, pd.DataFrame]:
-        """Build planning horizon and single daily segment covering the source time range.
+        # Time grid
+        self.period_len = period_len
+        self.t0 = raw.trips_df["started_at"].min().floor("h")
+        self.periods_df = get_periods_df(raw.trips_df, self.t0, period_len)
 
-        Prefers ``source.timestamps`` when available.  Falls back to the date
-        range of ``df_trips["started_at"]`` for minimal sources that don't carry
-        an explicit timestamp index.
-
-        Returns
-        -------
-        dict[str, pd.DataFrame]
-            ``planning_horizon`` and ``planning_horizon_segments`` tables.
-        """
-        start_d, end_d = self._derive_horizon_dates()
-
-        return {
-            "planning_horizon": pd.DataFrame({
-                "planning_horizon_id": ["h1"],
-                "name": ["mock_horizon"],
-                "start_date": [start_d],
-                "end_date": [end_d],
-            }),
-            "planning_horizon_segments": pd.DataFrame({
-                "planning_horizon_id": ["h1"],
-                "segment_index": [0],
-                "start_date": [start_d],
-                "end_date": [end_d],
-                "period_type": PeriodType.DAY.value,
-            }),
-        }
-
-    def _derive_horizon_dates(self) -> tuple:
-        """Derive ``(start_date, end_date)`` for the planning horizon.
-
-        Uses ``source.timestamps`` when present.  Otherwise derives the span
-        from ``df_trips["started_at"]``.
-
-        Returns
-        -------
-        tuple
-            ``(start_date, end_date)`` as ``datetime.date`` objects.
-
-        Raises
-        ------
-        ValueError
-            If neither ``timestamps`` nor ``df_trips["started_at"]`` is available.
-        """
-        ts = getattr(self._source, "timestamps", None)
-        if ts is not None and len(ts) > 0:
-            start_d = pd.Timestamp(ts[0]).normalize().date()
-            end_d = (pd.Timestamp(ts[-1]).normalize() + pd.Timedelta(days=1)).date()
-            return start_d, end_d
-
-        trips = _nonempty_df(self._source, "df_trips")
-        if trips is not None and "started_at" in trips.columns:
-            started = pd.to_datetime(trips["started_at"])
-            start_d = started.min().normalize().date()
-            end_d = (started.max().normalize() + pd.Timedelta(days=1)).date()
-            return start_d, end_d
-
-        raise ValueError(
-            "Cannot derive planning horizon: source has neither `timestamps` "
-            "nor a non-empty `df_trips` with `started_at`."
-        )
-
-    def _build_entities(self) -> _EntityResult:
-        """Build facilities and commodity/resource categories from the source.
-
-        Depots, resource categories, and explicit commodities are all optional.
-        When absent, the loader either emits a default placeholder or leaves
-        the table out entirely for ``build_model`` to derive.
-
-        Returns
-        -------
-        _EntityResult
-            Intermediate carrier with tables, station ids, and depot ids.
-        """
-        stations = self._source.df_stations
-        fac_stations = pd.DataFrame({
-            "facility_id": stations["station_id"].astype(str),
-            "facility_type": "station",
-            "name": stations["station_id"].astype(str),
-            "lat": stations["lat"].astype(float),
-            "lon": stations["lon"].astype(float),
-        })
-
-        depots = _nonempty_df(self._source, "df_depots")
-        if depots is not None:
-            fac_depots = pd.DataFrame({
-                "facility_id": depots["node_id"].astype(str),
-                "facility_type": "depot",
-                "name": depots["node_id"].astype(str),
-                "lat": depots["lat"].astype(float),
-                "lon": depots["lon"].astype(float),
-            })
-            facilities = pd.concat([fac_depots, fac_stations], ignore_index=True)
-            depot_ids = list(fac_depots["facility_id"])
-        else:
-            facilities = fac_stations.reset_index(drop=True)
-            depot_ids = []
-
-        tables: dict[str, pd.DataFrame] = {"facilities": facilities}
-
-        commodity_cats = self._commodity_categories()
-        tables["commodity_categories"] = pd.DataFrame({
-            "commodity_category_id": list(commodity_cats),
-            "name": [cc.replace("_", " ").capitalize() for cc in commodity_cats],
-            "unit": ["unit"] * len(commodity_cats),
-        })
-        res_caps = _nonempty_df(self._source, "df_resource_capacities")
-        if res_caps is not None:
-            tables["resource_categories"] = pd.DataFrame({
-                "resource_category_id": [RESOURCE_CATEGORY],
-                "name": ["Rebalancing truck"],
-                "base_capacity": [float(res_caps["capacity"].max())],
-            })
-
-        return _EntityResult(
-            tables=tables,
-            station_ids=list(fac_stations["facility_id"]),
-            depot_ids=depot_ids,
-        )
-
-    def _commodity_categories(self) -> tuple[str, ...]:
-        """Discover commodity categories from ``df_trips.rideable_type`` if present.
-
-        Falls back to a single ``DEFAULT_COMMODITY_CATEGORY_ID`` when trips
-        carry no explicit type.
-
-        Returns
-        -------
-        tuple[str, ...]
-            Sorted tuple of commodity category identifiers.
-        """
-        trips = _nonempty_df(self._source, "df_trips")
-        if trips is not None and "rideable_type" in trips.columns:
-            cats = tuple(
-                sorted({str(v) for v in trips["rideable_type"].dropna().unique()})
+        # Initial inventory (GBFS snapshot, or artificial saturated stock for the
+        # base replay -- see the ``saturate_stock`` parameter).
+        if saturate_stock:
+            self.initial_inventory_df = get_saturated_inventory_df(
+                self.facilities_df, self.commodities_categories_df, saturation_quantity
             )
-            if cats:
-                return cats
-        return (DEFAULT_COMMODITY_CATEGORY_ID,)
-
-    def _build_behavior(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
-        """Build facility operations and edge generation rules.
-
-        Roles are derived by ``build_model`` from ``(facility_type, operations)``
-        via ``gbp.core.roles.derive_roles``; the loader intentionally does
-        not emit a ``facility_roles`` table.
-
-        Edge rules cover station-to-station always; depot pairs are only
-        emitted when the source actually has depots.
-
-        Parameters
-        ----------
-        entities
-            Intermediate entity result from ``_build_entities``.
-
-        Returns
-        -------
-        dict[str, pd.DataFrame]
-            ``facility_operations`` and ``edge_rules`` tables.
-        """
-        op_rows: list[dict] = []
-
-        for did in entities.depot_ids:
-            op_rows.extend([
-                {"facility_id": did, "operation_type": "receiving", "enabled": True},
-                {"facility_id": did, "operation_type": "storage", "enabled": True},
-                {"facility_id": did, "operation_type": "dispatch", "enabled": True},
-            ])
-
-        for sid in entities.station_ids:
-            op_rows.extend([
-                {"facility_id": sid, "operation_type": "receiving", "enabled": True},
-                {"facility_id": sid, "operation_type": "storage", "enabled": True},
-                {"facility_id": sid, "operation_type": "dispatch", "enabled": True},
-            ])
-
-        if self._config.build_edges:
-            base_pairs = [("station", "station")]
-            if entities.depot_ids:
-                base_pairs.extend([
-                    ("depot", "station"),
-                    ("station", "depot"),
-                    ("depot", "depot"),
-                ])
-            commodity_cats = self._commodity_categories()
-            rule_rows: list[dict] = []
-            for src_t, tgt_t in base_pairs:
-                for cc in commodity_cats:
-                    rule_rows.append({
-                        "source_type": src_t,
-                        "target_type": tgt_t,
-                        "commodity_category": cc,
-                        "modal_type": ModalType.ROAD.value,
-                        "enabled": True,
-                    })
-            edge_rules = pd.DataFrame(rule_rows)
-        else:
-            edge_rules = pd.DataFrame({
-                "source_type": pd.Series(dtype="string"),
-                "target_type": pd.Series(dtype="string"),
-                "commodity_category": pd.Series(dtype="string"),
-                "modal_type": pd.Series(dtype="string"),
-                "enabled": pd.Series(dtype="bool"),
-            })
-
-        return {
-            "facility_operations": pd.DataFrame(op_rows),
-            "edge_rules": edge_rules,
-        }
-
-    def _build_distance_matrix(self, entities: _EntityResult) -> dict[str, pd.DataFrame]:
-        """Compute all-pairs pairwise distances and travel durations between facilities.
-
-        Parameters
-        ----------
-        entities
-            Intermediate entity result from ``_build_entities``.
-
-        Returns
-        -------
-        dict[str, pd.DataFrame]
-            Single-key dict with the ``distance_matrix`` table.
-        """
-        facilities = entities.tables["facilities"]
-        latlon = {
-            str(r["facility_id"]): (float(r["lat"]), float(r["lon"]))
-            for _, r in facilities.iterrows()
-        }
-        ids = list(facilities["facility_id"].astype(str))
-        speed = self._config.default_speed_kmh
-
-        records: list[dict] = []
-        for i, a in enumerate(ids):
-            la0, lo0 = latlon[a]
-            for j, b in enumerate(ids):
-                if i == j:
-                    continue
-                la1, lo1 = latlon[b]
-                dkm = _pair_distance_km(la0, lo0, la1, lo1, self._config.distance_backend)
-                dur = dkm / speed if speed > 0 else 0.0
-                records.append({
-                    "source_id": a,
-                    "target_id": b,
-                    "distance": dkm,
-                    "duration": max(dur, 1e-6),
-                })
-
-        return {"distance_matrix": pd.DataFrame(records)}
-
-    def _build_node_parameters(
-        self,
-        registry: AttributeRegistry,
-    ) -> dict[str, pd.DataFrame]:
-        """Build initial inventory and register storage capacity attributes.
-
-        Both are optional in minimal mode:
-
-        - ``inventory_initial`` is taken directly from the source when present.
-          Otherwise ``build_model`` seeds it from observed flow (or leaves it
-          empty if flow is also absent).
-        - Storage capacity attributes are registered only when the source has
-          station / depot capacities.
-
-        Parameters
-        ----------
-        registry
-            Attribute registry where capacity attributes are registered.
-
-        Returns
-        -------
-        dict[str, pd.DataFrame]
-            May contain ``inventory_initial``; empty dict when absent.
-        """
-        result: dict[str, pd.DataFrame] = {}
-
-        inv_initial = _nonempty_df(self._source, "inventory_initial")
-        if inv_initial is not None:
-            result["inventory_initial"] = inv_initial.copy()
-
-        cap_rows: list[dict] = []
-        station_caps = _nonempty_df(self._source, "df_station_capacities")
-        if station_caps is not None:
-            for _, r in station_caps.iterrows():
-                cap_rows.append({
-                    "facility_id": str(r["station_id"]),
-                    "operation_type": "storage",
-                    "commodity_category": str(r["commodity_category"]),
-                    "capacity": float(r["capacity"]),
-                })
-
-        depot_caps = _nonempty_df(self._source, "df_depot_capacities")
-        if depot_caps is not None:
-            for _, r in depot_caps.iterrows():
-                cap_rows.append({
-                    "facility_id": str(r["node_id"]),
-                    "operation_type": "storage",
-                    "commodity_category": str(r["commodity_category"]),
-                    "capacity": float(r["capacity"]),
-                })
-
-        if cap_rows:
-            registry.register(
-                name="operation_capacity",
-                data=pd.DataFrame(cap_rows),
-                entity_type="facility",
-                kind=AttributeKind.CAPACITY,
-                grain=("facility_id", "operation_type", "commodity_category"),
-                value_column="capacity",
-                aggregation="min",
+            self.facilities_capacities_df = get_saturated_capacities_df(
+                self.facilities_df, saturation_quantity
             )
-
-        return result
-
-    def _register_facility_costs(
-        self,
-        registry: AttributeRegistry,
-        temporal: dict[str, pd.DataFrame],
-    ) -> None:
-        """Register facility fixed costs (stations and depots) in the attribute registry.
-
-        Costs are per-day; the horizon is taken from ``planning_horizon`` so
-        this works even for minimal sources without ``timestamps``.
-
-        Parameters
-        ----------
-        registry
-            Attribute registry to register costs into.
-        temporal
-            Dict containing the ``planning_horizon`` table.
-        """
-        station_costs = _nonempty_df(self._source, "df_station_costs")
-        depot_costs = _nonempty_df(self._source, "df_depot_costs")
-        if station_costs is None and depot_costs is None:
-            return
-
-        horizon = temporal["planning_horizon"].iloc[0]
-        start = pd.Timestamp(horizon["start_date"])
-        end = pd.Timestamp(horizon["end_date"]) - pd.Timedelta(days=1)
-        horizon_dates = [d.date() for d in pd.date_range(start=start, end=end, freq="D")]
-
-        cost_rows: list[dict] = []
-        if station_costs is not None:
-            for d in horizon_dates:
-                for _, r in station_costs.iterrows():
-                    cost_rows.append({
-                        "facility_id": str(r["station_id"]),
-                        "date": d,
-                        "cost_per_unit": float(r["fixed_cost_station"]),
-                        "cost_unit": "USD",
-                    })
-
-        if depot_costs is not None:
-            for d in horizon_dates:
-                for _, r in depot_costs.iterrows():
-                    cost_rows.append({
-                        "facility_id": str(r["node_id"]),
-                        "date": d,
-                        "cost_per_unit": float(r["fixed_cost_depot"]),
-                        "cost_unit": "USD",
-                    })
-
-        if cost_rows:
-            registry.register(
-                name="facility_fixed_cost",
-                data=pd.DataFrame(cost_rows),
-                entity_type="facility",
-                kind=AttributeKind.COST,
-                grain=("facility_id", "date"),
-                value_column="cost_per_unit",
-                aggregation="mean",
-                unit="USD",
-            )
-
-    def _build_resources(self, entities: _EntityResult) -> dict[str, pd.DataFrame | None]:
-        """Build resource fleet and compatibility tables.
-
-        Skipped entirely when the source has no depots (no home for the fleet)
-        or no ``df_resources`` -- returns ``{}`` in that case.
-
-        Parameters
-        ----------
-        entities
-            Intermediate entity result from ``_build_entities``.
-
-        Returns
-        -------
-        dict[str, pd.DataFrame | None]
-            Resource-related tables or empty dict when not applicable.
-        """
-        if not entities.depot_ids:
-            return {}
-
-        resources_src = _nonempty_df(self._source, "df_resources")
-        res_caps_src = _nonempty_df(self._source, "df_resource_capacities")
-        if resources_src is None or res_caps_src is None:
-            return {}
-
-        home_depot = entities.depot_ids[0]
-
-        resource_fleet = pd.DataFrame({
-            "facility_id": [home_depot],
-            "resource_category": [RESOURCE_CATEGORY],
-            "count": [len(resources_src)],
-        })
-
-        cap_map = dict(zip(
-            res_caps_src["resource_id"],
-            res_caps_src["capacity"],
-            strict=True,
-        ))
-        resource_rows = []
-        for _, r in resources_src.iterrows():
-            rid = str(r["resource_id"])
-            resource_rows.append({
-                "resource_id": rid,
-                "resource_category": RESOURCE_CATEGORY,
-                "home_facility_id": home_depot,
-                "capacity_override": float(cap_map[rid]),
-                "description": None,
-            })
-
-        commodity_cats = self._commodity_categories()
-        n_cc = len(commodity_cats)
-        return {
-            "resource_fleet": resource_fleet,
-            "resources": pd.DataFrame(resource_rows),
-            "resource_commodity_compatibility": pd.DataFrame({
-                "resource_category": [RESOURCE_CATEGORY] * n_cc,
-                "commodity_category": list(commodity_cats),
-                "enabled": [True] * n_cc,
-            }),
-            "resource_modal_compatibility": pd.DataFrame({
-                "resource_category": [RESOURCE_CATEGORY],
-                "modal_type": [ModalType.ROAD.value],
-                "enabled": [True],
-            }),
-        }
-
-    def _register_resource_costs(
-        self,
-        registry: AttributeRegistry,
-        entities: _EntityResult,
-    ) -> None:
-        """Register per-resource cost attributes in the attribute registry.
-
-        Registers ``resource_cost_per_km``, ``resource_cost_per_hour``, and
-        ``resource_fixed_dispatch`` when the source provides truck rates.
-
-        Parameters
-        ----------
-        registry
-            Attribute registry to register costs into.
-        entities
-            Intermediate entity result from ``_build_entities``.
-        """
-        if not entities.depot_ids:
-            return
-        tr = _nonempty_df(self._source, "df_truck_rates")
-        if tr is None:
-            return
-        home_depot = entities.depot_ids[0]
-
-        for cost_attr, col in [
-            ("resource_cost_per_km", "cost_per_km"),
-            ("resource_cost_per_hour", "cost_per_hour"),
-            ("resource_fixed_dispatch", "fixed_dispatch_cost"),
-        ]:
-            rows = []
-            for _, r in tr.iterrows():
-                rows.append({
-                    "resource_category": RESOURCE_CATEGORY,
-                    "facility_id": home_depot,
-                    "resource_id": str(r["resource_id"]),
-                    "value": float(r[col]),
-                })
-            if rows:
-                registry.register(
-                    name=cost_attr,
-                    data=pd.DataFrame(rows),
-                    entity_type="resource",
-                    kind=AttributeKind.COST,
-                    grain=("resource_category", "facility_id", "resource_id"),
-                    value_column="value",
-                    aggregation="mean",
-                    unit="USD",
-                )
-
-    # ------------------------------------------------------------------
-    # Internal — observations (trips / telemetry → observed_flow / observed_inventory)
-    # ------------------------------------------------------------------
-
-    def _build_observations(
-        self, entities: _EntityResult,
-    ) -> dict[str, pd.DataFrame | None]:
-        """Map trips to ``observed_flow`` and telemetry to ``observed_inventory``.
-
-        When trips carry no ``rideable_type`` column, the flow is labelled
-        with ``DEFAULT_COMMODITY_CATEGORY_ID`` so it lines up with the default
-        single-category table emitted by ``_build_entities``.
-
-        Parameters
-        ----------
-        entities
-            Intermediate entity result from ``_build_entities``.
-
-        Returns
-        -------
-        dict[str, pd.DataFrame | None]
-            ``observed_flow`` and ``observed_inventory`` (either may be ``None``).
-        """
-        known_ids = set(entities.station_ids) | set(entities.depot_ids)
-        result: dict[str, pd.DataFrame | None] = {}
-
-        # ── trips → observed_flow ────────────────────────────────────
-        df_trips = _nonempty_df(self._source, "df_trips")
-        if df_trips is not None:
-            has_ended_at = "ended_at" in df_trips.columns
-            keep_cols = ["start_station_id", "end_station_id", "started_at"]
-            if has_ended_at:
-                keep_cols = [*keep_cols, "ended_at"]
-            trips = df_trips[keep_cols].copy()
-            trips = trips.rename(columns={
-                "start_station_id": "source_id",
-                "end_station_id": "target_id",
-            })
-            trips["date"] = pd.to_datetime(trips["started_at"]).dt.date
-            if has_ended_at:
-                trips["duration_hours"] = (
-                    pd.to_datetime(trips["ended_at"])
-                    - pd.to_datetime(trips["started_at"])
-                ).dt.total_seconds() / 3600.0
-                trips = trips.drop(columns=["ended_at"])
-            else:
-                trips["duration_hours"] = float("nan")
-            if "rideable_type" in df_trips.columns:
-                trips["commodity_category"] = df_trips["rideable_type"].astype(str).values
-            else:
-                trips["commodity_category"] = DEFAULT_COMMODITY_CATEGORY_ID
-            trips["quantity"] = 1.0
-            trips["modal_type"] = None
-            trips["resource_id"] = None
-
-            mask = trips["source_id"].isin(known_ids) & trips["target_id"].isin(known_ids)
-            trips = trips.loc[mask]
-
-            if not trips.empty:
-                grain = ["source_id", "target_id", "commodity_category", "date"]
-                agg = trips.groupby(grain, as_index=False).agg(
-                    quantity=("quantity", "sum"),
-                    duration_hours=("duration_hours", "mean"),
-                    modal_type=("modal_type", "first"),
-                    resource_id=("resource_id", "first"),
-                )
-                result["observed_flow"] = agg
-                self._log.debug("observed_flow_built", rows=len(agg))
-            else:
-                result["observed_flow"] = None
         else:
-            result["observed_flow"] = None
+            self.initial_inventory_df = get_initial_inventory_df(raw.gbfs_raw_df, raw.stations_df)
 
-        # ── telemetry → observed_inventory (per commodity_category) ──
-        df_tel = _nonempty_df(self._source, "df_telemetry_ts")
-        if df_tel is not None:
-            tel_base = df_tel[["station_id", "timestamp", "num_bikes_available",
-                               "num_ebikes_available"]].copy()
+        # Historical observations -- general
+        self.historical_flows_df = get_historical_flows_df(raw.trips_df, self.t0, period_len)
+        self.historical_resources_df = empty_resources_obs_df()
+        self.historical_inventory_df = get_inventory_df(self.historical_flows_df, self.initial_inventory_df)
+        self.historical_demand_df = flows_to_departures(self.historical_flows_df)
 
-            # Electric bikes
-            tel_e = tel_base[["station_id", "timestamp", "num_ebikes_available"]].copy()
-            tel_e = tel_e.rename(columns={
-                "station_id": "facility_id",
-                "num_ebikes_available": "quantity",
-            })
-            tel_e["commodity_category"] = "electric_bike"
+        # Historical observations -- additional (marginals of the flow log)
+        self.historical_departures_df = flows_to_departures(self.historical_flows_df)
+        self.historical_arrivals_df = flows_to_arrivals(self.historical_flows_df)
+        self.historical_od_matrix_df = flows_to_od_matrix(self.historical_flows_df)
 
-            # Classic bikes = total - ebike
-            tel_c = tel_base[["station_id", "timestamp"]].copy()
-            tel_c["quantity"] = (
-                tel_base["num_bikes_available"] - tel_base["num_ebikes_available"]
-            )
-            tel_c = tel_c.rename(columns={"station_id": "facility_id"})
-            tel_c["commodity_category"] = "classic_bike"
+        # Simulated observations -- filled by attach_simulation after a run
+        self.simulated_flows_df: pd.DataFrame | None = None
+        self.simulated_resources_df: pd.DataFrame | None = None
+        self.simulated_inventory_df: pd.DataFrame | None = None
+        self.simulated_demand_df: pd.DataFrame | None = None
+        self.simulated_departures_df: pd.DataFrame | None = None
+        self.simulated_arrivals_df: pd.DataFrame | None = None
+        self.simulated_od_matrix_df: pd.DataFrame | None = None
 
-            tel = pd.concat([tel_e, tel_c], ignore_index=True)
-            tel["date"] = pd.to_datetime(tel["timestamp"]).dt.date
-            tel["quantity"] = tel["quantity"].astype(float)
-            tel = tel.loc[tel["facility_id"].isin(known_ids)]
+        # Replay demand: one concrete desired trip per historical departure
+        self.potential_trips_df = build_potential_trips(self.historical_flows_df)
 
-            if not tel.empty:
-                grain = ["facility_id", "commodity_category", "date"]
-                tel = tel.sort_values("timestamp")
-                agg = tel.groupby(grain, as_index=False).agg(
-                    quantity=("quantity", "last"),
-                )
-                result["observed_inventory"] = agg
-                self._log.debug("observed_inventory_built", rows=len(agg))
-            else:
-                result["observed_inventory"] = None
-        else:
-            result["observed_inventory"] = None
 
-        return result
+# ---------------------------------------------------------------------------
+# Wiring a finished run back into the resolved container
+# ---------------------------------------------------------------------------
+def attach_simulation(
+    resolved: ResolvedModelData,
+    simulated_flows_df: pd.DataFrame,
+    simulated_resources_df: pd.DataFrame | None = None,
+) -> None:
+    """Populate the ``simulated_*`` observation slots from a finished run.
 
+    All simulated marginals are derived from the finalized flow journal with the
+    same functions used for the historical ones, so the two sets are directly
+    comparable (in the base scenario they are equal).
+
+    Parameters
+    ----------
+    resolved : ResolvedModelData
+        Container to fill in place.
+    simulated_flows_df : pandas.DataFrame
+        Finalized simulated flow journal (e.g. ``Environment.simulated_flows_df``).
+    simulated_resources_df : pandas.DataFrame, optional
+        Resource observations from the run. Defaults to an empty table (trucks
+        are idle in the historical replay).
+    """
+    resolved.simulated_flows_df = simulated_flows_df
+    resolved.simulated_resources_df = (
+        simulated_resources_df if simulated_resources_df is not None else empty_resources_obs_df()
+    )
+    resolved.simulated_inventory_df = get_inventory_df(simulated_flows_df, resolved.initial_inventory_df)
+    resolved.simulated_demand_df = flows_to_departures(simulated_flows_df)
+    resolved.simulated_departures_df = flows_to_departures(simulated_flows_df)
+    resolved.simulated_arrivals_df = flows_to_arrivals(simulated_flows_df)
+    resolved.simulated_od_matrix_df = flows_to_od_matrix(simulated_flows_df)

@@ -2,9 +2,7 @@
 
 Citi Bike Simulation Platform — vertical bike-sharing simulation built on the Citi Bike domain. Current phase: **codebase cleanup to canonical scenario minimum**.
 
-**Pipeline:** Raw Citi Bike data → `DataLoaderGraph` → `RawModelData` → `build_model()` → `ResolvedModelData` → `Environment` → `SimulationLog`.
-
-**Source of truth:** `notebooks/canonical_scenario.ipynb` — everything in the codebase must serve this scenario. If it doesn't, it should be removed.
+**Source of truth:** `notebooks/test_pipeline.ipynb` — everything in the codebase must serve this scenario. If it doesn't, it should be removed.
 
 ## Commands
 

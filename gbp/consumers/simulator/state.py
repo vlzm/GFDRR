@@ -16,8 +16,8 @@ so historical and simulated runs share one definition for each of them.
 import dataclasses
 from typing import Any
 
+import numpy as np
 import pandas as pd
-
 
 # ---------------------------------------------------------------------------
 # Flow-event schema
@@ -79,8 +79,13 @@ def departed_events(trips: pd.DataFrame) -> pd.DataFrame:
     }))
 
 
-def arrived_events(in_transit_due: pd.DataFrame, period_id: int) -> pd.DataFrame:
-    """One ``arrived`` event row per in-transit flow docking this period."""
+def arrived_events(in_transit_due: pd.DataFrame, period_id: int | pd.Series) -> pd.DataFrame:
+    """One ``arrived`` event row per in-transit flow docking at ``period_id``.
+
+    ``period_id`` is the docking period: a single int when a whole batch docks
+    in the same period (the simulator), or a per-row Series of end periods when
+    each flow docks at its own time (the historical log).
+    """
     return _typed_events(pd.DataFrame({
         "period_id":           period_id,
         "flow_id":             in_transit_due["flow_id"],
@@ -130,9 +135,10 @@ def empty_flows_journal() -> pd.DataFrame:
 def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
     """Order the accumulated journal and assign a monotonic ``event_id``.
 
-    Mirrors :func:`dataloader_graph.get_historical_flows_df` exactly (same sort
-    keys, same ``event_id`` assignment, same column projection), so a replay
-    run's finalized journal is identical to the historical log.
+    Both the historical log (:func:`dataloader_graph.get_historical_flows_df`)
+    and a replay run's journal are finalized through this one function, so they
+    share their sort keys, ``event_id`` assignment and column projection by
+    construction rather than by two definitions kept in sync by hand.
 
     Parameters
     ----------
@@ -212,17 +218,33 @@ def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
 
 
 def flows_to_od_matrix(flows: pd.DataFrame) -> pd.DataFrame:
-    """Origin-destination demand matrix from ``departed`` events.
+    """Origin-destination demand model from ``departed`` events.
 
-    Counts trips per ``(source_id, planned_target_id, commodity_category)``
-    across the whole journal (the intended origin->destination structure of
-    demand, not the realized docking which may be redirected above baseline).
+    Aggregates the journal's intended origin->destination structure of demand
+    (not the realized docking, which may be redirected above baseline). For each
+    ``(source_id, planned_target_id, commodity_category)``:
+
+    - ``count`` -- number of trips on the pair,
+    - ``probability`` -- ``P(target | source, commodity)``, normalized within
+      each ``(source, commodity)``,
+    - ``duration`` -- mean trip length in periods (``planned_end - start``),
+      rounded to whole periods.
+
+    The probability and duration columns turn the matrix into a generative demand
+    model: given a count of departures from a source, they say where the bikes go
+    and when they dock. In the trivial case ``simulated_od_matrix_df`` equals this
+    historical matrix.
     """
-    return (
-        flows[flows["event_type"] == "departed"]
-        .groupby(["source_id", "planned_target_id", "commodity_category"], as_index=False)["quantity"].sum()
-        .rename(columns={"quantity": "count"})
+    dep = flows[flows["event_type"] == "departed"].copy()
+    dep["duration"] = dep["planned_end_period"] - dep["start_period"]
+    od = (
+        dep.groupby(["source_id", "planned_target_id", "commodity_category"], as_index=False)
+        .agg(count=("quantity", "sum"), duration=("duration", "mean"))
     )
+    totals = od.groupby(["source_id", "commodity_category"])["count"].transform("sum")
+    od["probability"] = od["count"] / totals
+    od["duration"] = od["duration"].round().astype("Int64")
+    return od
 
 
 def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.DataFrame:
@@ -289,6 +311,124 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     inventory = cumulative.stack().rename("quantity").reset_index()
     inventory["quantity"] = inventory["quantity"].astype("int64")
     return inventory[["period_id", "facility_id", "commodity_category", "quantity"]]
+
+
+# ---------------------------------------------------------------------------
+# Demand realization and OD expansion (FormDepartures / FormPotentialTrips)
+# ---------------------------------------------------------------------------
+def realize_departures(demand_now: pd.DataFrame, inventory: pd.DataFrame) -> pd.DataFrame:
+    """Realized departures per (facility, commodity): ``min(demand, stock)``.
+
+    Demand above the stock on hand is lost to a stockout; stock is per commodity,
+    so classic and electric demand are gated independently. Dormant in an exact
+    replay, where stock always covers the historical demand.
+
+    Parameters
+    ----------
+    demand_now : pandas.DataFrame
+        This period's demand: ``facility_id``, ``commodity_category``, ``quantity``.
+    inventory : pandas.DataFrame
+        Current stock: ``facility_id``, ``commodity_category``, ``quantity``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``facility_id``, ``commodity_category``, ``realized``, ``lost``.
+    """
+    stock = inventory.rename(columns={"quantity": "available"})
+    out = demand_now.merge(stock, on=["facility_id", "commodity_category"], how="left")
+    out["available"] = out["available"].fillna(0)
+    out["realized"] = out[["quantity", "available"]].min(axis=1).astype("int64")
+    out["lost"] = (out["quantity"] - out["realized"]).astype("int64")
+    return out[["facility_id", "commodity_category", "realized", "lost"]]
+
+
+def departure_deltas_from_counts(realized: pd.DataFrame) -> pd.DataFrame:
+    """``-realized`` per (facility, commodity) for the inventory decrement."""
+    d = (realized[realized["realized"] > 0]
+         .rename(columns={"realized": "delta"})
+         [["facility_id", "commodity_category", "delta"]].copy())
+    d["delta"] = -d["delta"]
+    return d
+
+
+def form_potential_trips(
+    departures: pd.DataFrame, od_matrix: pd.DataFrame, period_id: int
+) -> pd.DataFrame:
+    """Split each source's departures across targets by the OD probabilities.
+
+    Each ``(source, commodity)`` releases ``quantity`` bikes this period; the OD
+    matrix ``P(target | source, commodity)`` decides their destinations. The
+    expected count per target (``departures * probability``) is rounded to whole
+    bikes by the largest-remainder method, so the per-source total is preserved
+    exactly. Each OD pair's mean historical duration sets the arrival period.
+
+    Parameters
+    ----------
+    departures : pandas.DataFrame
+        Realized departures this period: ``source_id``, ``commodity_category``,
+        ``quantity``.
+    od_matrix : pandas.DataFrame
+        OD demand model from :func:`flows_to_od_matrix` (``probability`` and
+        ``duration`` per ``(source_id, planned_target_id, commodity_category)``).
+    period_id : int
+        The current (departure) period.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``period_id``, ``source_id``, ``target_id``, ``commodity_category``,
+        ``quantity``, ``planned_end_period`` -- only rows with ``quantity > 0``.
+    """
+    cols = ["period_id", "source_id", "target_id", "commodity_category",
+            "quantity", "planned_end_period"]
+    dep = departures[departures["quantity"] > 0]
+    if dep.empty:
+        return pd.DataFrame({c: pd.Series(dtype="object") for c in cols})
+
+    m = dep.merge(od_matrix, on=["source_id", "commodity_category"], how="left")
+    m = m[m["probability"].notna()].copy()
+    m["expected"] = m["quantity"] * m["probability"]
+    m["base"] = np.floor(m["expected"]).astype("int64")
+    m["remainder"] = m["expected"] - m["base"]
+
+    # Largest-remainder rounding: hand the per-source shortfall to the targets
+    # with the largest fractional parts, so sum(quantity) == departures exactly.
+    m = m.sort_values(["source_id", "commodity_category", "remainder"],
+                      ascending=[True, True, False])
+    grp = m.groupby(["source_id", "commodity_category"])
+    m["rank"] = grp.cumcount()
+    m["shortfall"] = m["quantity"] - grp["base"].transform("sum")
+    m["qty"] = m["base"] + (m["rank"] < m["shortfall"]).astype("int64")
+    m = m[m["qty"] > 0]
+
+    return pd.DataFrame({
+        "period_id":          period_id,
+        "source_id":          m["source_id"].values,
+        "target_id":          m["planned_target_id"].values,
+        "commodity_category": m["commodity_category"].values,
+        "quantity":           m["qty"].astype("Int64").values,
+        "planned_end_period": (period_id + m["duration"]).astype("Int64").values,
+    })
+
+
+def expand_potential_trips(potential_trips: pd.DataFrame, period_id: int) -> pd.DataFrame:
+    """Expand aggregate OD potential trips into one concrete departed row per bike.
+
+    Each aggregate row carries ``quantity`` identical bikes; this repeats it into
+    that many trip rows and assigns a simulator ``flow_id`` (``sim_`` prefix so it
+    cannot collide with the historical ``hist_`` ids).
+    """
+    rep = (potential_trips.loc[potential_trips.index.repeat(potential_trips["quantity"])]
+           .reset_index(drop=True))
+    return pd.DataFrame({
+        "flow_id":            "sim_" + str(period_id) + "_" + rep.index.astype("string"),
+        "source_id":          rep["source_id"],
+        "planned_target_id":  rep["target_id"],
+        "commodity_category": rep["commodity_category"],
+        "start_period":       period_id,
+        "planned_end_period": rep["planned_end_period"],
+    })
 
 
 # ---------------------------------------------------------------------------
