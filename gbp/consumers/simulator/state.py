@@ -189,6 +189,196 @@ def arrival_deltas(in_transit_due: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Capacity-aware docking and overflow redirect
+# ---------------------------------------------------------------------------
+# The part that bites above the historical baseline: when a station's docks are
+# full, arriving bikes overflow and are redirected to the nearest station with a
+# free dock. Dormant in an exact replay, where capacity never binds.
+def free_docks(inventory: pd.DataFrame, capacities: pd.DataFrame) -> pd.Series:
+    """Free dock slots per facility: capacity minus bikes currently docked.
+
+    Classic and electric bikes share the same physical docks, so occupancy is the
+    total stock across commodities.
+
+    Parameters
+    ----------
+    inventory : pandas.DataFrame
+        Current stock: ``facility_id``, ``commodity_category``, ``quantity``.
+    capacities : pandas.DataFrame
+        Dock capacities: ``facility_id``, ``capacity``.
+
+    Returns
+    -------
+    pandas.Series
+        ``facility_id -> free slots`` (clipped at zero).
+    """
+    occupied = inventory.groupby("facility_id")["quantity"].sum()
+    capacity = capacities.set_index("facility_id")["capacity"]
+    idx = capacity.index.union(occupied.index)
+    free = capacity.reindex(idx).fillna(0) - occupied.reindex(idx).fillna(0)
+    return free.clip(lower=0).astype("int64")
+
+
+def dock_up_to_capacity(
+    due: pd.DataFrame, free: pd.Series
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split docking flows at their planned target into ``(fits, overflow)``.
+
+    Within each target the first ``free`` flows (in row order) dock; the rest are
+    overflow. Vectorized through a per-target cumulative count -- no Python loop.
+
+    Parameters
+    ----------
+    due : pandas.DataFrame
+        In-transit flows docking this period (``planned_target_id`` per row).
+    free : pandas.Series
+        Free dock slots per facility, from :func:`free_docks`.
+
+    Returns
+    -------
+    tuple of (pandas.DataFrame, pandas.DataFrame)
+        The flows that fit and the overflow flows, both subsets of ``due``.
+    """
+    if due.empty:
+        return due, due
+    rank = due.groupby("planned_target_id").cumcount()
+    capacity_here = due["planned_target_id"].map(free).fillna(0)
+    fits = rank < capacity_here
+    return due[fits], due[~fits]
+
+
+def redirected_events(
+    flows: pd.DataFrame, realized_target_id: pd.Series, period_id: int
+) -> pd.DataFrame:
+    """One ``redirected`` docking event per overflow flow that docked elsewhere.
+
+    ``realized_target_id`` is the station actually docked at (a per-row Series),
+    which differs from ``planned_target_id``; ``reason`` records why.
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        The overflow flows that were redirected.
+    realized_target_id : pandas.Series
+        Per-row station actually docked at, aligned to ``flows``.
+    period_id : int
+        The docking period.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One ``redirected`` flow-event row per flow.
+    """
+    return _typed_events(pd.DataFrame({
+        "period_id":           period_id,
+        "flow_id":             flows["flow_id"],
+        "flow_type":           "user_trip",
+        "event_type":          "redirected",
+        "commodity_category":  flows["commodity_category"],
+        "source_id":           flows["source_id"],
+        "planned_target_id":   flows["planned_target_id"],
+        "realized_target_id":  realized_target_id,
+        "start_period":        flows["start_period"],
+        "planned_end_period":  flows["planned_end_period"],
+        "realized_end_period": period_id,
+        "resource_id":         pd.NA,
+        "quantity":            1,
+        "reason":              "dock_full",
+        "event_order":         1,
+    }))
+
+
+def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame) -> pd.Series:
+    """Nearest *other* station with a free dock for each station id in ``targets``.
+
+    Distance is squared Euclidean on (lat, lng) -- enough to rank neighbours at
+    this prototype stage. Returns a Series aligned to ``targets`` (NA if none).
+
+    Parameters
+    ----------
+    targets : pandas.Series
+        Planned target station ids needing a free neighbour.
+    free : pandas.Series
+        Free dock slots per facility, from :func:`free_docks`.
+    geo : pandas.DataFrame
+        Facility geography: ``facility_id``, ``lat``, ``lng``.
+
+    Returns
+    -------
+    pandas.Series
+        Aligned to ``targets``: the nearest other station with a free dock, or NA.
+    """
+    candidates = free[free > 0].index
+    coords = geo.set_index("facility_id")[["lat", "lng"]]
+    origins = (coords.loc[coords.index.intersection(targets.unique())]
+               .reset_index().rename(columns={"facility_id": "origin"}))
+    cand = (coords.loc[coords.index.intersection(candidates)]
+            .reset_index().rename(columns={"facility_id": "candidate"}))
+    pairs = origins.merge(cand, how="cross")
+    pairs = pairs[pairs["origin"] != pairs["candidate"]]
+    pairs["dist2"] = (pairs["lat_x"] - pairs["lat_y"]) ** 2 + (pairs["lng_x"] - pairs["lng_y"]) ** 2
+    nearest = pairs.sort_values("dist2").drop_duplicates("origin").set_index("origin")["candidate"]
+    return targets.map(nearest)
+
+
+def redirect_overflow(
+    inventory: pd.DataFrame,
+    capacities: pd.DataFrame,
+    geo: pd.DataFrame,
+    overflow: pd.DataFrame,
+    period_id: int,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Greedily dock overflow flows at the nearest station with a free dock.
+
+    Rounds, not per-row loops: each round maps every still-unplaced flow to its
+    nearest free station, docks up to capacity there, applies the arrivals to
+    inventory, and repeats with the leftovers until none remain or no dock is free
+    anywhere. The within-batch capacity coupling is therefore honoured exactly.
+
+    Parameters
+    ----------
+    inventory : pandas.DataFrame
+        Current stock: ``facility_id``, ``commodity_category``, ``quantity``.
+    capacities : pandas.DataFrame
+        Dock capacities: ``facility_id``, ``capacity``.
+    geo : pandas.DataFrame
+        Facility geography: ``facility_id``, ``lat``, ``lng``.
+    overflow : pandas.DataFrame
+        The flows that found no free dock at their planned target.
+    period_id : int
+        The docking period.
+
+    Returns
+    -------
+    tuple of (pandas.DataFrame, pandas.DataFrame, pandas.DataFrame)
+        The ``redirected`` events, the inventory with the redirected arrivals
+        applied, and any flows that found no free dock anywhere (lost).
+    """
+    events = []
+    remaining = overflow
+    while not remaining.empty:
+        free = free_docks(inventory, capacities)
+        if not (free > 0).any():
+            break
+        target = _nearest_free_station(remaining["planned_target_id"], free, geo)
+        placed = remaining.assign(realized_target_id=target)
+        placed = placed[placed["realized_target_id"].notna()]
+        if placed.empty:
+            break
+        rank = placed.groupby("realized_target_id").cumcount()
+        fits = rank < placed["realized_target_id"].map(free)
+        docked = placed[fits]
+        events.append(redirected_events(docked, docked["realized_target_id"], period_id))
+        deltas = (docked.groupby(["realized_target_id", "commodity_category"]).size()
+                  .reset_index(name="delta").rename(columns={"realized_target_id": "facility_id"}))
+        inventory = adjust_inventory(inventory, deltas)
+        remaining = placed[~fits].drop(columns="realized_target_id")
+    events_df = (pd.concat(events, ignore_index=True) if events
+                 else redirected_events(overflow.iloc[:0], overflow["planned_target_id"].iloc[:0], period_id))
+    return events_df, inventory, remaining
+
+
+# ---------------------------------------------------------------------------
 # Observation derivations (pure functions of the flow journal)
 # ---------------------------------------------------------------------------
 def flows_to_departures(flows: pd.DataFrame) -> pd.DataFrame:

@@ -2,10 +2,10 @@
 
 Historical replay (minimal working version). The base scenario re-emits every
 historical trip exactly, so that ``simulated_flows_df == historical_flows_df``.
-Inventory and in-transit are tracked as real state, but the constraints that
-*change* outcomes (dock overflow -> redirect, stockout -> lost) live in the
-phases as TODO skeletons: they cannot fire in an exact replay and only become
-meaningful once demand is pushed above the historical baseline.
+Inventory and in-transit are tracked as real state. The constraints that *change*
+outcomes (dock overflow -> redirect, stockout -> lost) are fully implemented in
+the phases, but stay dormant in an exact replay (saturated stock and capacity)
+and only become meaningful once demand is pushed above the historical baseline.
 """
 
 import dataclasses

@@ -221,7 +221,11 @@ def get_saturated_capacities_df(facilities_df: pd.DataFrame, capacity: int = 1_0
     """Artificial dock capacities: every facility gets ``capacity`` slots.
 
     Pairs with :func:`get_saturated_inventory_df` so the overflow-redirect rule
-    never binds in the base scenario.
+    never binds in the base scenario. Classic and electric bikes share the same
+    physical docks, so the saturated occupancy of a station is the per-commodity
+    stock summed across commodities; ``capacity`` must therefore exceed
+    ``n_commodities * saturation_quantity`` (with headroom for net arrivals) for
+    the docks to stay non-binding -- see the caller in :class:`ResolvedModelData`.
     """
     out = facilities_df[["facility_id"]].copy()
     out["capacity"] = capacity
@@ -289,8 +293,13 @@ class ResolvedModelData:
             self.initial_inventory_df = get_saturated_inventory_df(
                 self.facilities_df, self.commodities_categories_df, saturation_quantity
             )
+            # Docks are shared across commodities, so a station's saturated
+            # occupancy is saturation_quantity per commodity summed over all
+            # commodities. Give the capacity one extra commodity's worth of slots
+            # as headroom so the overflow-redirect rule stays dormant.
+            n_commodities = len(self.commodities_categories_df)
             self.facilities_capacities_df = get_saturated_capacities_df(
-                self.facilities_df, saturation_quantity
+                self.facilities_df, saturation_quantity * (n_commodities + 1)
             )
         else:
             self.initial_inventory_df = get_initial_inventory_df(raw.gbfs_raw_df, raw.stations_df)

@@ -283,21 +283,3 @@ The goal is informed decisions, not dogmatic compliance.
   but the developer is aware that the choice of central data type (the "carrier set"
   around which modules are organized) is the highest-impact design decision.
   If relevant, comment on whether the central abstraction is well-chosen.
-
----
-
-## Project-Specific Context (GBP)
-
-This skill is used in the GBP (Graph-Based Platform) project. Key architecture:
-
-- **Central abstraction:** `ResolvedModelData` (~23 DataFrames) — the carrier set
-- **Deep modules:** `build_model(raw) → resolved`, `Environment.run() → SimulationLog`
-- **Core is not a module:** `gbp/core/` is a shared data contract, not an operational module
-- **Pipeline:** Raw Data → `RawModelData` → `build_model()` → `ResolvedModelData` → Consumer
-
-When reviewing GBP code, also check:
-- Does a new module respect the Raw=declarative / Resolved=materialized boundary?
-- Does it read from ResolvedModelData without leaking knowledge of how it was built?
-- Are diagnostic/validation concerns separated from business logic?
-
-Language: analysis report in Russian, code references in English.
