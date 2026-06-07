@@ -13,10 +13,7 @@ from gbp.consumers.simulator.state import (
     arrived_events,
     departed_events,
     finalize_flows,
-    flows_to_arrivals,
-    flows_to_departures,
-    flows_to_od_matrix,
-    get_inventory_df,
+    observe,
 )
 from gbp.loaders.dataloader_raw import RawModelData, get_initial_inventory_df
 
@@ -304,16 +301,16 @@ class ResolvedModelData:
         else:
             self.initial_inventory_df = get_initial_inventory_df(raw.gbfs_raw_df, raw.stations_df)
 
-        # Historical observations -- general
+        # Historical observations: the marginals of the flow log, assembled by
+        # the shared ``observe`` bundle so they match the simulated set below.
         self.historical_flows_df = get_historical_flows_df(raw.trips_df, self.t0, period_len)
         self.historical_resources_df = empty_resources_obs_df()
-        self.historical_inventory_df = get_inventory_df(self.historical_flows_df, self.initial_inventory_df)
-        self.historical_demand_df = flows_to_departures(self.historical_flows_df)
-
-        # Historical observations -- additional (marginals of the flow log)
-        self.historical_departures_df = flows_to_departures(self.historical_flows_df)
-        self.historical_arrivals_df = flows_to_arrivals(self.historical_flows_df)
-        self.historical_od_matrix_df = flows_to_od_matrix(self.historical_flows_df)
+        hist = observe(self.historical_flows_df, self.initial_inventory_df)
+        self.historical_inventory_df = hist.inventory
+        self.historical_demand_df = hist.demand
+        self.historical_departures_df = hist.departures
+        self.historical_arrivals_df = hist.arrivals
+        self.historical_od_matrix_df = hist.od_matrix
 
         # Simulated observations -- filled by attach_simulation after a run
         self.simulated_flows_df: pd.DataFrame | None = None
@@ -356,8 +353,9 @@ def attach_simulation(
     resolved.simulated_resources_df = (
         simulated_resources_df if simulated_resources_df is not None else empty_resources_obs_df()
     )
-    resolved.simulated_inventory_df = get_inventory_df(simulated_flows_df, resolved.initial_inventory_df)
-    resolved.simulated_demand_df = flows_to_departures(simulated_flows_df)
-    resolved.simulated_departures_df = flows_to_departures(simulated_flows_df)
-    resolved.simulated_arrivals_df = flows_to_arrivals(simulated_flows_df)
-    resolved.simulated_od_matrix_df = flows_to_od_matrix(simulated_flows_df)
+    sim = observe(simulated_flows_df, resolved.initial_inventory_df)
+    resolved.simulated_inventory_df = sim.inventory
+    resolved.simulated_demand_df = sim.demand
+    resolved.simulated_departures_df = sim.departures
+    resolved.simulated_arrivals_df = sim.arrivals
+    resolved.simulated_od_matrix_df = sim.od_matrix

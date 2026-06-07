@@ -503,6 +503,71 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     return inventory[["period_id", "facility_id", "commodity_category", "quantity"]]
 
 
+@dataclasses.dataclass(frozen=True)
+class Observations:
+    """The full set of marginals derived from a flow journal.
+
+    Every field is a pure function of the journal (and, for ``inventory``, of the
+    initial stock). Bundling them in one container means the historical and
+    simulated observation sets are produced by the same code path and therefore
+    coincide by construction: the base-replay invariant
+    ``simulated_departures == historical_departures`` rests on a single
+    definition rather than two hand-kept blocks.
+
+    Attributes
+    ----------
+    inventory : pandas.DataFrame
+        Per-period stock; see :func:`get_inventory_df`.
+    departures : pandas.DataFrame
+        Outflow per period and origin; see :func:`flows_to_departures`.
+    arrivals : pandas.DataFrame
+        Inflow per period and destination; see :func:`flows_to_arrivals`.
+    demand : pandas.DataFrame
+        Realized user demand; equals ``departures`` in an exact replay (see
+        :func:`flows_to_departures` and the note on demand gating).
+    od_matrix : pandas.DataFrame
+        Origin-destination demand model; see :func:`flows_to_od_matrix`.
+    """
+
+    inventory: pd.DataFrame
+    departures: pd.DataFrame
+    arrivals: pd.DataFrame
+    demand: pd.DataFrame
+    od_matrix: pd.DataFrame
+
+
+def observe(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> Observations:
+    """Derive the full set of marginals from a flow journal.
+
+    The single place that defines *what is in the observation set*. It is called
+    once for the historical journal and once for each simulated one, so the two
+    sets are identical by construction (in the base scenario their values are
+    equal too).
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        A flow-event log (historical or finalized simulated).
+    initial_inventory : pandas.DataFrame
+        Starting stock with ``facility_id``, ``commodity_category``, ``quantity``.
+
+    Returns
+    -------
+    Observations
+        The inventory, departures, arrivals, demand and OD-matrix marginals.
+    """
+    departures = flows_to_departures(flows)
+    return Observations(
+        inventory=get_inventory_df(flows, initial_inventory),
+        departures=departures,
+        arrivals=flows_to_arrivals(flows),
+        # In an exact replay every desired trip departs, so realized demand is
+        # read off the journal as the departures (see ``state_demand_df``).
+        demand=departures,
+        od_matrix=flows_to_od_matrix(flows),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Demand realization and OD expansion (FormDepartures / FormPotentialTrips)
 # ---------------------------------------------------------------------------

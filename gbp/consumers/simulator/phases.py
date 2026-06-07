@@ -1,15 +1,15 @@
 """Simulation phases.
 
 Each phase reads the state and returns a new state plus the events it emitted.
-The six canonical phases split a period into: dock earlier arrivals ->
-(redirect) -> form departures -> (sample extra trips) -> dock same-period
-arrivals -> (redirect).
+The four canonical phases split a period into: dock earlier arrivals -> form
+departures -> (sample extra trips) -> dock same-period arrivals.
 
-Each ``Arrivals`` phase docks only up to the free dock capacity and hands the
-overflow to the matching ``OverflowRedirect`` phase through the per-period
-``intermediates``; that phase redirects the overflow to the nearest station with
-a free dock. Capacity gating and overflow redirect stay dormant in an exact
-replay (where capacity never binds) and only bite above the historical baseline.
+:class:`DockArrivals` docks the bikes due this period up to the free dock
+capacity and redirects whatever overflows to the nearest station with a free
+dock, all in one pass -- docking and redirect are one operation, not two phases
+coupled through a shared intermediate. Capacity gating and overflow redirect stay
+dormant in an exact replay (where capacity never binds) and only bite above the
+historical baseline.
 """
 
 import pandas as pd
@@ -56,8 +56,8 @@ def dock_arrivals(
 
     Splits ``due`` into the flows that fit (docked: +inventory, ``arrived``
     events) and the overflow that found no free dock at its planned target. All
-    of ``due`` leaves ``in_transit``; the overflow is returned for the matching
-    OverflowRedirect phase to place elsewhere.
+    of ``due`` leaves ``in_transit``; the overflow is returned for the caller
+    (:class:`DockArrivals`) to redirect elsewhere.
 
     Returns
     -------
@@ -73,55 +73,54 @@ def dock_arrivals(
     return new_state, events, overflow
 
 
-def redirect_arrivals(
-    state: SimulationState, resolved: ResolvedModelData, overflow: pd.DataFrame, period_id: int
-) -> PhaseResult:
-    """Redirect ``overflow`` flows to the nearest station with a free dock.
+class DockArrivals(Phase):
+    """Dock the bikes arriving this period, redirecting any dock overflow.
 
-    Emits ``redirected`` events and applies the redirected arrivals to inventory.
-    Flows that find no free dock anywhere are dropped (lost).
+    One docking operation: dock the in-transit flows due now up to free dock
+    capacity, then redirect whatever overflowed to the nearest station with a free
+    dock. The overflow is a local of this method -- it never leaves the phase.
+    ``when`` selects which arrivals the phase handles, since the two run at
+    different points of the period:
+
+    - ``"previous"`` -- bikes that departed in an earlier period and arrive now
+      (docked before departures form), and
+    - ``"same"`` -- bikes that departed and arrive within this same period
+      (docked after departures form).
+
+    Capacity gating and overflow redirect stay dormant in an exact replay (dock
+    capacity never binds there) and only bite above the historical baseline.
     """
-    events, inventory, _lost = redirect_overflow(
-        state.state_inventory_df,
-        resolved.facilities_capacities_df,
-        resolved.facilities_geo_df,
-        overflow,
-        period_id,
-    )
-    return PhaseResult(state.with_inventory(inventory), events)
 
-
-class ArrivalsPreviousPhase(Phase):
-    """Dock bikes that departed in an earlier period and arrive now."""
-
-    name = "arrivals_previous"
+    def __init__(self, when: str, schedule: Schedule | None = None) -> None:
+        super().__init__(schedule)
+        if when not in ("previous", "same"):
+            raise ValueError(f"when must be 'previous' or 'same', got {when!r}")
+        self.when = when
+        self.name = f"dock_arrivals_{when}"
 
     def execute(self, state, resolved, period):
         t = period.period_id
         it = state.in_transit
-        due = it[(it["planned_end_period"] == t) & (it["start_period"] < t)]
+        arrived_now = it["planned_end_period"] == t
+        if self.when == "previous":
+            due = it[arrived_now & (it["start_period"] < t)]
+        else:
+            due = it[arrived_now & (it["start_period"] == t)]
         if due.empty:
             return PhaseResult.empty(state)
-        new_state, events, overflow = dock_arrivals(state, resolved, due, t)
-        new_state = new_state.with_intermediates(overflow_previous=overflow)
-        return PhaseResult(new_state, events)
 
-
-class OverflowRedirectPreviousPhase(Phase):
-    """Redirect the overflow from :class:`ArrivalsPreviousPhase`.
-
-    If a station's docks were full when earlier departures arrived, the overflow
-    is redirected to the nearest station with a free dock. Dormant in the
-    historical replay (dock capacity is not binding there).
-    """
-
-    name = "overflow_redirect_previous"
-
-    def execute(self, state, resolved, period):
-        overflow = state.intermediates.get("overflow_previous")
-        if overflow is None or overflow.empty:
-            return PhaseResult.empty(state)
-        return redirect_arrivals(state, resolved, overflow, period.period_id)
+        state, events, overflow = dock_arrivals(state, resolved, due, t)
+        if not overflow.empty:
+            redirected, inventory, _lost = redirect_overflow(
+                state.state_inventory_df,
+                resolved.facilities_capacities_df,
+                resolved.facilities_geo_df,
+                overflow,
+                t,
+            )
+            state = state.with_inventory(inventory)
+            events = pd.concat([events, redirected], ignore_index=True)
+        return PhaseResult(state, events)
 
 
 class FormDeparturesPhase(Phase):
@@ -180,33 +179,3 @@ class FormPotentialTripsPhase(Phase):
         return PhaseResult(new_state, events)
 
 
-class ArrivalsPhase(Phase):
-    """Dock bikes that departed and arrive within this same period."""
-
-    name = "arrivals"
-
-    def execute(self, state, resolved, period):
-        t = period.period_id
-        it = state.in_transit
-        due = it[(it["planned_end_period"] == t) & (it["start_period"] == t)]
-        if due.empty:
-            return PhaseResult.empty(state)
-        new_state, events, overflow = dock_arrivals(state, resolved, due, t)
-        new_state = new_state.with_intermediates(overflow_same=overflow)
-        return PhaseResult(new_state, events)
-
-
-class OverflowRedirectPhase(Phase):
-    """Redirect the overflow from :class:`ArrivalsPhase`.
-
-    Same redirect rule as :class:`OverflowRedirectPreviousPhase`, for bikes that
-    departed and arrived within the same period.
-    """
-
-    name = "overflow_redirect"
-
-    def execute(self, state, resolved, period):
-        overflow = state.intermediates.get("overflow_same")
-        if overflow is None or overflow.empty:
-            return PhaseResult.empty(state)
-        return redirect_arrivals(state, resolved, overflow, period.period_id)
