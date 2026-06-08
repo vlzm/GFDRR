@@ -13,8 +13,8 @@ import dataclasses
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
+from gbp.model.journal import empty_flows_journal, empty_in_transit, finalize_flows
 
-from .journal import empty_flows_journal, empty_in_transit, finalize_flows
 from .state import PeriodRow, SimulationState, SimulatorConfigError
 
 

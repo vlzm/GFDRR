@@ -15,8 +15,8 @@ historical baseline.
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
+from gbp.model.journal import arrived_events, departed_events
 
-from .journal import arrived_events, departed_events
 from .mechanics import (
     dock_up_to_capacity,
     expand_potential_trips,

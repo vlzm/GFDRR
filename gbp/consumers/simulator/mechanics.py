@@ -13,7 +13,8 @@ mechanics <- phases <- engine``.
 import numpy as np
 import pandas as pd
 
-from .journal import redirected_events
+from gbp.model.journal import redirected_events
+
 from .state import adjust_inventory
 
 

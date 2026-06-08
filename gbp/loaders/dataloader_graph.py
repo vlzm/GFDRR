@@ -9,13 +9,13 @@ subset of them: ``periods_df``, ``initial_inventory_df``, ``potential_trips_df``
 
 import pandas as pd
 
-from gbp.consumers.simulator.journal import (
+from gbp.loaders.dataloader_raw import RawModelData, get_initial_inventory_df
+from gbp.model.journal import (
     arrived_events,
     departed_events,
     finalize_flows,
     observe,
 )
-from gbp.loaders.dataloader_raw import RawModelData, get_initial_inventory_df
 
 
 # ---------------------------------------------------------------------------
@@ -52,9 +52,9 @@ def get_historical_flows_df(trips_df: pd.DataFrame, t0: pd.Timestamp, period_len
     ``flow_id`` is namespaced with a ``hist_`` prefix so it cannot collide with
     flows the simulator generates and appends to the same journal.
 
-    The rows are built with the shared :func:`~state.departed_events` /
-    :func:`~state.arrived_events` builders and ordered by
-    :func:`~state.finalize_flows` -- the same primitives the simulator uses --
+    The rows are built with the shared :func:`~gbp.model.journal.departed_events` /
+    :func:`~gbp.model.journal.arrived_events` builders and ordered by
+    :func:`~gbp.model.journal.finalize_flows` -- the same primitives the simulator uses --
     so a base replay's finalized journal is identical to this log by
     construction.
 
