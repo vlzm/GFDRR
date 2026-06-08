@@ -9,7 +9,7 @@ subset of them: ``periods_df``, ``initial_inventory_df``, ``potential_trips_df``
 
 import pandas as pd
 
-from gbp.consumers.simulator.state import (
+from gbp.consumers.simulator.journal import (
     arrived_events,
     departed_events,
     finalize_flows,
