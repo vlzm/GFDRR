@@ -18,7 +18,7 @@ from typing import Any
 
 import pandas as pd
 
-from .journal import (
+from gbp.model.journal import (
     empty_in_transit,
     flows_to_arrivals,
     flows_to_departures,

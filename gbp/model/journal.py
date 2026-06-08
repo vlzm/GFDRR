@@ -9,8 +9,9 @@ marginals (:func:`flows_to_departures` and friends, :func:`observe`). Write and
 read live together on purpose: splitting them would leak the column layout
 across two modules.
 
-It has no dependency on the rest of the simulator (state, mechanics, the engine
-or the loaders), so all of them can import from it freely.
+This is the model layer: the shared vocabulary both the loaders (historical
+flows) and the simulator (simulated flows) speak. It depends on neither of them,
+so all of them can import from it freely.
 
 Inventory and the in-transit working set are *projections* of the journal: the
 marginal observations (departures, arrivals, demand, supply, OD matrix) are pure
