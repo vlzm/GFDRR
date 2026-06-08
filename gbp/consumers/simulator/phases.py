@@ -16,6 +16,15 @@ import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
 
+from .journal import arrived_events, departed_events
+from .mechanics import (
+    dock_up_to_capacity,
+    expand_potential_trips,
+    form_potential_trips,
+    free_docks,
+    realize_departures,
+    redirect_overflow,
+)
 from .state import (
     PeriodRow,
     PhaseResult,
@@ -23,15 +32,7 @@ from .state import (
     SimulationState,
     adjust_inventory,
     arrival_deltas,
-    arrived_events,
-    departed_events,
     departure_deltas_from_counts,
-    dock_up_to_capacity,
-    expand_potential_trips,
-    form_potential_trips,
-    free_docks,
-    realize_departures,
-    redirect_overflow,
 )
 
 

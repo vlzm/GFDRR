@@ -1,0 +1,394 @@
+"""Flow journal: the event schema, the event builders, the append-only journal
+and its read-models (the marginal observations).
+
+The flow journal is the single source of truth for what happened in a run. This
+module owns one secret -- the shape of a flow event -- on both sides: the
+builders that *write* events (:func:`departed_events`, :func:`arrived_events`,
+:func:`redirected_events`) and the derivations that *read* the journal back into
+marginals (:func:`flows_to_departures` and friends, :func:`observe`). Write and
+read live together on purpose: splitting them would leak the column layout
+across two modules.
+
+It has no dependency on the rest of the simulator (state, mechanics, the engine
+or the loaders), so all of them can import from it freely.
+
+Inventory and the in-transit working set are *projections* of the journal: the
+marginal observations (departures, arrivals, demand, supply, OD matrix) are pure
+functions of the journal and the current inventory, so historical and simulated
+runs share one definition for each of them.
+"""
+
+import dataclasses
+
+import pandas as pd
+
+# ---------------------------------------------------------------------------
+# Flow-event schema
+# ---------------------------------------------------------------------------
+FLOW_EVENT_COLUMNS = [
+    "event_id", "period_id", "flow_id", "flow_type", "event_type", "commodity_category",
+    "source_id", "planned_target_id", "realized_target_id",
+    "start_period", "planned_end_period", "realized_end_period",
+    "resource_id", "quantity", "reason",
+]
+
+FLOW_EVENT_DTYPES = {
+    "period_id": "Int64",
+    "flow_id": "string",
+    "flow_type": "string",
+    "event_type": "string",
+    "commodity_category": "string",
+    "source_id": "string",
+    "planned_target_id": "string",
+    "realized_target_id": "string",
+    "start_period": "Int64",
+    "planned_end_period": "Int64",
+    "realized_end_period": "Int64",
+    "resource_id": "string",
+    "quantity": "Int64",
+    "reason": "string",
+}
+
+
+# ---------------------------------------------------------------------------
+# Flow-event builders
+# ---------------------------------------------------------------------------
+def _typed_events(events_df: pd.DataFrame) -> pd.DataFrame:
+    """Cast event columns to the canonical dtypes so frames concat cleanly."""
+    for col, dtype in FLOW_EVENT_DTYPES.items():
+        events_df[col] = events_df[col].astype(dtype)
+    events_df["event_order"] = events_df["event_order"].astype("int64")
+    return events_df
+
+
+def departed_events(trips: pd.DataFrame) -> pd.DataFrame:
+    """One ``departed`` event row per trip leaving this period."""
+    return _typed_events(pd.DataFrame({
+        "period_id":           trips["start_period"],
+        "flow_id":             trips["flow_id"],
+        "flow_type":           "user_trip",
+        "event_type":          "departed",
+        "commodity_category":  trips["commodity_category"],
+        "source_id":           trips["source_id"],
+        "planned_target_id":   trips["planned_target_id"],
+        "realized_target_id":  pd.NA,
+        "start_period":        trips["start_period"],
+        "planned_end_period":  trips["planned_end_period"],
+        "realized_end_period": pd.NA,
+        "resource_id":         pd.NA,
+        "quantity":            1,
+        "reason":              pd.NA,
+        "event_order":         0,
+    }))
+
+
+def arrived_events(in_transit_due: pd.DataFrame, period_id: int | pd.Series) -> pd.DataFrame:
+    """One ``arrived`` event row per in-transit flow docking at ``period_id``.
+
+    ``period_id`` is the docking period: a single int when a whole batch docks
+    in the same period (the simulator), or a per-row Series of end periods when
+    each flow docks at its own time (the historical log).
+    """
+    return _typed_events(pd.DataFrame({
+        "period_id":           period_id,
+        "flow_id":             in_transit_due["flow_id"],
+        "flow_type":           "user_trip",
+        "event_type":          "arrived",
+        "commodity_category":  in_transit_due["commodity_category"],
+        "source_id":           in_transit_due["source_id"],
+        "planned_target_id":   in_transit_due["planned_target_id"],
+        "realized_target_id":  in_transit_due["planned_target_id"],
+        "start_period":        in_transit_due["start_period"],
+        "planned_end_period":  in_transit_due["planned_end_period"],
+        "realized_end_period": period_id,
+        "resource_id":         pd.NA,
+        "quantity":            1,
+        "reason":              pd.NA,
+        "event_order":         1,
+    }))
+
+
+def redirected_events(
+    flows: pd.DataFrame, realized_target_id: pd.Series, period_id: int
+) -> pd.DataFrame:
+    """One ``redirected`` docking event per overflow flow that docked elsewhere.
+
+    ``realized_target_id`` is the station actually docked at (a per-row Series),
+    which differs from ``planned_target_id``; ``reason`` records why.
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        The overflow flows that were redirected.
+    realized_target_id : pandas.Series
+        Per-row station actually docked at, aligned to ``flows``.
+    period_id : int
+        The docking period.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One ``redirected`` flow-event row per flow.
+    """
+    return _typed_events(pd.DataFrame({
+        "period_id":           period_id,
+        "flow_id":             flows["flow_id"],
+        "flow_type":           "user_trip",
+        "event_type":          "redirected",
+        "commodity_category":  flows["commodity_category"],
+        "source_id":           flows["source_id"],
+        "planned_target_id":   flows["planned_target_id"],
+        "realized_target_id":  realized_target_id,
+        "start_period":        flows["start_period"],
+        "planned_end_period":  flows["planned_end_period"],
+        "realized_end_period": period_id,
+        "resource_id":         pd.NA,
+        "quantity":            1,
+        "reason":              "dock_full",
+        "event_order":         1,
+    }))
+
+
+def empty_in_transit() -> pd.DataFrame:
+    """Empty in-transit table (a ``departed``-event frame with no rows)."""
+    return departed_events(pd.DataFrame({
+        "flow_id":            pd.Series(dtype="string"),
+        "source_id":          pd.Series(dtype="string"),
+        "planned_target_id":  pd.Series(dtype="string"),
+        "commodity_category": pd.Series(dtype="string"),
+        "start_period":       pd.Series(dtype="Int64"),
+        "planned_end_period": pd.Series(dtype="Int64"),
+    }))
+
+
+# ---------------------------------------------------------------------------
+# Flow journal (the run's single source of truth)
+# ---------------------------------------------------------------------------
+def empty_flows_journal() -> pd.DataFrame:
+    """Empty append-only flow journal.
+
+    Holds the same columns the event builders emit (the canonical flow fields
+    plus the transient ``event_order``); ``event_id`` is assigned only once at
+    :func:`finalize_flows`, so it is absent while the journal is still growing.
+    """
+    journal = pd.DataFrame({col: pd.Series(dtype=dtype) for col, dtype in FLOW_EVENT_DTYPES.items()})
+    journal["event_order"] = pd.Series(dtype="int64")
+    return journal
+
+
+def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
+    """Order the accumulated journal and assign a monotonic ``event_id``.
+
+    Both the historical log (:func:`dataloader_graph.get_historical_flows_df`)
+    and a replay run's journal are finalized through this one function, so they
+    share their sort keys, ``event_id`` assignment and column projection by
+    construction rather than by two definitions kept in sync by hand.
+
+    Parameters
+    ----------
+    journal : pandas.DataFrame
+        The append-only journal accumulated during a run.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Event log with columns :data:`FLOW_EVENT_COLUMNS`, sorted by
+        ``period_id`` then ``flow_id`` then ``event_order``, with a monotonic
+        ``event_id``.
+    """
+    flows = journal.copy()
+    for col, dtype in FLOW_EVENT_DTYPES.items():
+        flows[col] = flows[col].astype(dtype)
+    flows = flows.sort_values(["period_id", "flow_id", "event_order"]).reset_index(drop=True)
+    flows["event_id"] = flows.index.astype("Int64")
+    return flows[FLOW_EVENT_COLUMNS]
+
+
+# ---------------------------------------------------------------------------
+# Observation derivations (pure functions of the flow journal)
+# ---------------------------------------------------------------------------
+def flows_to_departures(flows: pd.DataFrame) -> pd.DataFrame:
+    """Outflow per period and origin: count of ``departed`` events.
+
+    Grouped by ``(period_id, facility_id, commodity_category)`` where
+    ``facility_id`` is the trip's ``source_id``.
+    """
+    return (
+        flows[flows["event_type"] == "departed"]
+        .groupby(["period_id", "source_id", "commodity_category"], as_index=False)["quantity"].sum()
+        .rename(columns={"source_id": "facility_id"})
+    )
+
+
+def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
+    """Inflow per period and destination: count of ``arrived`` events.
+
+    Grouped by ``(period_id, facility_id, commodity_category)`` where
+    ``facility_id`` is the trip's ``realized_target_id``.
+    """
+    return (
+        flows[flows["event_type"] == "arrived"]
+        .groupby(["period_id", "realized_target_id", "commodity_category"], as_index=False)["quantity"].sum()
+        .rename(columns={"realized_target_id": "facility_id"})
+    )
+
+
+def flows_to_od_matrix(flows: pd.DataFrame) -> pd.DataFrame:
+    """Origin-destination demand model from ``departed`` events.
+
+    Aggregates the journal's intended origin->destination structure of demand
+    (not the realized docking, which may be redirected above baseline). For each
+    ``(source_id, planned_target_id, commodity_category)``:
+
+    - ``count`` -- number of trips on the pair,
+    - ``probability`` -- ``P(target | source, commodity)``, normalized within
+      each ``(source, commodity)``,
+    - ``duration`` -- mean trip length in periods (``planned_end - start``),
+      rounded to whole periods.
+
+    The probability and duration columns turn the matrix into a generative demand
+    model: given a count of departures from a source, they say where the bikes go
+    and when they dock. In the trivial case ``simulated_od_matrix_df`` equals this
+    historical matrix.
+    """
+    dep = flows[flows["event_type"] == "departed"].copy()
+    dep["duration"] = dep["planned_end_period"] - dep["start_period"]
+    od = (
+        dep.groupby(["source_id", "planned_target_id", "commodity_category"], as_index=False)
+        .agg(count=("quantity", "sum"), duration=("duration", "mean"))
+    )
+    totals = od.groupby(["source_id", "commodity_category"])["count"].transform("sum")
+    od["probability"] = od["count"] / totals
+    od["duration"] = od["duration"].round().astype("Int64")
+    return od
+
+
+def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.DataFrame:
+    """Per-period inventory as a pure function of the journal and initial stock.
+
+    Inventory at the end of period ``t`` equals the initial stock plus the
+    cumulative net flow (arrivals ``+1``, departures ``-1``) up to and including
+    ``t``, per ``(facility_id, commodity_category)``. Because both historical and
+    simulated inventory are defined this way, they need no per-period snapshot
+    table — the journal is enough.
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        A flow-event log (historical or finalized simulated).
+    initial_inventory : pandas.DataFrame
+        Starting stock with ``facility_id``, ``commodity_category``, ``quantity``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``period_id``, ``facility_id``, ``commodity_category``,
+        ``quantity`` for every period in ``[0, max(period_id)]``.
+    """
+    if flows.empty:
+        return pd.DataFrame({
+            "period_id":          pd.Series(dtype="int64"),
+            "facility_id":        pd.Series(dtype="string"),
+            "commodity_category": pd.Series(dtype="string"),
+            "quantity":           pd.Series(dtype="int64"),
+        })
+
+    dep = (
+        flows[flows["event_type"] == "departed"]
+        .groupby(["period_id", "source_id", "commodity_category"], as_index=False)["quantity"].sum()
+        .rename(columns={"source_id": "facility_id", "quantity": "delta"})
+    )
+    dep["delta"] = -dep["delta"]
+    arr = (
+        flows[flows["event_type"] == "arrived"]
+        .groupby(["period_id", "realized_target_id", "commodity_category"], as_index=False)["quantity"].sum()
+        .rename(columns={"realized_target_id": "facility_id", "quantity": "delta"})
+    )
+    deltas = pd.concat([dep, arr], ignore_index=True)
+    deltas = deltas.groupby(
+        ["period_id", "facility_id", "commodity_category"], as_index=False
+    )["delta"].sum()
+
+    n_periods = int(flows["period_id"].max()) + 1
+    net = deltas.pivot_table(
+        index=["facility_id", "commodity_category"],
+        columns="period_id",
+        values="delta",
+        fill_value=0,
+        aggfunc="sum",
+    ).reindex(columns=range(n_periods), fill_value=0)
+    net.columns.name = "period_id"
+
+    initial = initial_inventory.set_index(["facility_id", "commodity_category"])["quantity"]
+    full_index = net.index.union(initial.index)
+    net = net.reindex(full_index, fill_value=0)
+    cumulative = net.cumsum(axis=1).add(initial.reindex(full_index).fillna(0), axis=0)
+
+    inventory = cumulative.stack().rename("quantity").reset_index()
+    inventory["quantity"] = inventory["quantity"].astype("int64")
+    return inventory[["period_id", "facility_id", "commodity_category", "quantity"]]
+
+
+@dataclasses.dataclass(frozen=True)
+class Observations:
+    """The full set of marginals derived from a flow journal.
+
+    Every field is a pure function of the journal (and, for ``inventory``, of the
+    initial stock). Bundling them in one container means the historical and
+    simulated observation sets are produced by the same code path and therefore
+    coincide by construction: the base-replay invariant
+    ``simulated_departures == historical_departures`` rests on a single
+    definition rather than two hand-kept blocks.
+
+    Attributes
+    ----------
+    inventory : pandas.DataFrame
+        Per-period stock; see :func:`get_inventory_df`.
+    departures : pandas.DataFrame
+        Outflow per period and origin; see :func:`flows_to_departures`.
+    arrivals : pandas.DataFrame
+        Inflow per period and destination; see :func:`flows_to_arrivals`.
+    demand : pandas.DataFrame
+        Realized user demand; equals ``departures`` in an exact replay (see
+        :func:`flows_to_departures` and the note on demand gating).
+    od_matrix : pandas.DataFrame
+        Origin-destination demand model; see :func:`flows_to_od_matrix`.
+    """
+
+    inventory: pd.DataFrame
+    departures: pd.DataFrame
+    arrivals: pd.DataFrame
+    demand: pd.DataFrame
+    od_matrix: pd.DataFrame
+
+
+def observe(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> Observations:
+    """Derive the full set of marginals from a flow journal.
+
+    The single place that defines *what is in the observation set*. It is called
+    once for the historical journal and once for each simulated one, so the two
+    sets are identical by construction (in the base scenario their values are
+    equal too).
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        A flow-event log (historical or finalized simulated).
+    initial_inventory : pandas.DataFrame
+        Starting stock with ``facility_id``, ``commodity_category``, ``quantity``.
+
+    Returns
+    -------
+    Observations
+        The inventory, departures, arrivals, demand and OD-matrix marginals.
+    """
+    departures = flows_to_departures(flows)
+    return Observations(
+        inventory=get_inventory_df(flows, initial_inventory),
+        departures=departures,
+        arrivals=flows_to_arrivals(flows),
+        # In an exact replay every desired trip departs, so realized demand is
+        # read off the journal as the departures (see ``state_demand_df``).
+        demand=departures,
+        od_matrix=flows_to_od_matrix(flows),
+    )
