@@ -46,11 +46,16 @@ def departure_deltas(trips: pd.DataFrame) -> pd.DataFrame:
     return deltas
 
 
-def arrival_deltas(in_transit_due: pd.DataFrame) -> pd.DataFrame:
-    """+1 per docking bike, grouped by (target, commodity)."""
+def dock_deltas(docked: pd.DataFrame, target_col: str = "planned_target_id") -> pd.DataFrame:
+    """+1 per docking bike, grouped by the station docked at and the commodity.
+
+    ``target_col`` selects which station the bike docked at: ``planned_target_id``
+    when it docked at its planned target, ``realized_target_id`` when an overflow
+    flow was redirected elsewhere.
+    """
     return (
-        in_transit_due.groupby(["planned_target_id", "commodity_category"]).size()
-        .reset_index(name="delta").rename(columns={"planned_target_id": "facility_id"})
+        docked.groupby([target_col, "commodity_category"]).size()
+        .reset_index(name="delta").rename(columns={target_col: "facility_id"})
     )
 
 

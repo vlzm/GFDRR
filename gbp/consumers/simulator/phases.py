@@ -15,15 +15,15 @@ historical baseline.
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
-from gbp.model.journal import arrived_events, departed_events
+from gbp.model.journal import arrived_events, departed_events, redirected_events
 
 from .mechanics import (
     dock_up_to_capacity,
     expand_potential_trips,
     form_potential_trips,
     free_docks,
+    plan_overflow_redirect,
     realize_departures,
-    redirect_overflow,
 )
 from .state import (
     PeriodRow,
@@ -31,8 +31,8 @@ from .state import (
     Schedule,
     SimulationState,
     adjust_inventory,
-    arrival_deltas,
     departure_deltas_from_counts,
+    dock_deltas,
 )
 
 
@@ -48,30 +48,6 @@ class Phase:
     def execute(self, state: SimulationState, resolved: ResolvedModelData,
                 period: PeriodRow) -> PhaseResult:
         raise NotImplementedError
-
-
-def dock_arrivals(
-    state: SimulationState, resolved: ResolvedModelData, due: pd.DataFrame, period_id: int
-):
-    """Dock the in-transit flows ``due`` this period, up to free dock capacity.
-
-    Splits ``due`` into the flows that fit (docked: +inventory, ``arrived``
-    events) and the overflow that found no free dock at its planned target. All
-    of ``due`` leaves ``in_transit``; the overflow is returned for the caller
-    (:class:`DockArrivals`) to redirect elsewhere.
-
-    Returns
-    -------
-    tuple of (SimulationState, pandas.DataFrame, pandas.DataFrame)
-        The updated state, the ``arrived`` events, and the overflow flows.
-    """
-    free = free_docks(state.state_inventory_df, resolved.facilities_capacities_df)
-    docked, overflow = dock_up_to_capacity(due, free)
-    events = arrived_events(docked, period_id)
-    inventory = adjust_inventory(state.state_inventory_df, arrival_deltas(docked))
-    in_transit = state.in_transit.drop(due.index)
-    new_state = state.with_inventory(inventory).with_in_transit(in_transit)
-    return new_state, events, overflow
 
 
 class DockArrivals(Phase):
@@ -110,18 +86,30 @@ class DockArrivals(Phase):
         if due.empty:
             return PhaseResult.empty(state)
 
-        state, events, overflow = dock_arrivals(state, resolved, due, t)
+        capacities = resolved.facilities_capacities_df
+        inventory = state.state_inventory_df
+
+        # Dock at the planned target, up to free dock capacity.
+        free = free_docks(inventory, capacities)
+        docked, overflow = dock_up_to_capacity(due, free)
+        events = arrived_events(docked, t)
+        inventory = adjust_inventory(inventory, dock_deltas(docked))
+
+        # Redirect whatever overflowed to the nearest station with a free dock.
         if not overflow.empty:
-            redirected, inventory, _lost = redirect_overflow(
-                state.state_inventory_df,
-                resolved.facilities_capacities_df,
-                resolved.facilities_geo_df,
-                overflow,
-                t,
+            placed, _lost = plan_overflow_redirect(
+                inventory, capacities, resolved.facilities_geo_df, overflow
             )
-            state = state.with_inventory(inventory)
-            events = pd.concat([events, redirected], ignore_index=True)
-        return PhaseResult(state, events)
+            if not placed.empty:
+                events = pd.concat(
+                    [events, redirected_events(placed, placed["realized_target_id"], t)],
+                    ignore_index=True,
+                )
+                inventory = adjust_inventory(inventory, dock_deltas(placed, "realized_target_id"))
+
+        in_transit = state.in_transit.drop(due.index)
+        new_state = state.with_inventory(inventory).with_in_transit(in_transit)
+        return PhaseResult(new_state, events)
 
 
 class FormDeparturesPhase(Phase):

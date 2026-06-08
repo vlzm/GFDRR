@@ -5,17 +5,18 @@ and overflow redirect (the dock side) and demand realization plus OD expansion
 (the departure side). The phases decide *when* to apply these rules; this module
 holds the rules themselves.
 
-It depends on :mod:`journal` for the event builders it emits and on :mod:`state`
-for the inventory arithmetic, and on nothing above it: ``journal <- state <-
-mechanics <- phases <- engine``.
+Mechanics never touch :class:`SimulationState` or the event journal: they take
+plain frames and return *decisions* (what fits, what overflows, where each
+overflow flow docks). Applying those decisions to the live state and writing the
+events is the phase's job. So this module depends only on :mod:`state` for the
+inventory arithmetic and on nothing above it: ``journal <- state <- mechanics <-
+phases <- engine``.
 """
 
 import numpy as np
 import pandas as pd
 
-from gbp.model.journal import redirected_events
-
-from .state import adjust_inventory
+from .state import adjust_inventory, dock_deltas
 
 
 # ---------------------------------------------------------------------------
@@ -110,19 +111,21 @@ def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame
     return targets.map(nearest)
 
 
-def redirect_overflow(
+def plan_overflow_redirect(
     inventory: pd.DataFrame,
     capacities: pd.DataFrame,
     geo: pd.DataFrame,
     overflow: pd.DataFrame,
-    period_id: int,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Greedily dock overflow flows at the nearest station with a free dock.
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Plan where each overflow flow docks: the nearest station with a free dock.
 
-    Rounds, not per-row loops: each round maps every still-unplaced flow to its
-    nearest free station, docks up to capacity there, applies the arrivals to
-    inventory, and repeats with the leftovers until none remain or no dock is free
-    anywhere. The within-batch capacity coupling is therefore honoured exactly.
+    A decision, not a state change: this returns *where each flow goes* and leaves
+    applying it (inventory, events) to the phase. Rounds, not per-row loops: each
+    round maps every still-unplaced flow to its nearest free station, docks up to
+    capacity there, and repeats with the leftovers until none remain or no dock is
+    free anywhere. A running copy of inventory tracks the docks each round fills,
+    so the within-batch capacity coupling is honoured exactly; that copy is local
+    and never leaves the function.
 
     Parameters
     ----------
@@ -134,37 +137,35 @@ def redirect_overflow(
         Facility geography: ``facility_id``, ``lat``, ``lng``.
     overflow : pandas.DataFrame
         The flows that found no free dock at their planned target.
-    period_id : int
-        The docking period.
 
     Returns
     -------
-    tuple of (pandas.DataFrame, pandas.DataFrame, pandas.DataFrame)
-        The ``redirected`` events, the inventory with the redirected arrivals
-        applied, and any flows that found no free dock anywhere (lost).
+    tuple of (pandas.DataFrame, pandas.DataFrame)
+        ``placed`` -- the overflow flows that docked, each with a
+        ``realized_target_id`` column naming the station it docked at -- and the
+        flows that found no free dock anywhere (lost).
     """
-    events = []
+    placed_batches = []
     remaining = overflow
+    running = inventory
     while not remaining.empty:
-        free = free_docks(inventory, capacities)
+        free = free_docks(running, capacities)
         if not (free > 0).any():
             break
         target = _nearest_free_station(remaining["planned_target_id"], free, geo)
-        placed = remaining.assign(realized_target_id=target)
-        placed = placed[placed["realized_target_id"].notna()]
-        if placed.empty:
+        candidate = remaining.assign(realized_target_id=target)
+        candidate = candidate[candidate["realized_target_id"].notna()]
+        if candidate.empty:
             break
-        rank = placed.groupby("realized_target_id").cumcount()
-        fits = rank < placed["realized_target_id"].map(free)
-        docked = placed[fits]
-        events.append(redirected_events(docked, docked["realized_target_id"], period_id))
-        deltas = (docked.groupby(["realized_target_id", "commodity_category"]).size()
-                  .reset_index(name="delta").rename(columns={"realized_target_id": "facility_id"}))
-        inventory = adjust_inventory(inventory, deltas)
-        remaining = placed[~fits].drop(columns="realized_target_id")
-    events_df = (pd.concat(events, ignore_index=True) if events
-                 else redirected_events(overflow.iloc[:0], overflow["planned_target_id"].iloc[:0], period_id))
-    return events_df, inventory, remaining
+        rank = candidate.groupby("realized_target_id").cumcount()
+        fits = rank < candidate["realized_target_id"].map(free)
+        docked = candidate[fits]
+        placed_batches.append(docked)
+        running = adjust_inventory(running, dock_deltas(docked, "realized_target_id"))
+        remaining = candidate[~fits].drop(columns="realized_target_id")
+    placed = (pd.concat(placed_batches, ignore_index=True) if placed_batches
+              else overflow.iloc[:0].assign(realized_target_id=overflow["planned_target_id"].iloc[:0]))
+    return placed, remaining
 
 
 # ---------------------------------------------------------------------------
