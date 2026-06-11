@@ -10,7 +10,7 @@ subset of them: ``periods_df``, ``initial_inventory_df``, ``potential_trips_df``
 import pandas as pd
 
 from gbp.loaders.dataloader_raw import RawModelData, get_initial_inventory_df
-from gbp.model.journal import (
+from gbp.model import (
     arrived_events,
     departed_events,
     finalize_flows,
