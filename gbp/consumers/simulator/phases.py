@@ -15,7 +15,7 @@ historical baseline.
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
-from gbp.model import arrived_events, departed_events, redirected_events
+from gbp.model import arrived_events, departed_events, lost_events, redirected_events
 
 from .mechanics import (
     dock_up_to_capacity,
@@ -88,6 +88,7 @@ class DockArrivals(Phase):
 
         capacities = resolved.facilities_capacities_df
         inventory = state.state_inventory_df
+        stock_before = int(inventory["quantity"].sum())
 
         # Dock at the planned target, up to free dock capacity.
         free = free_docks(inventory, capacities)
@@ -95,18 +96,37 @@ class DockArrivals(Phase):
         events = arrived_events(docked, t)
         inventory = adjust_inventory(inventory, dock_deltas(docked))
 
-        # Redirect whatever overflowed to the nearest station with a free dock.
+        # Redirect whatever overflowed to the nearest station with a free dock;
+        # whatever still finds no dock anywhere is lost to a full network.
+        n_placed = n_lost = 0
         if not overflow.empty:
-            placed, _lost = plan_overflow_redirect(
+            placed, lost = plan_overflow_redirect(
                 inventory, capacities, resolved.facilities_geo_df, overflow
             )
+            n_placed, n_lost = len(placed), len(lost)
             if not placed.empty:
                 events = pd.concat(
                     [events, redirected_events(placed, placed["realized_target_id"], t)],
                     ignore_index=True,
                 )
                 inventory = adjust_inventory(inventory, dock_deltas(placed, "realized_target_id"))
+            if not lost.empty:
+                # No free dock anywhere: the bike leaves the system (a sink, per
+                # the loss-logging design). The event closes the flow's spine;
+                # inventory is untouched -- the bike already left its source at
+                # ``departed`` and docks nowhere now.
+                events = pd.concat(
+                    [events, lost_events(lost, t, "dock_full")],
+                    ignore_index=True,
+                )
 
+        # Tier-1 contracts: every due flow docks, redirects, or is lost exactly
+        # once, and a lost flow docks nowhere -- so stock rises only by the bikes
+        # that actually docked (docked + redirected), never by the lost ones.
+        assert len(docked) + n_placed + n_lost == len(due), "due flows not conserved"
+        assert int(inventory["quantity"].sum()) - stock_before == len(docked) + n_placed, (
+            "lost or redirected count moved inventory incorrectly"
+        )
         in_transit = state.in_transit.drop(due.index)
         new_state = state.with_inventory(inventory).with_in_transit(in_transit)
         return PhaseResult(new_state, events)
@@ -117,7 +137,10 @@ class FormDeparturesPhase(Phase):
 
     Counts only -- the concrete trips (their targets and durations) are formed in
     :class:`FormPotentialTripsPhase`. The realized counts are handed over through
-    the per-period ``intermediates``.
+    the per-period ``intermediates``; the demand that did *not* fit the stock is
+    emitted as ``lost`` (``reason="stockout"``) events so the journal carries the
+    full demand split ``demand = departed + lost`` rather than silently dropping
+    the shortfall.
     """
 
     name = "form_departures"
@@ -132,10 +155,27 @@ class FormDeparturesPhase(Phase):
         # Gate demand by the stock on hand; demand above stock is lost to a
         # stockout (dormant in an exact replay, where stock covers the baseline).
         realized = realize_departures(demand_now, state.state_inventory_df)
-        inventory = adjust_inventory(state.state_inventory_df, departure_deltas_from_counts(realized))
+        stock_before = int(state.state_inventory_df["quantity"].sum())
+        inventory = adjust_inventory(
+            state.state_inventory_df, departure_deltas_from_counts(realized)
+        )
+        # Tier-1 contract: stock falls by exactly the realized departures; the
+        # stockout shortfall never left a dock, so it moves no inventory.
+        dispatched = stock_before - int(inventory["quantity"].sum())
+        assert dispatched == int(realized["realized"].sum()), "stockout moves no inventory"
         new_state = (state.with_inventory(inventory)
                      .with_intermediates(realized_departures=realized))
-        return PhaseResult.empty(new_state)
+
+        # Journal the shortfall. A stockout loss is demand that never became a
+        # flow: aggregated per origin, no flow_id, no target. It touches no
+        # inventory (the bike never left), so it is emitted but not applied.
+        shortfall = realized[realized["lost"] > 0]
+        if shortfall.empty:
+            return PhaseResult.empty(new_state)
+        stockout = shortfall.rename(
+            columns={"facility_id": "source_id", "lost": "quantity"}
+        )
+        return PhaseResult(new_state, lost_events(stockout, t, "stockout"))
 
 
 class FormPotentialTripsPhase(Phase):

@@ -4,7 +4,8 @@ and its read-models (the marginal observations).
 The flow journal is the single source of truth for what happened in a run. This
 module owns one secret -- the shape of a flow event -- on both sides: the
 builders that *write* events (:func:`departed_events`, :func:`arrived_events`,
-:func:`redirected_events`) and the derivations that *read* the journal back into
+:func:`redirected_events`, :func:`lost_events`) and the derivations that *read*
+the journal back into
 marginals (:func:`flows_to_departures` and friends, :func:`observe`). Write and
 read live together on purpose: splitting them would leak the column layout
 across two modules.
@@ -49,6 +50,13 @@ FLOW_EVENT_DTYPES = {
     "quantity": "Int64",
     "reason": "string",
 }
+
+# Event types that dock a bike (+1 at ``realized_target_id``): a normal arrival
+# and an overflow redirect both land a bike at a station. Every inventory-side
+# projection must read *both*, or the journal-derived inventory and the live state
+# diverge above the baseline, where redirect fires. ``lost`` docks nowhere and a
+# ``departed`` undocks (-1 at ``source_id``), so neither belongs here.
+DOCKING_EVENT_TYPES = ["arrived", "redirected"]
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +158,62 @@ def redirected_events(
     }))
 
 
+def lost_events(losses: pd.DataFrame, period_id: int, reason: str) -> pd.DataFrame:
+    """One ``lost`` event per trip that failed to happen, tagged with ``reason``.
+
+    Serves both loss sites with a single shape: the caller passes whatever columns
+    it has and the rest default to NA. The two losses are deliberately different
+    shapes because they are different things:
+
+    - a **stockout** loss (origin side) is demand that never became a flow,
+      aggregated per ``(source_id, commodity_category)`` with ``quantity`` = the
+      shortfall and no ``flow_id`` or target;
+    - a **dock-full** loss (destination side) is a flow that departed but never
+      docked: one row per in-transit ``flow_id`` with ``quantity`` = 1, carrying
+      its ``source_id`` and ``planned_target_id``.
+
+    ``lost`` events never touch inventory (a stockout bike never left; a dock-full
+    bike already left at ``departed`` and docks nowhere). They are pure
+    accounting: they make a loss visible in the journal and close a dock-full
+    flow's spine. ``realized_target_id`` and ``realized_end_period`` are always NA
+    -- a lost trip reaches no destination.
+
+    Parameters
+    ----------
+    losses : pandas.DataFrame
+        The lost trips. Always carries ``source_id``, ``commodity_category`` and
+        ``quantity``; a dock-full batch also carries ``flow_id``,
+        ``planned_target_id``, ``start_period`` and ``planned_end_period``.
+    period_id : int
+        The period the loss is recorded in.
+    reason : str
+        Why the trip was lost: ``"stockout"`` or ``"dock_full"``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One ``lost`` flow-event row per input row.
+    """
+    na = pd.Series([pd.NA] * len(losses), index=losses.index)
+    return _typed_events(pd.DataFrame({
+        "period_id":           period_id,
+        "flow_id":             losses.get("flow_id", na),
+        "flow_type":           "user_trip",
+        "event_type":          "lost",
+        "commodity_category":  losses["commodity_category"],
+        "source_id":           losses["source_id"],
+        "planned_target_id":   losses.get("planned_target_id", na),
+        "realized_target_id":  pd.NA,
+        "start_period":        losses.get("start_period", na),
+        "planned_end_period":  losses.get("planned_end_period", na),
+        "realized_end_period": pd.NA,
+        "resource_id":         pd.NA,
+        "quantity":            losses["quantity"],
+        "reason":              reason,
+        "event_order":         1,
+    }))
+
+
 def empty_in_transit() -> pd.DataFrame:
     """Empty in-transit table (a ``departed``-event frame with no rows)."""
     return departed_events(pd.DataFrame({
@@ -222,14 +286,17 @@ def flows_to_departures(flows: pd.DataFrame) -> pd.DataFrame:
 
 
 def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
-    """Inflow per period and destination: count of ``arrived`` events.
+    """Inflow per period and destination: count of docking events.
 
+    A docking is an ``arrived`` or a ``redirected`` event (see
+    :data:`DOCKING_EVENT_TYPES`); both land a bike at their ``realized_target_id``.
     Grouped by ``(period_id, facility_id, commodity_category)`` where
-    ``facility_id`` is the trip's ``realized_target_id``.
+    ``facility_id`` is that ``realized_target_id``.
     """
+    docked = flows[flows["event_type"].isin(DOCKING_EVENT_TYPES)]
+    keys = ["period_id", "realized_target_id", "commodity_category"]
     return (
-        flows[flows["event_type"] == "arrived"]
-        .groupby(["period_id", "realized_target_id", "commodity_category"], as_index=False)["quantity"].sum()
+        docked.groupby(keys, as_index=False)["quantity"].sum()
         .rename(columns={"realized_target_id": "facility_id"})
     )
 
@@ -268,8 +335,10 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     """Per-period inventory as a pure function of the journal and initial stock.
 
     Inventory at the end of period ``t`` equals the initial stock plus the
-    cumulative net flow (arrivals ``+1``, departures ``-1``) up to and including
-    ``t``, per ``(facility_id, commodity_category)``. Because both historical and
+    cumulative net flow (dockings ``+1`` -- arrivals and redirects, see
+    :data:`DOCKING_EVENT_TYPES`; departures ``-1``) up to and including ``t``, per
+    ``(facility_id, commodity_category)``. ``lost`` events touch no facility.
+    Because both historical and
     simulated inventory are defined this way, they need no per-period snapshot
     table — the journal is enough.
 
@@ -300,9 +369,10 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
         .rename(columns={"source_id": "facility_id", "quantity": "delta"})
     )
     dep["delta"] = -dep["delta"]
+    dock_keys = ["period_id", "realized_target_id", "commodity_category"]
     arr = (
-        flows[flows["event_type"] == "arrived"]
-        .groupby(["period_id", "realized_target_id", "commodity_category"], as_index=False)["quantity"].sum()
+        flows[flows["event_type"].isin(DOCKING_EVENT_TYPES)]
+        .groupby(dock_keys, as_index=False)["quantity"].sum()
         .rename(columns={"realized_target_id": "facility_id", "quantity": "delta"})
     )
     deltas = pd.concat([dep, arr], ignore_index=True)
@@ -361,6 +431,75 @@ class Observations:
     arrivals: pd.DataFrame
     demand: pd.DataFrame
     od_matrix: pd.DataFrame
+
+
+# ---------------------------------------------------------------------------
+# Run invariants (pure functions of the journal)
+# ---------------------------------------------------------------------------
+# I1 and I2 of the loss-logging design: whole-journal properties, returned as a
+# list of human-readable violations (empty == holds) rather than raised, so the
+# simulator-layer ``validate_run`` can collect I1-I4 together and report once.
+def check_demand_split(flows: pd.DataFrame, demand: pd.DataFrame) -> list[str]:
+    """I1 -- demand splits exactly into served departures and stockout losses.
+
+    Per ``(period_id, facility_id, commodity_category)`` the input demand must
+    equal ``Σ departed + Σ lost(reason="stockout")``. Checkable because ``demand``
+    is a scenario input, not derived from the journal. Dormant in an exact replay
+    (no stockout, so ``departed == demand``).
+    """
+    keys = ["period_id", "facility_id", "commodity_category"]
+    demand = demand.astype({
+        "period_id": "Int64", "facility_id": "string",
+        "commodity_category": "string", "quantity": "Int64",
+    }).rename(columns={"quantity": "demand"})
+    served = flows_to_departures(flows).rename(columns={"quantity": "departed"})
+    lost = flows[(flows["event_type"] == "lost") & (flows["reason"] == "stockout")]
+    stock_keys = ["period_id", "source_id", "commodity_category"]
+    stockout = (
+        lost.groupby(stock_keys, as_index=False)["quantity"].sum()
+        .rename(columns={"source_id": "facility_id", "quantity": "stockout"})
+    )
+    merged = (
+        demand.merge(served, on=keys, how="outer")
+        .merge(stockout, on=keys, how="outer")
+        .fillna(0)
+    )
+    bad = merged[merged["demand"] != merged["departed"] + merged["stockout"]]
+    return [
+        f"I1 {r.facility_id}/{r.commodity_category} p{r.period_id}: demand={int(r.demand)} "
+        f"!= departed={int(r.departed)} + stockout={int(r.stockout)}"
+        for r in bad.itertuples(index=False)
+    ]
+
+
+def check_spine_closure(flows: pd.DataFrame) -> list[str]:
+    """I2 -- every flow due by the horizon closes with exactly one terminal event.
+
+    A flow's spine opens with ``departed`` and closes with exactly one of
+    ``arrived``, ``redirected`` or ``lost`` (dock-full). A flow whose
+    ``planned_end_period`` falls past the last period of the run is legitimately
+    still in transit -- the run window ended mid-trip -- so only flows due by the
+    horizon are required to have closed. More than one terminal is always a double
+    close. Stockout losses carry no ``flow_id`` and are not spines, so they are
+    excluded.
+    """
+    if flows.empty:
+        return []
+    last_period = int(flows["period_id"].max())
+    departed = flows.loc[flows["event_type"] == "departed", ["flow_id", "planned_end_period"]]
+    terminal_types = ["arrived", "redirected", "lost"]
+    terminal = flows[flows["event_type"].isin(terminal_types) & flows["flow_id"].notna()]
+    closes = terminal.groupby("flow_id").size()
+    departed = departed.assign(n=departed["flow_id"].map(closes).fillna(0).astype("int64"))
+    violations = []
+    due = departed[departed["planned_end_period"] <= last_period]
+    stuck = int((due["n"] == 0).sum())
+    if stuck:
+        violations.append(f"I2 spine closure: {stuck} flows due by the horizon never closed")
+    doubled = int((departed["n"] > 1).sum())
+    if doubled:
+        violations.append(f"I2 spine closure: {doubled} flows have multiple terminal events")
+    return violations
 
 
 def observe(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> Observations:

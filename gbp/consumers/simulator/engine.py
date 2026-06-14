@@ -9,7 +9,6 @@ and only become meaningful once demand is pushed above the historical baseline.
 """
 
 import dataclasses
-import sys
 
 import pandas as pd
 
@@ -17,6 +16,7 @@ from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import empty_flows_journal, empty_in_transit, finalize_flows
 
 from .state import PeriodRow, SimulationState, SimulatorConfigError
+from .validation import RunInvariantError, validate_run
 
 
 @dataclasses.dataclass
@@ -24,6 +24,7 @@ class EnvironmentConfig:
     phases: list
     seed: int
     scenario_id: str
+    validate: bool = False
 
 
 def init_state(resolved: ResolvedModelData, first_period: PeriodRow) -> SimulationState:
@@ -67,16 +68,14 @@ class Environment:
     def run(self) -> SimulationState:
         while not self.is_done:
             self.step()
+        if self._config.validate:
+            violations = validate_run(self._state, self._resolved)
+            if violations:
+                raise RunInvariantError("run invariants violated:\n" + "\n".join(violations))
         return self._state
 
     def step(self) -> SimulationState:
         period = self._periods[self._period_cursor]
-        if period.period_id > 20:
-            import pickle
-            pickle.dump({'resolved': self._resolved, 'state': self._state, 'period': period}, open('D:\\Documents\\vlzm\\GFDRR\\temp\\dbg.pkl', 'wb'))
-            # i need to stop here
-            sys.exit()
-
         for phase in self._config.phases:
             if phase.should_run(period):
                 result = phase.execute(self._state, self._resolved, period)

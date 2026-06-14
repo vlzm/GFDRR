@@ -75,6 +75,9 @@ def dock_up_to_capacity(
     rank = due.groupby("planned_target_id").cumcount()
     capacity_here = due["planned_target_id"].map(free).fillna(0)
     fits = rank < capacity_here
+    # Tier-1 contract: no target docks more flows than it has free slots.
+    docked_n = due[fits].groupby("planned_target_id").size()
+    assert (docked_n <= free.reindex(docked_n.index).fillna(0)).all(), "docked over capacity"
     return due[fits], due[~fits]
 
 
@@ -165,6 +168,8 @@ def plan_overflow_redirect(
         remaining = candidate[~fits].drop(columns="realized_target_id")
     placed = (pd.concat(placed_batches, ignore_index=True) if placed_batches
               else overflow.iloc[:0].assign(realized_target_id=overflow["planned_target_id"].iloc[:0]))
+    # Tier-1 contract: every overflow flow either docks or is lost, never both.
+    assert len(placed) + len(remaining) == len(overflow), "overflow flows not conserved"
     return placed, remaining
 
 
@@ -195,6 +200,9 @@ def realize_departures(demand_now: pd.DataFrame, inventory: pd.DataFrame) -> pd.
     out["available"] = out["available"].fillna(0)
     out["realized"] = out[["quantity", "available"]].min(axis=1).astype("int64")
     out["lost"] = (out["quantity"] - out["realized"]).astype("int64")
+    # Tier-1 contracts: realization is bounded by stock and loss is non-negative.
+    assert (out["realized"] <= out["available"]).all(), "realized exceeds available stock"
+    assert (out["lost"] >= 0).all(), "stockout loss is negative"
     return out[["facility_id", "commodity_category", "realized", "lost"]]
 
 
