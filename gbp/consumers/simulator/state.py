@@ -59,10 +59,10 @@ def dock_deltas(docked: pd.DataFrame, target_col: str = "planned_target_id") -> 
     )
 
 
-def departure_deltas_from_counts(realized: pd.DataFrame) -> pd.DataFrame:
-    """``-realized`` per (facility, commodity) for the inventory decrement."""
-    d = (realized[realized["realized"] > 0]
-         .rename(columns={"realized": "delta"})
+def departure_deltas_from_counts(departures: pd.DataFrame) -> pd.DataFrame:
+    """``-departed`` per (facility, commodity) for the inventory decrement."""
+    d = (departures[departures["departed"] > 0]
+         .rename(columns={"departed": "delta"})
          [["facility_id", "commodity_category", "delta"]].copy())
     d["delta"] = -d["delta"]
     return d
@@ -83,13 +83,16 @@ class Schedule:
 
     @classmethod
     def every(cls) -> "Schedule":
+        """Build a schedule that runs every period."""
         return cls(1)
 
     @classmethod
     def every_n_periods(cls, n: int) -> "Schedule":
+        """Build a schedule that runs once every ``n`` periods."""
         return cls(n)
 
     def should_run(self, period: "PeriodRow") -> bool:
+        """Report whether ``period`` falls on this schedule."""
         return period.period_id % self.every_n == 0
 
 
@@ -125,7 +128,7 @@ class SimulationState:
     state_period_id_obj : PeriodRow
         The current period (the clock position).
     state_inventory_df : pandas.DataFrame
-        Current stock: ``facility_id``, ``commodity_category``, ``quantity``.
+        Current inventory: ``facility_id``, ``commodity_category``, ``quantity``.
     state_flows_df : pandas.DataFrame
         Append-only flow-event journal accumulated so far this run.
     state_resources_df : pandas.DataFrame
@@ -152,12 +155,12 @@ class SimulationState:
     # -- derived "Additional" observations -----------------------------------
     @property
     def state_departures_df(self) -> pd.DataFrame:
-        """Outflow per period and origin, derived from ``state_flows_df``."""
+        """Outflow per period and source, derived from ``state_flows_df``."""
         return flows_to_departures(self.state_flows_df)
 
     @property
     def state_arrivals_df(self) -> pd.DataFrame:
-        """Inflow per period and destination, derived from ``state_flows_df``."""
+        """Inflow per period and target, derived from ``state_flows_df``."""
         return flows_to_arrivals(self.state_flows_df)
 
     @property
@@ -183,12 +186,15 @@ class SimulationState:
 
     # -- functional updates --------------------------------------------------
     def with_inventory(self, new_inventory: pd.DataFrame) -> "SimulationState":
+        """Return a copy with the inventory replaced."""
         return dataclasses.replace(self, state_inventory_df=new_inventory)
 
     def with_in_transit(self, new_in_transit: pd.DataFrame) -> "SimulationState":
+        """Return a copy with the in-transit set replaced."""
         return dataclasses.replace(self, in_transit=new_in_transit)
 
     def with_resources(self, new_resources: pd.DataFrame) -> "SimulationState":
+        """Return a copy with the resources replaced."""
         return dataclasses.replace(self, state_resources_df=new_resources)
 
     def append_flows(self, events: pd.DataFrame | None) -> "SimulationState":
@@ -199,9 +205,11 @@ class SimulationState:
         return dataclasses.replace(self, state_flows_df=journal)
 
     def with_intermediates(self, **updates: Any) -> "SimulationState":
+        """Return a copy with the given per-period hand-offs merged in."""
         return dataclasses.replace(self, intermediates={**self.intermediates, **updates})
 
     def advance_period(self, next_period_obj: PeriodRow) -> "SimulationState":
+        """Return a copy moved to ``next_period_obj``, clearing the intermediates."""
         # Intermediates are transient per-period hand-offs between phases.
         return dataclasses.replace(self, state_period_id_obj=next_period_obj, intermediates={})
 
@@ -215,4 +223,5 @@ class PhaseResult:
 
     @classmethod
     def empty(cls, state: SimulationState) -> "PhaseResult":
+        """Build a result that changes nothing: the same state, no events."""
         return cls(state=state, events=None)

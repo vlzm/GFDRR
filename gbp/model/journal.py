@@ -1,7 +1,7 @@
-"""Flow journal: the event schema, the event builders, the append-only journal
-and its read-models (the marginal observations).
+"""Flow journal: the event schema, builders, log, and its read-models.
 
-The flow journal is the single source of truth for what happened in a run. This
+Its read-models are the marginal observations. The flow journal is the single
+source of truth for what happened in a run. This
 module owns one secret -- the shape of a flow event -- on both sides: the
 builders that *write* events (:func:`departed_events`, :func:`arrived_events`,
 :func:`redirected_events`, :func:`lost_events`) and the derivations that *read*
@@ -159,16 +159,16 @@ def redirected_events(
 
 
 def lost_events(losses: pd.DataFrame, period_id: int, reason: str) -> pd.DataFrame:
-    """One ``lost`` event per trip that failed to happen, tagged with ``reason``.
+    """One ``lost`` event per trip that did not happen, tagged with ``reason``.
 
     Serves both loss sites with a single shape: the caller passes whatever columns
     it has and the rest default to NA. The two losses are deliberately different
     shapes because they are different things:
 
-    - a **stockout** loss (origin side) is demand that never became a flow,
+    - a **stockout** loss (source side) is demand that never became a flow,
       aggregated per ``(source_id, commodity_category)`` with ``quantity`` = the
-      shortfall and no ``flow_id`` or target;
-    - a **dock-full** loss (destination side) is a flow that departed but never
+      lost demand and no ``flow_id`` or target;
+    - a **dock-full** loss (target side) is a flow that departed but never
       docked: one row per in-transit ``flow_id`` with ``quantity`` = 1, carrying
       its ``source_id`` and ``planned_target_id``.
 
@@ -176,7 +176,7 @@ def lost_events(losses: pd.DataFrame, period_id: int, reason: str) -> pd.DataFra
     bike already left at ``departed`` and docks nowhere). They are pure
     accounting: they make a loss visible in the journal and close a dock-full
     flow's spine. ``realized_target_id`` and ``realized_end_period`` are always NA
-    -- a lost trip reaches no destination.
+    -- a lost trip reaches no target.
 
     Parameters
     ----------
@@ -236,7 +236,9 @@ def empty_flows_journal() -> pd.DataFrame:
     plus the transient ``event_order``); ``event_id`` is assigned only once at
     :func:`finalize_flows`, so it is absent while the journal is still growing.
     """
-    journal = pd.DataFrame({col: pd.Series(dtype=dtype) for col, dtype in FLOW_EVENT_DTYPES.items()})
+    journal = pd.DataFrame(
+        {col: pd.Series(dtype=dtype) for col, dtype in FLOW_EVENT_DTYPES.items()}
+    )
     journal["event_order"] = pd.Series(dtype="int64")
     return journal
 
@@ -273,7 +275,7 @@ def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
 # Observation derivations (pure functions of the flow journal)
 # ---------------------------------------------------------------------------
 def flows_to_departures(flows: pd.DataFrame) -> pd.DataFrame:
-    """Outflow per period and origin: count of ``departed`` events.
+    """Outflow per period and source: count of ``departed`` events.
 
     Grouped by ``(period_id, facility_id, commodity_category)`` where
     ``facility_id`` is the trip's ``source_id``.
@@ -286,7 +288,7 @@ def flows_to_departures(flows: pd.DataFrame) -> pd.DataFrame:
 
 
 def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
-    """Inflow per period and destination: count of docking events.
+    """Inflow per period and target: count of docking events.
 
     A docking is an ``arrived`` or a ``redirected`` event (see
     :data:`DOCKING_EVENT_TYPES`); both land a bike at their ``realized_target_id``.
@@ -332,9 +334,9 @@ def flows_to_od_matrix(flows: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.DataFrame:
-    """Per-period inventory as a pure function of the journal and initial stock.
+    """Per-period inventory as a pure function of the journal and initial inventory.
 
-    Inventory at the end of period ``t`` equals the initial stock plus the
+    Inventory at the end of period ``t`` equals the initial inventory plus the
     cumulative net flow (dockings ``+1`` -- arrivals and redirects, see
     :data:`DOCKING_EVENT_TYPES`; departures ``-1``) up to and including ``t``, per
     ``(facility_id, commodity_category)``. ``lost`` events touch no facility.
@@ -347,7 +349,7 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     flows : pandas.DataFrame
         A flow-event log (historical or finalized simulated).
     initial_inventory : pandas.DataFrame
-        Starting stock with ``facility_id``, ``commodity_category``, ``quantity``.
+        Starting inventory with ``facility_id``, ``commodity_category``, ``quantity``.
 
     Returns
     -------
@@ -405,7 +407,7 @@ class Observations:
     """The full set of marginals derived from a flow journal.
 
     Every field is a pure function of the journal (and, for ``inventory``, of the
-    initial stock). Bundling them in one container means the historical and
+    initial inventory). Bundling them in one container means the historical and
     simulated observation sets are produced by the same code path and therefore
     coincide by construction: the base-replay invariant
     ``simulated_departures == historical_departures`` rests on a single
@@ -414,11 +416,11 @@ class Observations:
     Attributes
     ----------
     inventory : pandas.DataFrame
-        Per-period stock; see :func:`get_inventory_df`.
+        Per-period inventory; see :func:`get_inventory_df`.
     departures : pandas.DataFrame
-        Outflow per period and origin; see :func:`flows_to_departures`.
+        Outflow per period and source; see :func:`flows_to_departures`.
     arrivals : pandas.DataFrame
-        Inflow per period and destination; see :func:`flows_to_arrivals`.
+        Inflow per period and target; see :func:`flows_to_arrivals`.
     demand : pandas.DataFrame
         Realized user demand; equals ``departures`` in an exact replay (see
         :func:`flows_to_departures` and the note on demand gating).
@@ -454,9 +456,9 @@ def check_demand_split(flows: pd.DataFrame, demand: pd.DataFrame) -> list[str]:
     }).rename(columns={"quantity": "demand"})
     served = flows_to_departures(flows).rename(columns={"quantity": "departed"})
     lost = flows[(flows["event_type"] == "lost") & (flows["reason"] == "stockout")]
-    stock_keys = ["period_id", "source_id", "commodity_category"]
+    stockout_keys = ["period_id", "source_id", "commodity_category"]
     stockout = (
-        lost.groupby(stock_keys, as_index=False)["quantity"].sum()
+        lost.groupby(stockout_keys, as_index=False)["quantity"].sum()
         .rename(columns={"source_id": "facility_id", "quantity": "stockout"})
     )
     merged = (
@@ -515,7 +517,7 @@ def observe(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> Observation
     flows : pandas.DataFrame
         A flow-event log (historical or finalized simulated).
     initial_inventory : pandas.DataFrame
-        Starting stock with ``facility_id``, ``commodity_category``, ``quantity``.
+        Starting inventory with ``facility_id``, ``commodity_category``, ``quantity``.
 
     Returns
     -------

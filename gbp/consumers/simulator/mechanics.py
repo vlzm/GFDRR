@@ -29,12 +29,12 @@ def free_docks(inventory: pd.DataFrame, capacities: pd.DataFrame) -> pd.Series:
     """Free dock slots per facility: capacity minus bikes currently docked.
 
     Classic and electric bikes share the same physical docks, so occupancy is the
-    total stock across commodities.
+    total inventory across commodities.
 
     Parameters
     ----------
     inventory : pandas.DataFrame
-        Current stock: ``facility_id``, ``commodity_category``, ``quantity``.
+        Current inventory: ``facility_id``, ``commodity_category``, ``quantity``.
     capacities : pandas.DataFrame
         Dock capacities: ``facility_id``, ``capacity``.
 
@@ -103,14 +103,14 @@ def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame
     """
     candidates = free[free > 0].index
     coords = geo.set_index("facility_id")[["lat", "lng"]]
-    origins = (coords.loc[coords.index.intersection(targets.unique())]
-               .reset_index().rename(columns={"facility_id": "origin"}))
+    target_coords = (coords.loc[coords.index.intersection(targets.unique())]
+                     .reset_index().rename(columns={"facility_id": "target"}))
     cand = (coords.loc[coords.index.intersection(candidates)]
             .reset_index().rename(columns={"facility_id": "candidate"}))
-    pairs = origins.merge(cand, how="cross")
-    pairs = pairs[pairs["origin"] != pairs["candidate"]]
+    pairs = target_coords.merge(cand, how="cross")
+    pairs = pairs[pairs["target"] != pairs["candidate"]]
     pairs["dist2"] = (pairs["lat_x"] - pairs["lat_y"]) ** 2 + (pairs["lng_x"] - pairs["lng_y"]) ** 2
-    nearest = pairs.sort_values("dist2").drop_duplicates("origin").set_index("origin")["candidate"]
+    nearest = pairs.sort_values("dist2").drop_duplicates("target").set_index("target")["candidate"]
     return targets.map(nearest)
 
 
@@ -133,7 +133,7 @@ def plan_overflow_redirect(
     Parameters
     ----------
     inventory : pandas.DataFrame
-        Current stock: ``facility_id``, ``commodity_category``, ``quantity``.
+        Current inventory: ``facility_id``, ``commodity_category``, ``quantity``.
     capacities : pandas.DataFrame
         Dock capacities: ``facility_id``, ``capacity``.
     geo : pandas.DataFrame
@@ -144,11 +144,11 @@ def plan_overflow_redirect(
     Returns
     -------
     tuple of (pandas.DataFrame, pandas.DataFrame)
-        ``placed`` -- the overflow flows that docked, each with a
+        ``redirected`` -- the overflow flows that docked, each with a
         ``realized_target_id`` column naming the station it docked at -- and the
         flows that found no free dock anywhere (lost).
     """
-    placed_batches = []
+    redirected_batches = []
     remaining = overflow
     running = inventory
     while not remaining.empty:
@@ -163,47 +163,51 @@ def plan_overflow_redirect(
         rank = candidate.groupby("realized_target_id").cumcount()
         fits = rank < candidate["realized_target_id"].map(free)
         docked = candidate[fits]
-        placed_batches.append(docked)
+        redirected_batches.append(docked)
         running = adjust_inventory(running, dock_deltas(docked, "realized_target_id"))
         remaining = candidate[~fits].drop(columns="realized_target_id")
-    placed = (pd.concat(placed_batches, ignore_index=True) if placed_batches
-              else overflow.iloc[:0].assign(realized_target_id=overflow["planned_target_id"].iloc[:0]))
+    if redirected_batches:
+        redirected = pd.concat(redirected_batches, ignore_index=True)
+    else:
+        redirected = overflow.iloc[:0].assign(
+            realized_target_id=overflow["planned_target_id"].iloc[:0]
+        )
     # Tier-1 contract: every overflow flow either docks or is lost, never both.
-    assert len(placed) + len(remaining) == len(overflow), "overflow flows not conserved"
-    return placed, remaining
+    assert len(redirected) + len(remaining) == len(overflow), "overflow flows not conserved"
+    return redirected, remaining
 
 
 # ---------------------------------------------------------------------------
 # Demand realization and OD expansion (FormDepartures / FormPotentialTrips)
 # ---------------------------------------------------------------------------
 def realize_departures(demand_now: pd.DataFrame, inventory: pd.DataFrame) -> pd.DataFrame:
-    """Realized departures per (facility, commodity): ``min(demand, stock)``.
+    """Departures per (facility, commodity): ``min(demand, inventory)``.
 
-    Demand above the stock on hand is lost to a stockout; stock is per commodity,
-    so classic and electric demand are gated independently. Dormant in an exact
-    replay, where stock always covers the historical demand.
+    Demand above the inventory is lost to a stockout; inventory is per commodity,
+    so classic and electric demand are limited independently. Dormant in an exact
+    replay, where inventory always covers the historical demand.
 
     Parameters
     ----------
     demand_now : pandas.DataFrame
         This period's demand: ``facility_id``, ``commodity_category``, ``quantity``.
     inventory : pandas.DataFrame
-        Current stock: ``facility_id``, ``commodity_category``, ``quantity``.
+        Current inventory: ``facility_id``, ``commodity_category``, ``quantity``.
 
     Returns
     -------
     pandas.DataFrame
-        ``facility_id``, ``commodity_category``, ``realized``, ``lost``.
+        ``facility_id``, ``commodity_category``, ``departed``, ``lost``.
     """
-    stock = inventory.rename(columns={"quantity": "available"})
-    out = demand_now.merge(stock, on=["facility_id", "commodity_category"], how="left")
+    available = inventory.rename(columns={"quantity": "available"})
+    out = demand_now.merge(available, on=["facility_id", "commodity_category"], how="left")
     out["available"] = out["available"].fillna(0)
-    out["realized"] = out[["quantity", "available"]].min(axis=1).astype("int64")
-    out["lost"] = (out["quantity"] - out["realized"]).astype("int64")
-    # Tier-1 contracts: realization is bounded by stock and loss is non-negative.
-    assert (out["realized"] <= out["available"]).all(), "realized exceeds available stock"
+    out["departed"] = out[["quantity", "available"]].min(axis=1).astype("int64")
+    out["lost"] = (out["quantity"] - out["departed"]).astype("int64")
+    # Tier-1 contracts: departures are bounded by inventory and loss is non-negative.
+    assert (out["departed"] <= out["available"]).all(), "departed exceeds available inventory"
     assert (out["lost"] >= 0).all(), "stockout loss is negative"
-    return out[["facility_id", "commodity_category", "realized", "lost"]]
+    return out[["facility_id", "commodity_category", "departed", "lost"]]
 
 
 def form_potential_trips(
@@ -211,7 +215,7 @@ def form_potential_trips(
 ) -> pd.DataFrame:
     """Split each source's departures across targets by the OD probabilities.
 
-    Each ``(source, commodity)`` releases ``quantity`` bikes this period; the OD
+    Each ``(source, commodity)`` departs ``quantity`` bikes this period; the OD
     matrix ``P(target | source, commodity)`` decides their destinations. The
     expected count per target (``departures * probability``) is rounded to whole
     bikes by the largest-remainder method, so the per-source total is preserved
@@ -246,14 +250,14 @@ def form_potential_trips(
     m["base"] = np.floor(m["expected"]).astype("int64")
     m["remainder"] = m["expected"] - m["base"]
 
-    # Largest-remainder rounding: hand the per-source shortfall to the targets
+    # Largest-remainder rounding: hand the per-source leftover to the targets
     # with the largest fractional parts, so sum(quantity) == departures exactly.
     m = m.sort_values(["source_id", "commodity_category", "remainder"],
                       ascending=[True, True, False])
     grp = m.groupby(["source_id", "commodity_category"])
     m["rank"] = grp.cumcount()
-    m["shortfall"] = m["quantity"] - grp["base"].transform("sum")
-    m["qty"] = m["base"] + (m["rank"] < m["shortfall"]).astype("int64")
+    m["leftover"] = m["quantity"] - grp["base"].transform("sum")
+    m["qty"] = m["base"] + (m["rank"] < m["leftover"]).astype("int64")
     m = m[m["qty"] > 0]
 
     return pd.DataFrame({

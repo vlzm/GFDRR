@@ -1,5 +1,7 @@
-"""Graph (resolved) model data: the period grid, the historical flow log, the
-graph entities/attributes, and the replay demand the engine consumes.
+"""Graph (resolved) model data.
+
+The period grid, the historical flow log, the graph entities/attributes, and
+the replay demand the engine consumes.
 
 ``ResolvedModelData`` is built once per scenario from a :class:`RawModelData`
 and exposes the graph tables. The :class:`~engine.Environment` reads a narrow
@@ -17,15 +19,22 @@ from gbp.model import (
     observe,
 )
 
-
 # ---------------------------------------------------------------------------
 # Period grid (the simulation clock)
 # ---------------------------------------------------------------------------
+#: Default length of a single simulation period.
+DEFAULT_PERIOD_LEN = pd.Timedelta(hours=1)
+
+
 def to_period_id(ts: pd.Series, t0: pd.Timestamp, period_len: pd.Timedelta) -> pd.Series:
+    """Map timestamps to zero-based period ids relative to ``t0``."""
     return ((ts - t0) // period_len).astype("int64")
 
 
-def get_periods_df(trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta) -> pd.DataFrame:
+def get_periods_df(
+    trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta
+) -> pd.DataFrame:
+    """Build the period grid covering every trip, with start/end timestamps."""
     n_periods = int(to_period_id(trips_df["ended_at"], t0, period_len).max()) + 1
     periods_df = pd.DataFrame({"period_id": range(n_periods)})
     periods_df["start_timestamp"] = t0 + periods_df["period_id"] * period_len
@@ -36,7 +45,9 @@ def get_periods_df(trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Time
 # ---------------------------------------------------------------------------
 # Flow event log
 # ---------------------------------------------------------------------------
-def get_historical_flows_df(trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta) -> pd.DataFrame:
+def get_historical_flows_df(
+    trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta
+) -> pd.DataFrame:
     """Expand each historical trip into a realized-flow event log.
 
     Ground-truth history contains only flows that actually happened, so each
@@ -64,7 +75,7 @@ def get_historical_flows_df(trips_df: pd.DataFrame, t0: pd.Timestamp, period_len
         Trips with ``started_at``, ``ended_at``, ``start_station_id``,
         ``end_station_id`` and ``rideable_type``. The row index seeds ``flow_id``.
     t0 : pandas.Timestamp
-        Origin of the period grid.
+        Start of the period grid.
     period_len : pandas.Timedelta
         Length of a single period.
 
@@ -91,19 +102,28 @@ def get_historical_flows_df(trips_df: pd.DataFrame, t0: pd.Timestamp, period_len
 # Entity definitions
 # ---------------------------------------------------------------------------
 def get_facilities_df(stations_df: pd.DataFrame, depots_df: pd.DataFrame) -> pd.DataFrame:
+    """Combine stations and depots into one facility table with categories."""
     return pd.concat([
-        stations_df[['station_id']].rename(columns={"station_id": "facility_id"}).assign(facility_category="station"),
-        depots_df[['depot_id']].rename(columns={"depot_id": "facility_id"}).assign(facility_category="depot"),
+        stations_df[['station_id']]
+        .rename(columns={"station_id": "facility_id"})
+        .assign(facility_category="station"),
+        depots_df[['depot_id']]
+        .rename(columns={"depot_id": "facility_id"})
+        .assign(facility_category="depot"),
     ], ignore_index=True)
 
 
 def get_resources_df(trucks_df: pd.DataFrame) -> pd.DataFrame:
+    """Build the resource table from trucks with their category."""
     return pd.concat([
-        trucks_df[['truck_id']].rename(columns={"truck_id": "resource_id"}).assign(resource_category="truck"),
+        trucks_df[['truck_id']]
+        .rename(columns={"truck_id": "resource_id"})
+        .assign(resource_category="truck"),
     ], ignore_index=True)
 
 
 def get_commodities_categories_df() -> pd.DataFrame:
+    """Return the two bike commodity categories."""
     return pd.DataFrame({
         "commodity_category": ["classic_bike", "electric_bike"],
     })
@@ -117,7 +137,9 @@ def get_facilities_geo_df(stations_df: pd.DataFrame, depots_df: pd.DataFrame) ->
     ], ignore_index=True)
 
 
-def get_facilities_capacities_df(stations_capacities_df: pd.DataFrame, depot_capacities_df: pd.DataFrame) -> pd.DataFrame:
+def get_facilities_capacities_df(
+    stations_capacities_df: pd.DataFrame, depot_capacities_df: pd.DataFrame
+) -> pd.DataFrame:
     """Capacities: facility_id, capacity."""
     return pd.concat([
         stations_capacities_df.rename(columns={"station_id": "facility_id"}),
@@ -130,19 +152,27 @@ def get_resources_capacities_df(trucks_capacities_df: pd.DataFrame) -> pd.DataFr
     return trucks_capacities_df.rename(columns={"truck_id": "resource_id"})
 
 
-def get_facilities_costs_df(stations_costs_df: pd.DataFrame, depot_costs_df: pd.DataFrame) -> pd.DataFrame:
+def get_facilities_costs_df(
+    stations_costs_df: pd.DataFrame, depot_costs_df: pd.DataFrame
+) -> pd.DataFrame:
     """Costs: facility_id, fixed_cost."""
     return pd.concat([
-        stations_costs_df.rename(columns={"station_id": "facility_id", "fixed_cost_station": "fixed_cost"}),
-        depot_costs_df.rename(columns={"depot_id": "facility_id", "fixed_cost_depot": "fixed_cost"}),
+        stations_costs_df.rename(
+            columns={"station_id": "facility_id", "fixed_cost_station": "fixed_cost"}
+        ),
+        depot_costs_df.rename(
+            columns={"depot_id": "facility_id", "fixed_cost_depot": "fixed_cost"}
+        ),
     ], ignore_index=True)
 
 
 def get_resources_rates_df(trucks_rates_df: pd.DataFrame) -> pd.DataFrame:
+    """Rename the truck rate table to the resource schema."""
     return trucks_rates_df.rename(columns={"truck_id": "resource_id"})
 
 
 def get_commodities_categories_rates_df(bike_rates_df: pd.DataFrame) -> pd.DataFrame:
+    """Rename the bike rate table to the commodity schema."""
     return bike_rates_df.rename(columns={"rideable_type": "commodity_category"})
 
 
@@ -191,13 +221,13 @@ def get_saturated_inventory_df(
     commodities_categories_df: pd.DataFrame,
     quantity: int = 1_000_000,
 ) -> pd.DataFrame:
-    """Artificial initial inventory: every station stocked with ``quantity`` bikes
-    of each commodity.
+    """Build artificial initial inventory holding ``quantity`` bikes per station.
 
+    Every station holds ``quantity`` bikes of each commodity.
     Used by the base scenario instead of the GBFS snapshot. The snapshot is a
     *current* observation, unrelated to the historical start state, so gating
     demand against it starves the replay (most departures lose to a stockout that
-    never happened historically). With stock far above any period's demand the
+    never happened historically). With inventory far above any period's demand the
     gate never binds, every historical departure departs, and the run reproduces
     the historical departures exactly even though demand is still gated and trips
     are still formed from the OD matrix.
@@ -214,13 +244,15 @@ def get_saturated_inventory_df(
     return inv.reset_index(drop=True)
 
 
-def get_saturated_capacities_df(facilities_df: pd.DataFrame, capacity: int = 1_000_000) -> pd.DataFrame:
+def get_saturated_capacities_df(
+    facilities_df: pd.DataFrame, capacity: int = 1_000_000
+) -> pd.DataFrame:
     """Artificial dock capacities: every facility gets ``capacity`` slots.
 
     Pairs with :func:`get_saturated_inventory_df` so the overflow-redirect rule
     never binds in the base scenario. Classic and electric bikes share the same
     physical docks, so the saturated occupancy of a station is the per-commodity
-    stock summed across commodities; ``capacity`` must therefore exceed
+    inventory summed across commodities; ``capacity`` must therefore exceed
     ``n_commodities * saturation_quantity`` (with headroom for net arrivals) for
     the docks to stay non-binding -- see the caller in :class:`ResolvedModelData`.
     """
@@ -248,19 +280,19 @@ class ResolvedModelData:
         Length of a single simulation period. Defaults to one hour.
     saturate_stock : bool, optional
         If True, replace the GBFS initial inventory and the dock capacities with
-        artificial saturated ones (every station stocked far above demand, every
+        artificial saturated ones (every station holding far above demand, every
         facility with effectively unbounded docks). This is the base-replay setup:
         demand gating and overflow redirect stay in the pipeline but never bind,
         so the run reproduces the historical departures exactly. Defaults to False.
     saturation_quantity : int, optional
-        The per-station stock and per-facility capacity used when
+        The per-station inventory and per-facility capacity used when
         ``saturate_stock`` is True. Defaults to one million.
     """
 
     def __init__(
         self,
         raw: RawModelData,
-        period_len: pd.Timedelta = pd.Timedelta(hours=1),
+        period_len: pd.Timedelta = DEFAULT_PERIOD_LEN,
         saturate_stock: bool = False,
         saturation_quantity: int = 1_000_000,
     ) -> None:
@@ -275,17 +307,21 @@ class ResolvedModelData:
             raw.stations_capacities_df, raw.depot_capacities_df
         )
         self.resources_capacities_df = get_resources_capacities_df(raw.trucks_capacities_df)
-        self.facilities_costs_df = get_facilities_costs_df(raw.stations_costs_df, raw.depot_costs_df)
+        self.facilities_costs_df = get_facilities_costs_df(
+            raw.stations_costs_df, raw.depot_costs_df
+        )
         self.resources_rates_df = get_resources_rates_df(raw.trucks_rates_df)
-        self.commodities_categories_rates_df = get_commodities_categories_rates_df(raw.bike_rates_df)
+        self.commodities_categories_rates_df = get_commodities_categories_rates_df(
+            raw.bike_rates_df
+        )
 
         # Time grid
         self.period_len = period_len
         self.t0 = raw.trips_df["started_at"].min().floor("h")
         self.periods_df = get_periods_df(raw.trips_df, self.t0, period_len)
 
-        # Initial inventory (GBFS snapshot, or artificial saturated stock for the
-        # base replay -- see the ``saturate_stock`` parameter).
+        # Initial inventory (GBFS snapshot, or artificial saturated inventory for
+        # the base replay -- see the ``saturate_stock`` parameter).
         if saturate_stock:
             self.initial_inventory_df = get_saturated_inventory_df(
                 self.facilities_df, self.commodities_categories_df, saturation_quantity

@@ -5,7 +5,7 @@ too broad for a single phase's contract. ``validate_run`` runs once, behind
 ``EnvironmentConfig.validate`` -- off the hot path, always available, exercised
 by the canonical notebook. I1/I2 are pure functions of the journal
 (:mod:`gbp.model.journal`); I3/I4 also read the live final inventory, the
-in-transit set and the initial stock, so they live here in the simulator layer.
+in-transit set and the initial inventory, so they live here in the simulator layer.
 
 All checks return a list of human-readable violations (empty == holds);
 ``validate_run`` collects I1-I4 and the engine raises :class:`RunInvariantError`
@@ -69,8 +69,8 @@ def _check_projection_consistency(
     proj = (projected[projected["period_id"] == last]
             .rename(columns={"quantity": "projected"})[_KEYS + ["projected"]])
     live = live.rename(columns={"quantity": "live"})[_KEYS + ["live"]]
-    merged = (live.astype({k: "string" for k in _KEYS})
-              .merge(proj.astype({k: "string" for k in _KEYS}), on=_KEYS, how="outer")
+    merged = (live.astype(dict.fromkeys(_KEYS, "string"))
+              .merge(proj.astype(dict.fromkeys(_KEYS, "string")), on=_KEYS, how="outer")
               .fillna(0))
     bad = merged[merged["live"] != merged["projected"]]
     return [

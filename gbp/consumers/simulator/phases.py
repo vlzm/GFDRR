@@ -1,15 +1,15 @@
 """Simulation phases.
 
-Each phase reads the state and returns a new state plus the events it emitted.
-The four canonical phases split a period into: dock earlier arrivals -> form
-departures -> (sample extra trips) -> dock same-period arrivals.
+Each phase reads the state and returns a new state plus the events it created.
+The four phases split one period into these steps: dock earlier arrivals -> form
+departures -> (build the trips) -> dock arrivals from this same period.
 
-:class:`DockArrivals` docks the bikes due this period up to the free dock
-capacity and redirects whatever overflows to the nearest station with a free
-dock, all in one pass -- docking and redirect are one operation, not two phases
-coupled through a shared intermediate. Capacity gating and overflow redirect stay
-dormant in an exact replay (where capacity never binds) and only bite above the
-historical baseline.
+:class:`DockArrivals` parks the bikes that arrive this period. It fills the free
+dock slots first, and sends any extra bikes to the nearest station that still has
+a free dock. Docking and redirect happen together, in one step. When we replay
+the real history the docks are never full, so the capacity limit and the redirect
+do nothing. They only start to matter when traffic goes above the historical
+level.
 """
 
 import pandas as pd
@@ -37,35 +37,40 @@ from .state import (
 
 
 class Phase:
+    """Base class for one phase: a single step of a period, run on a schedule."""
+
     name = "phase"
 
     def __init__(self, schedule: Schedule | None = None) -> None:
         self._schedule = schedule or Schedule.every()
 
     def should_run(self, period: PeriodRow) -> bool:
+        """Report whether this phase runs in ``period`` (per its schedule)."""
         return self._schedule.should_run(period)
 
     def execute(self, state: SimulationState, resolved: ResolvedModelData,
                 period: PeriodRow) -> PhaseResult:
+        """Apply the phase to the state; return the next state and emitted events."""
         raise NotImplementedError
 
 
 class DockArrivals(Phase):
-    """Dock the bikes arriving this period, redirecting any dock overflow.
+    """Dock the bikes that arrive this period, and redirect any that do not fit.
 
-    One docking operation: dock the in-transit flows due now up to free dock
-    capacity, then redirect whatever overflowed to the nearest station with a free
-    dock. The overflow is a local of this method -- it never leaves the phase.
-    ``when`` selects which arrivals the phase handles, since the two run at
-    different points of the period:
+    This is one step: park the arriving bikes in the free dock slots, then send
+    any bikes that did not fit to the nearest station with a free dock. The list
+    of extra bikes stays inside this method -- it never leaves the phase.
+    ``when`` chooses which arrivals this phase handles, because the two run at
+    different moments of the period:
 
-    - ``"previous"`` -- bikes that departed in an earlier period and arrive now
-      (docked before departures form), and
-    - ``"same"`` -- bikes that departed and arrive within this same period
-      (docked after departures form).
+    - ``"previous"`` -- bikes that left in an earlier period and arrive now
+      (docked before the departures are formed), and
+    - ``"same"`` -- bikes that left and arrive inside this same period
+      (docked after the departures are formed).
 
-    Capacity gating and overflow redirect stay dormant in an exact replay (dock
-    capacity never binds there) and only bite above the historical baseline.
+    When we replay the real history the docks are never full, so the capacity
+    limit and the redirect do nothing. They only start to matter when traffic
+    goes above the historical level.
     """
 
     def __init__(self, when: str, schedule: Schedule | None = None) -> None:
@@ -75,7 +80,11 @@ class DockArrivals(Phase):
         self.when = when
         self.name = f"dock_arrivals_{when}"
 
-    def execute(self, state, resolved, period):
+    def execute(self, state: SimulationState, resolved: ResolvedModelData,
+                period: PeriodRow) -> PhaseResult:
+        """Dock this period's arriving bikes, redirect the overflow, lose what fits nowhere."""
+        # Reads -- the in-transit bikes that should dock this period, the dock
+        # capacities, and the starting inventory the check below uses.
         t = period.period_id
         it = state.in_transit
         arrived_now = it["planned_end_period"] == t
@@ -85,124 +94,143 @@ class DockArrivals(Phase):
             due = it[arrived_now & (it["start_period"] == t)]
         if due.empty:
             return PhaseResult.empty(state)
-
         capacities = resolved.facilities_capacities_df
         inventory = state.state_inventory_df
-        stock_before = int(inventory["quantity"].sum())
+        inventory_before = int(inventory["quantity"].sum())
 
-        # Dock at the planned target, up to free dock capacity.
+        # Mechanics -- dock the bikes at their planned station while free slots
+        # last, then send the rest to the nearest station with a free dock. Any
+        # bike that finds no free dock anywhere is lost: the whole network is full.
         free = free_docks(inventory, capacities)
         docked, overflow = dock_up_to_capacity(due, free)
         events = arrived_events(docked, t)
         inventory = adjust_inventory(inventory, dock_deltas(docked))
-
-        # Redirect whatever overflowed to the nearest station with a free dock;
-        # whatever still finds no dock anywhere is lost to a full network.
-        n_placed = n_lost = 0
+        n_redirected = n_lost = 0
         if not overflow.empty:
-            placed, lost = plan_overflow_redirect(
+            redirected, lost = plan_overflow_redirect(
                 inventory, capacities, resolved.facilities_geo_df, overflow
             )
-            n_placed, n_lost = len(placed), len(lost)
-            if not placed.empty:
+            n_redirected, n_lost = len(redirected), len(lost)
+            if not redirected.empty:
                 events = pd.concat(
-                    [events, redirected_events(placed, placed["realized_target_id"], t)],
+                    [events, redirected_events(redirected, redirected["realized_target_id"], t)],
                     ignore_index=True,
                 )
-                inventory = adjust_inventory(inventory, dock_deltas(placed, "realized_target_id"))
+                inventory = adjust_inventory(
+                    inventory, dock_deltas(redirected, "realized_target_id")
+                )
             if not lost.empty:
-                # No free dock anywhere: the bike leaves the system (a sink, per
-                # the loss-logging design). The event closes the flow's spine;
-                # inventory is untouched -- the bike already left its source at
-                # ``departed`` and docks nowhere now.
+                # No free dock anywhere, so the bike leaves the system for good.
+                # The event ends this bike's trip; the inventory does not change,
+                # because the bike already left its start station at ``departed``
+                # and now docks nowhere.
                 events = pd.concat(
                     [events, lost_events(lost, t, "dock_full")],
                     ignore_index=True,
                 )
 
-        # Tier-1 contracts: every due flow docks, redirects, or is lost exactly
-        # once, and a lost flow docks nowhere -- so stock rises only by the bikes
-        # that actually docked (docked + redirected), never by the lost ones.
-        assert len(docked) + n_placed + n_lost == len(due), "due flows not conserved"
-        assert int(inventory["quantity"].sum()) - stock_before == len(docked) + n_placed, (
-            "lost or redirected count moved inventory incorrectly"
-        )
+        # Writes -- remove the docked bikes from the in-transit set and save the
+        # inventory.
         in_transit = state.in_transit.drop(due.index)
         new_state = state.with_inventory(inventory).with_in_transit(in_transit)
+
+        # Check -- each arriving bike docks, is redirected, or is lost exactly
+        # once. A lost bike docks nowhere, so the inventory grows only by the bikes
+        # that really docked (docked + redirected), never by the lost ones.
+        assert len(docked) + n_redirected + n_lost == len(due), "due flows not conserved"
+        assert int(inventory["quantity"].sum()) - inventory_before == len(docked) + n_redirected, (
+            "lost or redirected count moved inventory incorrectly"
+        )
         return PhaseResult(new_state, events)
 
 
 class FormDeparturesPhase(Phase):
-    """Decide how many bikes depart per (source, commodity), gated by stock.
+    """Decide how many bikes leave each (source, commodity), limited by inventory.
 
-    Counts only -- the concrete trips (their targets and durations) are formed in
-    :class:`FormPotentialTripsPhase`. The realized counts are handed over through
-    the per-period ``intermediates``; the demand that did *not* fit the stock is
-    emitted as ``lost`` (``reason="stockout"``) events so the journal carries the
-    full demand split ``demand = departed + lost`` rather than silently dropping
-    the shortfall.
+    Counts only -- the real trips (their targets and durations) are built in
+    :class:`FormPotentialTripsPhase`. The counts are passed on through the
+    per-period ``intermediates``. The demand that did *not* fit the inventory
+    becomes ``lost`` events (``reason="stockout"``), so the journal keeps the full
+    split ``demand = departed + lost`` instead of quietly dropping the lost demand.
     """
 
     name = "form_departures"
 
-    def execute(self, state, resolved, period):
+    def execute(self, state: SimulationState, resolved: ResolvedModelData,
+                period: PeriodRow) -> PhaseResult:
+        """Split this period's demand into departures and stockout losses, bounded by inventory."""
+        # Reads -- the demand for this period and the starting inventory the check
+        # below uses.
         t = period.period_id
         demand = resolved.historical_demand_df
         demand_now = demand[demand["period_id"] == t]
         if demand_now.empty:
             return PhaseResult.empty(state)
+        inventory_before = int(state.state_inventory_df["quantity"].sum())
 
-        # Gate demand by the stock on hand; demand above stock is lost to a
-        # stockout (dormant in an exact replay, where stock covers the baseline).
-        realized = realize_departures(demand_now, state.state_inventory_df)
-        stock_before = int(state.state_inventory_df["quantity"].sum())
+        # Mechanics -- limit the demand by the inventory we have, and split it
+        # into the bikes that leave and the lost demand (demand above inventory).
+        # In an exact replay the inventory always covers the demand, so the lost
+        # demand is zero.
+        departures = realize_departures(demand_now, state.state_inventory_df)
         inventory = adjust_inventory(
-            state.state_inventory_df, departure_deltas_from_counts(realized)
+            state.state_inventory_df, departure_deltas_from_counts(departures)
         )
-        # Tier-1 contract: stock falls by exactly the realized departures; the
-        # stockout shortfall never left a dock, so it moves no inventory.
-        dispatched = stock_before - int(inventory["quantity"].sum())
-        assert dispatched == int(realized["realized"].sum()), "stockout moves no inventory"
-        new_state = (state.with_inventory(inventory)
-                     .with_intermediates(realized_departures=realized))
+        lost_demand = departures[departures["lost"] > 0]
 
-        # Journal the shortfall. A stockout loss is demand that never became a
-        # flow: aggregated per origin, no flow_id, no target. It touches no
-        # inventory (the bike never left), so it is emitted but not applied.
-        shortfall = realized[realized["lost"] > 0]
-        if shortfall.empty:
-            return PhaseResult.empty(new_state)
-        stockout = shortfall.rename(
-            columns={"facility_id": "source_id", "lost": "quantity"}
-        )
-        return PhaseResult(new_state, lost_events(stockout, t, "stockout"))
+        # Writes -- save the lowered inventory, pass the counts to the next
+        # phase, and journal the lost demand. A stockout loss is demand that
+        # never became a trip: summed per source, with no flow_id and no target.
+        # It changes no inventory (the bike never left), so we only emit the event.
+        new_state = (state.with_inventory(inventory)
+                     .with_intermediates(departures=departures))
+        events = None
+        if not lost_demand.empty:
+            stockout = lost_demand.rename(
+                columns={"facility_id": "source_id", "lost": "quantity"}
+            )
+            events = lost_events(stockout, t, "stockout")
+
+        # Check -- the inventory falls by exactly the bikes that left; the lost
+        # demand never left a dock, so it changes no inventory.
+        departed = inventory_before - int(inventory["quantity"].sum())
+        assert departed == int(departures["departed"].sum()), "stockout moves no inventory"
+        return PhaseResult(new_state, events)
 
 
 class FormPotentialTripsPhase(Phase):
-    """Turn the realized departure counts into concrete trips via the OD matrix.
+    """Turn the departure counts into real trips, using the OD matrix.
 
-    Splits each source's departures across destinations by the OD probabilities
-    ``P(target | source, commodity)`` and sets each trip's arrival period from the
-    OD pair's mean historical duration, then expands the aggregate into one
-    ``departed`` flow per bike. In the trivial case the OD matrix is the
-    historical one, so a base run reproduces the historical demand structure.
+    For each source, it spreads the departures over the destinations with the OD
+    probabilities ``P(target | source, commodity)``, sets each trip's arrival
+    period from the average historical duration of that source-target pair, then
+    splits the totals into one ``departed`` flow per bike. In the simple case the
+    OD matrix is the historical one, so a base run repeats the historical demand
+    pattern.
     """
 
     name = "form_potential_trips"
 
-    def execute(self, state, resolved, period):
+    def execute(self, state: SimulationState, resolved: ResolvedModelData,
+                period: PeriodRow) -> PhaseResult:
+        """Turn this period's departure counts into departed flows via the OD matrix."""
+        # Reads -- the departure counts passed on by FormDeparturesPhase.
         t = period.period_id
-        realized = state.intermediates.get("realized_departures")
-        if realized is None or realized.empty:
+        departures = state.intermediates.get("departures")
+        if departures is None or departures.empty:
             return PhaseResult.empty(state)
 
-        departures = realized.rename(columns={"facility_id": "source_id", "realized": "quantity"})
+        # Mechanics -- spread each source's departures over the destinations with
+        # the OD matrix, then split the totals into one departed flow per bike.
+        # (No check: this phase only reshapes counts, it moves no inventory.)
+        departures = departures.rename(columns={"facility_id": "source_id", "departed": "quantity"})
         potential = form_potential_trips(departures, resolved.historical_od_matrix_df, t)
         trips_now = expand_potential_trips(potential, t)
         if trips_now.empty:
             return PhaseResult.empty(state)
-
         events = departed_events(trips_now)
+
+        # Writes -- add the new departed flows to the in-transit set.
         in_transit = pd.concat([state.in_transit, events], ignore_index=True)
         new_state = state.with_in_transit(in_transit)
         return PhaseResult(new_state, events)

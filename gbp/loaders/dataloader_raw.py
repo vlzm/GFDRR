@@ -15,6 +15,7 @@ import requests
 # Raw loaders
 # ---------------------------------------------------------------------------
 def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
+    """Load the raw Citi Bike trip CSV and drop rows with missing key fields."""
     trips_dtypes = {
         'ride_id': 'string',
         'rideable_type': 'string',
@@ -43,6 +44,7 @@ def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
 
 
 def load_gbfs_raw_df(gbfs_base: str) -> pd.DataFrame:
+    """Fetch the GBFS station feed and merge station information with status."""
     station_info = requests.get(f"{gbfs_base}/station_information.json").json()
     station_status = requests.get(f"{gbfs_base}/station_status.json").json()
     info_df = pd.DataFrame(station_info["data"]["stations"])
@@ -52,6 +54,7 @@ def load_gbfs_raw_df(gbfs_base: str) -> pd.DataFrame:
 
 
 def get_stations(trips: pd.DataFrame) -> pd.DataFrame:
+    """Build the unique station table from trip start and end points."""
     parts = []
     for p in ("start", "end"):
         cols = {f"{p}_station_id": "station_id", f"{p}_lat": "lat", f"{p}_lng": "lng"}
@@ -66,6 +69,7 @@ def get_stations(trips: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_stations_capacities(gbfs: pd.DataFrame, stations_df: pd.DataFrame) -> pd.DataFrame:
+    """Return the dock capacity of each installed station seen in the trips."""
     return (
         gbfs.query("is_installed == 1")[["short_name", "capacity"]]
         .drop_duplicates("short_name")
@@ -76,10 +80,12 @@ def get_stations_capacities(gbfs: pd.DataFrame, stations_df: pd.DataFrame) -> pd
 
 
 def get_stations_costs(stations_df: pd.DataFrame) -> pd.DataFrame:
+    """Return the fixed cost of each station (zero for all stations)."""
     return stations_df[["station_id"]].assign(fixed_cost_station=0)
 
 
 def get_depots(rng: np.random.Generator, n: int) -> pd.DataFrame:
+    """Synthesize ``n`` depots at random coordinates within the city box."""
     return pd.DataFrame({
         "depot_id": [f"depot_{i + 1}" for i in range(n)],
         "lat":     rng.uniform(40.68, 40.86, size=n),
@@ -87,7 +93,10 @@ def get_depots(rng: np.random.Generator, n: int) -> pd.DataFrame:
     })
 
 
-def get_depots_capacities(rng: np.random.Generator, depot_capacity: int, depots_df: pd.DataFrame) -> pd.DataFrame:
+def get_depots_capacities(
+    rng: np.random.Generator, depot_capacity: int, depots_df: pd.DataFrame
+) -> pd.DataFrame:
+    """Assign each depot a random capacity around ``depot_capacity``."""
     return depots_df[["depot_id"]].assign(
         capacity=rng.integers(
             int(depot_capacity * 0.75), int(depot_capacity * 1.25), size=len(depots_df)
@@ -96,18 +105,19 @@ def get_depots_capacities(rng: np.random.Generator, depot_capacity: int, depots_
 
 
 def get_depots_costs(rng: np.random.Generator, depots_df: pd.DataFrame) -> pd.DataFrame:
+    """Assign each depot a random fixed cost."""
     return depots_df[["depot_id"]].assign(
         fixed_cost_depot=np.round(rng.uniform(80.0, 200.0, size=len(depots_df)), 2)
     )
 
 
 def get_initial_inventory_df(gbfs_raw: pd.DataFrame, stations_df: pd.DataFrame) -> pd.DataFrame:
-    """Initial inventory split by commodity (classic vs electric).
+    """Split the initial inventory by commodity (classic vs electric).
 
     GBFS ``num_bikes_available`` is the total available count; ``num_ebikes_available``
     is the electric subset, so ``classic = total - ebikes``. If the electric
     field is absent, everything is booked as classic (and you should then keep
-    user flows to classic-only, or electric trips will depart from zero stock).
+    user flows to classic-only, or electric trips will depart from zero inventory).
     Verify the field semantics against the actual payload columns.
     """
     g = (
@@ -118,12 +128,21 @@ def get_initial_inventory_df(gbfs_raw: pd.DataFrame, stations_df: pd.DataFrame) 
     ebikes = g["num_ebikes_available"] if "num_ebikes_available" in g.columns else 0
     classic = g["num_bikes_available"] - ebikes
     return pd.concat([
-        pd.DataFrame({"facility_id": g["facility_id"], "commodity_category": "classic_bike",  "quantity": classic}),
-        pd.DataFrame({"facility_id": g["facility_id"], "commodity_category": "electric_bike", "quantity": ebikes}),
+        pd.DataFrame({
+            "facility_id": g["facility_id"],
+            "commodity_category": "classic_bike",
+            "quantity": classic,
+        }),
+        pd.DataFrame({
+            "facility_id": g["facility_id"],
+            "commodity_category": "electric_bike",
+            "quantity": ebikes,
+        }),
     ], ignore_index=True).reset_index(drop=True)
 
 
 def get_trips_df(trips_raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Select the trip columns the rest of the pipeline needs."""
     cols = [
         'ride_id', 'rideable_type', 'started_at', 'ended_at',
         'start_station_name', 'start_station_id',
@@ -133,19 +152,23 @@ def get_trips_df(trips_raw_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_trucks_df(n_trucks: int) -> pd.DataFrame:
+    """Build a table of ``n_trucks`` trucks with generated ids."""
     truck_ids = [f"truck_{i + 1}" for i in range(n_trucks)]
     return pd.DataFrame({"truck_id": truck_ids})
 
 
 def get_trucks_rates_df(truck_rate: float, df_trucks: pd.DataFrame) -> pd.DataFrame:
+    """Assign the same per-unit rate to every truck."""
     return pd.DataFrame({"truck_id": df_trucks["truck_id"], "rate": truck_rate})
 
 
 def get_trucks_capacities_df(truck_capacity_bikes: int, df_trucks: pd.DataFrame) -> pd.DataFrame:
+    """Assign the same bike capacity to every truck."""
     return pd.DataFrame({"truck_id": df_trucks["truck_id"], "capacity": truck_capacity_bikes})
 
 
 def get_bike_rates_df(electric_bike_rate: float, classic_bike_rate: float) -> pd.DataFrame:
+    """Build the per-unit rate table for the two bike commodities."""
     return pd.DataFrame({
         "rideable_type": ["electric_bike", "classic_bike"],
         "rate": [electric_bike_rate, classic_bike_rate],
