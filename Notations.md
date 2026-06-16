@@ -150,22 +150,4 @@ Classic and electric bikes share the same physical docks but are counted per
 
 ---
 
-## Known drift to fix
-
-None outstanding. The whole `gbp/` package was audited and brought to canon:
-
-- `stock` (variables, `stock_keys`, and all prose) → `inventory` across the
-  simulator (`phases.py`, `mechanics.py`, `state.py`, `validation.py`,
-  `engine.py`), `journal.py`, and `loaders/`.
-- the `realized` departure column/frame → `departed` / `departures`; the
-  `realized` *adjective* (planned-vs-actual: `realized_target_id`,
-  `realized_end_period`, "realized docking") stays — that is its canonical sense.
-- `placed` / `placed_batches` → `redirected` / `redirected_batches`;
-  `dispatched` → `departed`; `shortfall` → `lost` (loss) or `leftover` (rounding);
-  "moving set" → "in-transit".
-- `origin` / `destination` outside the OD matrix → `source` / `target` (the
-  `origins` local in `_nearest_free_station`, the loss-side prose and the
-  derived-observation docstrings in `journal.py` and `state.py`). The
-  Origin–Destination matrix itself keeps `origin` / `destination`.
-
 When new drift appears, list it here as a target for the audit skill.
