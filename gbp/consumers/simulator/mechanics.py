@@ -243,8 +243,8 @@ def form_potential_trips(
     dep = departures[departures["quantity"] > 0]
     if dep.empty:
         return pd.DataFrame({c: pd.Series(dtype="object") for c in cols})
-
-    m = dep.merge(od_matrix, on=["source_id", "commodity_category"], how="left")
+    
+    m = dep.merge(od_matrix[od_matrix['period_id'] == period_id].drop(columns = ['period_id']), on=["source_id", "commodity_category"], how="left")
     m = m[m["probability"].notna()].copy()
     m["expected"] = m["quantity"] * m["probability"]
     m["base"] = np.floor(m["expected"]).astype("int64")

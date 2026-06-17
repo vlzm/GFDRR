@@ -216,7 +216,9 @@ class RawModelData:
 
         # Stations
         self.stations_df = get_stations(self.trips_raw_df)
-        self.stations_capacities_df = get_stations_capacities(self.gbfs_raw_df, self.stations_df)
+        # self.stations_capacities_df = get_stations_capacities(self.gbfs_raw_df, self.stations_df)
+        self.stations_capacities_df = self.stations_df[['station_id']]
+        self.stations_capacities_df['capacity'] = 100
         self.stations_costs_df = get_stations_costs(self.stations_df)
 
         # Depots

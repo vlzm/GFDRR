@@ -16,8 +16,10 @@ from gbp.model import (
     arrived_events,
     departed_events,
     finalize_flows,
-    observe,
 )
+
+from gbp.model import flows_to_departures, flows_to_arrivals, flows_to_od_matrix, get_inventory_df
+
 
 # ---------------------------------------------------------------------------
 # Period grid (the simulation clock)
@@ -243,24 +245,6 @@ def get_saturated_inventory_df(
     inv["quantity"] = quantity
     return inv.reset_index(drop=True)
 
-
-def get_saturated_capacities_df(
-    facilities_df: pd.DataFrame, capacity: int = 1_000_000
-) -> pd.DataFrame:
-    """Artificial dock capacities: every facility gets ``capacity`` slots.
-
-    Pairs with :func:`get_saturated_inventory_df` so the overflow-redirect rule
-    never takes effect in the base scenario. Classic and electric bikes share the same
-    physical docks, so the saturated occupancy of a station is the per-commodity
-    inventory summed across commodities; ``capacity`` must therefore exceed
-    ``n_commodities * saturation_quantity`` (with headroom for net arrivals) for
-    the docks to stay non-binding -- see the caller in :class:`ResolvedModelData`.
-    """
-    out = facilities_df[["facility_id"]].copy()
-    out["capacity"] = capacity
-    return out.reset_index(drop=True)
-
-
 # ---------------------------------------------------------------------------
 # Resolved model data container
 # ---------------------------------------------------------------------------
@@ -293,8 +277,7 @@ class ResolvedModelData:
         self,
         raw: RawModelData,
         period_len: pd.Timedelta = DEFAULT_PERIOD_LEN,
-        saturate_stock: bool = False,
-        saturation_quantity: int = 1_000_000,
+        scale_capacity_factor: int = 1,
     ) -> None:
         # Entities
         self.facilities_df = get_facilities_df(raw.stations_df, raw.depots_df)
@@ -306,6 +289,9 @@ class ResolvedModelData:
         self.facilities_capacities_df = get_facilities_capacities_df(
             raw.stations_capacities_df, raw.depot_capacities_df
         )
+        self.facilities_capacities_df["capacity"] = self.facilities_capacities_df["capacity"]*scale_capacity_factor
+        # if capacity < 10 then capacity = 10
+        self.facilities_capacities_df["capacity"] = self.facilities_capacities_df["capacity"].apply(lambda x: max(x, 10))
         self.resources_capacities_df = get_resources_capacities_df(raw.trucks_capacities_df)
         self.facilities_costs_df = get_facilities_costs_df(
             raw.stations_costs_df, raw.depot_costs_df
@@ -319,34 +305,22 @@ class ResolvedModelData:
         self.period_len = period_len
         self.t0 = raw.trips_df["started_at"].min().floor("h")
         self.periods_df = get_periods_df(raw.trips_df, self.t0, period_len)
-
-        # Initial inventory (GBFS snapshot, or artificial saturated inventory for
-        # the base replay -- see the ``saturate_stock`` parameter).
-        if saturate_stock:
-            self.initial_inventory_df = get_saturated_inventory_df(
-                self.facilities_df, self.commodities_categories_df, saturation_quantity
-            )
-            # Docks are shared across commodities, so a station's saturated
-            # occupancy is saturation_quantity per commodity summed over all
-            # commodities. Give the capacity one extra commodity's worth of slots
-            # as headroom so the overflow-redirect rule never triggers.
-            n_commodities = len(self.commodities_categories_df)
-            self.facilities_capacities_df = get_saturated_capacities_df(
-                self.facilities_df, saturation_quantity * (n_commodities + 1)
-            )
-        else:
-            self.initial_inventory_df = get_initial_inventory_df(raw.gbfs_raw_df, raw.stations_df)
-
+  
         # Historical observations: the marginals of the flow log, assembled by
         # the shared ``observe`` bundle so they match the simulated set below.
         self.historical_flows_df = get_historical_flows_df(raw.trips_df, self.t0, period_len)
         self.historical_resources_df = empty_resources_obs_df()
-        hist = observe(self.historical_flows_df, self.initial_inventory_df)
-        self.historical_inventory_df = hist.inventory
-        self.historical_demand_df = hist.demand
-        self.historical_departures_df = hist.departures
-        self.historical_arrivals_df = hist.arrivals
-        self.historical_od_matrix_df = hist.od_matrix
+        
+        historical_departures_df = flows_to_departures(self.historical_flows_df)
+
+        self.initial_inventory_df = historical_departures_df.groupby(['facility_id','commodity_category'])['quantity'].max().reset_index().sort_values('quantity', ascending=False).reset_index(drop=True)
+        self.initial_inventory_df['quantity'] = self.initial_inventory_df['quantity'] + 10
+
+        self.historical_inventory_df = get_inventory_df(self.historical_flows_df, self.initial_inventory_df)
+        self.historical_demand_df = historical_departures_df
+        self.historical_departures_df = historical_departures_df
+        self.historical_arrivals_df = flows_to_arrivals(self.historical_flows_df)
+        self.historical_od_matrix_df = flows_to_od_matrix(self.historical_flows_df)
 
         # Simulated observations -- filled by attach_simulation after a run
         self.simulated_flows_df: pd.DataFrame | None = None
@@ -389,9 +363,9 @@ def attach_simulation(
     resolved.simulated_resources_df = (
         simulated_resources_df if simulated_resources_df is not None else empty_resources_obs_df()
     )
-    sim = observe(simulated_flows_df, resolved.initial_inventory_df)
-    resolved.simulated_inventory_df = sim.inventory
-    resolved.simulated_demand_df = sim.demand
-    resolved.simulated_departures_df = sim.departures
-    resolved.simulated_arrivals_df = sim.arrivals
-    resolved.simulated_od_matrix_df = sim.od_matrix
+    resolved.simulated_inventory_df = get_inventory_df(resolved.simulated_flows_df, resolved.initial_inventory_df)
+    simulated_departures_df = flows_to_departures(resolved.simulated_flows_df)
+    resolved.simulated_demand_df = simulated_departures_df
+    resolved.simulated_departures_df = simulated_departures_df
+    resolved.simulated_arrivals_df = flows_to_arrivals(resolved.simulated_flows_df)
+    resolved.simulated_od_matrix_df = flows_to_od_matrix(resolved.simulated_flows_df)

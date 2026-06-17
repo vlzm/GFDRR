@@ -304,30 +304,13 @@ def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
 
 
 def flows_to_od_matrix(flows: pd.DataFrame) -> pd.DataFrame:
-    """Origin-destination demand model from ``departed`` events.
-
-    Aggregates the journal's intended origin->destination structure of demand
-    (not the realized docking, which may be redirected above baseline). For each
-    ``(source_id, planned_target_id, commodity_category)``:
-
-    - ``count`` -- number of trips on the pair,
-    - ``probability`` -- ``P(target | source, commodity)``, normalized within
-      each ``(source, commodity)``,
-    - ``duration`` -- mean trip length in periods (``planned_end - start``),
-      rounded to whole periods.
-
-    The probability and duration columns turn the matrix into a generative demand
-    model: given a count of departures from a source, they say where the bikes go
-    and when they dock. In the trivial case ``simulated_od_matrix_df`` equals this
-    historical matrix.
-    """
     dep = flows[flows["event_type"] == "departed"].copy()
     dep["duration"] = dep["planned_end_period"] - dep["start_period"]
     od = (
-        dep.groupby(["source_id", "planned_target_id", "commodity_category"], as_index=False)
+        dep.groupby(["source_id", "planned_target_id", "period_id", "commodity_category"], as_index=False)
         .agg(count=("quantity", "sum"), duration=("duration", "mean"))
     )
-    totals = od.groupby(["source_id", "commodity_category"])["count"].transform("sum")
+    totals = od.groupby(["source_id", "period_id","commodity_category"])["count"].transform("sum")
     od["probability"] = od["count"] / totals
     od["duration"] = od["duration"].round().astype("Int64")
     return od
@@ -502,35 +485,3 @@ def check_flow_closure(flows: pd.DataFrame) -> list[str]:
     if doubled:
         violations.append(f"I2 flow closure: {doubled} flows have multiple terminal events")
     return violations
-
-
-def observe(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> Observations:
-    """Derive the full set of marginals from a flow journal.
-
-    The single place that defines *what is in the observation set*. It is called
-    once for the historical journal and once for each simulated one, so the two
-    sets are identical by construction (in the base scenario their values are
-    equal too).
-
-    Parameters
-    ----------
-    flows : pandas.DataFrame
-        A flow-event log (historical or finalized simulated).
-    initial_inventory : pandas.DataFrame
-        Starting inventory with ``facility_id``, ``commodity_category``, ``quantity``.
-
-    Returns
-    -------
-    Observations
-        The inventory, departures, arrivals, demand and OD-matrix marginals.
-    """
-    departures = flows_to_departures(flows)
-    return Observations(
-        inventory=get_inventory_df(flows, initial_inventory),
-        departures=departures,
-        arrivals=flows_to_arrivals(flows),
-        # In an exact replay every desired trip departs, so realized demand is
-        # read off the journal as the departures (see ``state_demand_df``).
-        demand=departures,
-        od_matrix=flows_to_od_matrix(flows),
-    )
