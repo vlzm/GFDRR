@@ -175,7 +175,7 @@ def lost_events(losses: pd.DataFrame, period_id: int, reason: str) -> pd.DataFra
     ``lost`` events never touch inventory (a stockout bike never left; a dock-full
     bike already left at ``departed`` and docks nowhere). They are pure
     accounting: they make a loss visible in the journal and close a dock-full
-    flow's spine. ``realized_target_id`` and ``realized_end_period`` are always NA
+    flow's lifecycle. ``realized_target_id`` and ``realized_end_period`` are always NA
     -- a lost trip reaches no target.
 
     Parameters
@@ -423,7 +423,7 @@ class Observations:
         Inflow per period and target; see :func:`flows_to_arrivals`.
     demand : pandas.DataFrame
         Realized user demand; equals ``departures`` in an exact replay (see
-        :func:`flows_to_departures` and the note on demand gating).
+        :func:`flows_to_departures` and the note on demand limiting).
     od_matrix : pandas.DataFrame
         Origin-destination demand model; see :func:`flows_to_od_matrix`.
     """
@@ -446,7 +446,7 @@ def check_demand_split(flows: pd.DataFrame, demand: pd.DataFrame) -> list[str]:
 
     Per ``(period_id, facility_id, commodity_category)`` the input demand must
     equal ``Σ departed + Σ lost(reason="stockout")``. Checkable because ``demand``
-    is a scenario input, not derived from the journal. Dormant in an exact replay
+    is a scenario input, not derived from the journal. Never triggers in an exact replay
     (no stockout, so ``departed == demand``).
     """
     keys = ["period_id", "facility_id", "commodity_category"]
@@ -456,34 +456,34 @@ def check_demand_split(flows: pd.DataFrame, demand: pd.DataFrame) -> list[str]:
     }).rename(columns={"quantity": "demand"})
     served = flows_to_departures(flows).rename(columns={"quantity": "departed"})
     lost = flows[(flows["event_type"] == "lost") & (flows["reason"] == "stockout")]
-    stockout_keys = ["period_id", "source_id", "commodity_category"]
-    stockout = (
-        lost.groupby(stockout_keys, as_index=False)["quantity"].sum()
-        .rename(columns={"source_id": "facility_id", "quantity": "stockout"})
+    lost_keys = ["period_id", "source_id", "commodity_category"]
+    lost_demand = (
+        lost.groupby(lost_keys, as_index=False)["quantity"].sum()
+        .rename(columns={"source_id": "facility_id", "quantity": "lost_demand"})
     )
     merged = (
         demand.merge(served, on=keys, how="outer")
-        .merge(stockout, on=keys, how="outer")
+        .merge(lost_demand, on=keys, how="outer")
         .fillna(0)
     )
-    bad = merged[merged["demand"] != merged["departed"] + merged["stockout"]]
+    bad = merged[merged["demand"] != merged["departed"] + merged["lost_demand"]]
     return [
         f"I1 {r.facility_id}/{r.commodity_category} p{r.period_id}: demand={int(r.demand)} "
-        f"!= departed={int(r.departed)} + stockout={int(r.stockout)}"
+        f"!= departed={int(r.departed)} + lost_demand={int(r.lost_demand)}"
         for r in bad.itertuples(index=False)
     ]
 
 
-def check_spine_closure(flows: pd.DataFrame) -> list[str]:
+def check_flow_closure(flows: pd.DataFrame) -> list[str]:
     """I2 -- every flow due by the horizon closes with exactly one terminal event.
 
-    A flow's spine opens with ``departed`` and closes with exactly one of
+    A flow's lifecycle opens with ``departed`` and closes with exactly one of
     ``arrived``, ``redirected`` or ``lost`` (dock-full). A flow whose
     ``planned_end_period`` falls past the last period of the run is legitimately
     still in transit -- the run window ended mid-trip -- so only flows due by the
     horizon are required to have closed. More than one terminal is always a double
-    close. Stockout losses carry no ``flow_id`` and are not spines, so they are
-    excluded.
+    close. Stockout losses carry no ``flow_id`` and have no lifecycle of their own,
+    so they are excluded.
     """
     if flows.empty:
         return []
@@ -497,10 +497,10 @@ def check_spine_closure(flows: pd.DataFrame) -> list[str]:
     due = departed[departed["planned_end_period"] <= last_period]
     stuck = int((due["n"] == 0).sum())
     if stuck:
-        violations.append(f"I2 spine closure: {stuck} flows due by the horizon never closed")
+        violations.append(f"I2 flow closure: {stuck} flows due by the horizon never closed")
     doubled = int((departed["n"] > 1).sum())
     if doubled:
-        violations.append(f"I2 spine closure: {doubled} flows have multiple terminal events")
+        violations.append(f"I2 flow closure: {doubled} flows have multiple terminal events")
     return violations
 
 

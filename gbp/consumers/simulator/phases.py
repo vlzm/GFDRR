@@ -14,6 +14,8 @@ level.
 
 import pandas as pd
 
+from .config import EnvironmentConfig
+
 from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import arrived_events, departed_events, lost_events, redirected_events
 
@@ -49,7 +51,7 @@ class Phase:
         return self._schedule.should_run(period)
 
     def execute(self, state: SimulationState, resolved: ResolvedModelData,
-                period: PeriodRow) -> PhaseResult:
+                period: PeriodRow, config: EnvironmentConfig) -> PhaseResult:
         """Apply the phase to the state; return the next state and emitted events."""
         raise NotImplementedError
 
@@ -81,7 +83,7 @@ class DockArrivals(Phase):
         self.name = f"dock_arrivals_{when}"
 
     def execute(self, state: SimulationState, resolved: ResolvedModelData,
-                period: PeriodRow) -> PhaseResult:
+                period: PeriodRow, config: EnvironmentConfig) -> PhaseResult:
         """Dock this period's arriving bikes, redirect the overflow, lose what fits nowhere."""
         # Reads -- the in-transit bikes that should dock this period, the dock
         # capacities, and the starting inventory the check below uses.
@@ -157,13 +159,15 @@ class FormDeparturesPhase(Phase):
     name = "form_departures"
 
     def execute(self, state: SimulationState, resolved: ResolvedModelData,
-                period: PeriodRow) -> PhaseResult:
+                period: PeriodRow, config: EnvironmentConfig) -> PhaseResult:
         """Split this period's demand into departures and stockout losses, bounded by inventory."""
         # Reads -- the demand for this period and the starting inventory the check
         # below uses.
         t = period.period_id
         demand = resolved.historical_demand_df
-        demand_now = demand[demand["period_id"] == t]
+        demand_now = demand[demand["period_id"] == t].copy()
+        demand_scale_factor = getattr(config, "demand_scale_factor", 1.0)
+        demand_now.loc[:, 'quantity'] = (demand_now['quantity'] * demand_scale_factor).round().astype("Int64")
         if demand_now.empty:
             return PhaseResult.empty(state)
         inventory_before = int(state.state_inventory_df["quantity"].sum())
@@ -186,10 +190,10 @@ class FormDeparturesPhase(Phase):
                      .with_intermediates(departures=departures))
         events = None
         if not lost_demand.empty:
-            stockout = lost_demand.rename(
+            lost_demand = lost_demand.rename(
                 columns={"facility_id": "source_id", "lost": "quantity"}
             )
-            events = lost_events(stockout, t, "stockout")
+            events = lost_events(lost_demand, t, "stockout")
 
         # Check -- the inventory falls by exactly the bikes that left; the lost
         # demand never left a dock, so it changes no inventory.
@@ -212,7 +216,7 @@ class FormPotentialTripsPhase(Phase):
     name = "form_potential_trips"
 
     def execute(self, state: SimulationState, resolved: ResolvedModelData,
-                period: PeriodRow) -> PhaseResult:
+                period: PeriodRow, config: EnvironmentConfig) -> PhaseResult:
         """Turn this period's departure counts into departed flows via the OD matrix."""
         # Reads -- the departure counts passed on by FormDeparturesPhase.
         t = period.period_id

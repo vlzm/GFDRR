@@ -4,34 +4,18 @@ Historical replay (minimal working version). The base scenario re-emits every
 historical trip exactly, so that ``simulated_flows_df == historical_flows_df``.
 Inventory and in-transit are tracked as real state. The constraints that *change*
 outcomes (dock overflow -> redirect, stockout -> lost) are fully implemented in
-the phases, but stay dormant in an exact replay (saturated inventory and capacity)
+the phases, but do nothing in an exact replay (saturated inventory and capacity)
 and only become meaningful once demand is pushed above the historical baseline.
 """
-
-import dataclasses
 
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import empty_flows_journal, empty_in_transit, finalize_flows
 
-from .phases import Phase
+from .config import EnvironmentConfig
 from .state import PeriodRow, SimulationState, SimulatorConfigError
 from .validation import RunInvariantError, validate_run
-
-
-@dataclasses.dataclass
-class EnvironmentConfig:
-    """Settings for one run.
-
-    The ordered phases to run, the seed, the scenario id, and whether to check
-    the run-level invariants at the end.
-    """
-
-    phases: list[Phase]
-    seed: int
-    scenario_id: str
-    validate: bool = False
 
 
 def init_state(resolved: ResolvedModelData, first_period: PeriodRow) -> SimulationState:
@@ -79,7 +63,7 @@ class Environment:
     @property
     def is_done(self) -> bool:
         """True once every period has been stepped."""
-        return self._period_cursor >= len(self._periods)
+        return self._period_cursor >= len(self._periods[:self._config.number_of_periods])
 
     def run(self) -> SimulationState:
         """Step every period to the end, optionally check invariants, return the state."""
@@ -96,7 +80,7 @@ class Environment:
         period = self._periods[self._period_cursor]
         for phase in self._config.phases:
             if phase.should_run(period):
-                result = phase.execute(self._state, self._resolved, period)
+                result = phase.execute(self._state, self._resolved, period, self._config)
                 self._state = result.state.append_flows(result.events)
 
         self._period_cursor += 1

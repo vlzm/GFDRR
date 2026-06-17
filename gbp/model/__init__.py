@@ -11,14 +11,14 @@ The public surface is the journal vocabulary: event constructors
 (``departed_events``, ``arrived_events``, ``redirected_events``, ``lost_events``),
 empty-state factories, ``finalize_flows``, the ``flows_to_*`` projections,
 ``observe`` with its ``Observations`` result, and the journal-level run invariants
-(``check_demand_split``, ``check_spine_closure``).
+(``check_demand_split``, ``check_flow_closure``).
 """
 
 from .journal import (
     Observations,
     arrived_events,
     check_demand_split,
-    check_spine_closure,
+    check_flow_closure,
     departed_events,
     empty_flows_journal,
     empty_in_transit,
@@ -36,7 +36,7 @@ __all__ = [
     "Observations",
     "arrived_events",
     "check_demand_split",
-    "check_spine_closure",
+    "check_flow_closure",
     "departed_events",
     "empty_flows_journal",
     "empty_in_transit",

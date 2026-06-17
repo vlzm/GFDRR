@@ -22,9 +22,9 @@ from .state import adjust_inventory, dock_deltas
 # ---------------------------------------------------------------------------
 # Capacity-aware docking and overflow redirect
 # ---------------------------------------------------------------------------
-# The part that bites above the historical baseline: when a station's docks are
+# The part that only matters above the historical baseline: when a station's docks are
 # full, arriving bikes overflow and are redirected to the nearest station with a
-# free dock. Dormant in an exact replay, where capacity never binds.
+# free dock. Never triggers in an exact replay, where capacity is never the limit.
 def free_docks(inventory: pd.DataFrame, capacities: pd.DataFrame) -> pd.Series:
     """Free dock slots per facility: capacity minus bikes currently docked.
 
@@ -184,7 +184,7 @@ def realize_departures(demand_now: pd.DataFrame, inventory: pd.DataFrame) -> pd.
     """Departures per (facility, commodity): ``min(demand, inventory)``.
 
     Demand above the inventory is lost to a stockout; inventory is per commodity,
-    so classic and electric demand are limited independently. Dormant in an exact
+    so classic and electric demand are limited independently. Never triggers in an exact
     replay, where inventory always covers the historical demand.
 
     Parameters
@@ -235,10 +235,10 @@ def form_potential_trips(
     Returns
     -------
     pandas.DataFrame
-        ``period_id``, ``source_id``, ``target_id``, ``commodity_category``,
+        ``period_id``, ``source_id``, ``planned_target_id``, ``commodity_category``,
         ``quantity``, ``planned_end_period`` -- only rows with ``quantity > 0``.
     """
-    cols = ["period_id", "source_id", "target_id", "commodity_category",
+    cols = ["period_id", "source_id", "planned_target_id", "commodity_category",
             "quantity", "planned_end_period"]
     dep = departures[departures["quantity"] > 0]
     if dep.empty:
@@ -263,7 +263,7 @@ def form_potential_trips(
     return pd.DataFrame({
         "period_id":          period_id,
         "source_id":          m["source_id"].values,
-        "target_id":          m["planned_target_id"].values,
+        "planned_target_id":  m["planned_target_id"].values,
         "commodity_category": m["commodity_category"].values,
         "quantity":           m["qty"].astype("Int64").values,
         "planned_end_period": (period_id + m["duration"]).astype("Int64").values,
@@ -282,7 +282,7 @@ def expand_potential_trips(potential_trips: pd.DataFrame, period_id: int) -> pd.
     return pd.DataFrame({
         "flow_id":            "sim_" + str(period_id) + "_" + rep.index.astype("string"),
         "source_id":          rep["source_id"],
-        "planned_target_id":  rep["target_id"],
+        "planned_target_id":  rep["planned_target_id"],
         "commodity_category": rep["commodity_category"],
         "start_period":       period_id,
         "planned_end_period": rep["planned_end_period"],

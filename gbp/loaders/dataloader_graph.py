@@ -225,11 +225,11 @@ def get_saturated_inventory_df(
 
     Every station holds ``quantity`` bikes of each commodity.
     Used by the base scenario instead of the GBFS snapshot. The snapshot is a
-    *current* observation, unrelated to the historical start state, so gating
+    *current* observation, unrelated to the historical start state, so limiting
     demand against it starves the replay (most departures lose to a stockout that
     never happened historically). With inventory far above any period's demand the
-    gate never binds, every historical departure departs, and the run reproduces
-    the historical departures exactly even though demand is still gated and trips
+    limit never takes effect, every historical departure departs, and the run reproduces
+    the historical departures exactly even though demand is still limited and trips
     are still formed from the OD matrix.
 
     Returns
@@ -250,7 +250,7 @@ def get_saturated_capacities_df(
     """Artificial dock capacities: every facility gets ``capacity`` slots.
 
     Pairs with :func:`get_saturated_inventory_df` so the overflow-redirect rule
-    never binds in the base scenario. Classic and electric bikes share the same
+    never takes effect in the base scenario. Classic and electric bikes share the same
     physical docks, so the saturated occupancy of a station is the per-commodity
     inventory summed across commodities; ``capacity`` must therefore exceed
     ``n_commodities * saturation_quantity`` (with headroom for net arrivals) for
@@ -282,7 +282,7 @@ class ResolvedModelData:
         If True, replace the GBFS initial inventory and the dock capacities with
         artificial saturated ones (every station holding far above demand, every
         facility with effectively unbounded docks). This is the base-replay setup:
-        demand gating and overflow redirect stay in the pipeline but never bind,
+        demand limiting and overflow redirect stay in the pipeline but never take effect,
         so the run reproduces the historical departures exactly. Defaults to False.
     saturation_quantity : int, optional
         The per-station inventory and per-facility capacity used when
@@ -329,7 +329,7 @@ class ResolvedModelData:
             # Docks are shared across commodities, so a station's saturated
             # occupancy is saturation_quantity per commodity summed over all
             # commodities. Give the capacity one extra commodity's worth of slots
-            # as headroom so the overflow-redirect rule stays dormant.
+            # as headroom so the overflow-redirect rule never triggers.
             n_commodities = len(self.commodities_categories_df)
             self.facilities_capacities_df = get_saturated_capacities_df(
                 self.facilities_df, saturation_quantity * (n_commodities + 1)

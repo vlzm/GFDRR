@@ -10,13 +10,13 @@ in-transit set and the initial inventory, so they live here in the simulator lay
 All checks return a list of human-readable violations (empty == holds);
 ``validate_run`` collects I1-I4 and the engine raises :class:`RunInvariantError`
 if the combined list is non-empty. Like the rest of the constraint logic, every
-invariant is dormant in an exact replay and only bites above the baseline.
+invariant has no effect in an exact replay and only matters above the baseline.
 """
 
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
-from gbp.model import check_demand_split, check_spine_closure, finalize_flows, get_inventory_df
+from gbp.model import check_demand_split, check_flow_closure, finalize_flows, get_inventory_df
 
 from .state import SimulationState
 
@@ -47,7 +47,7 @@ def validate_run(state: SimulationState, resolved: ResolvedModelData) -> list[st
 
     violations: list[str] = []
     violations += check_demand_split(flows, resolved.historical_demand_df)  # I1
-    violations += check_spine_closure(flows)  # I2
+    violations += check_flow_closure(flows)  # I2
     violations += _check_projection_consistency(state.state_inventory_df, flows, initial)  # I3
     violations += _check_conservation(state, flows, initial)  # I4
     return violations
@@ -83,22 +83,22 @@ def _check_projection_consistency(
 def _check_conservation(
     state: SimulationState, flows: pd.DataFrame, initial: pd.DataFrame
 ) -> list[str]:
-    """I4 -- bikes are conserved across inventory, the dock-full sink and transit.
+    """I4 -- bikes are conserved across inventory, dock-full losses and transit.
 
     ``Σ initial == Σ final_inventory + Σ lost(reason="dock_full") + Σ in_transit``.
     At run end a bike is either docked somewhere (inventory), gone from the system
-    (the dock-full sink) or still riding because the run window ended mid-trip (in
+    (lost to a full dock) or still riding because the run window ended mid-trip (in
     transit). A stockout bike never left a dock and a redirect keeps the bike in
-    the system, so neither is a sink.
+    the system, so neither leaves the system.
     """
     initial_total = int(initial["quantity"].sum())
     final_total = int(state.state_inventory_df["quantity"].sum())
-    sink = flows[(flows["event_type"] == "lost") & (flows["reason"] == "dock_full")]
-    sink_total = int(sink["quantity"].sum())
+    lost_dock_full = flows[(flows["event_type"] == "lost") & (flows["reason"] == "dock_full")]
+    lost_dock_full_total = int(lost_dock_full["quantity"].sum())
     transit_total = int(state.in_transit["quantity"].sum()) if not state.in_transit.empty else 0
-    if initial_total != final_total + sink_total + transit_total:
+    if initial_total != final_total + lost_dock_full_total + transit_total:
         return [
             f"I4 conservation: initial={initial_total} != final={final_total} + "
-            f"dock_full_sink={sink_total} + in_transit={transit_total}"
+            f"lost_dock_full={lost_dock_full_total} + in_transit={transit_total}"
         ]
     return []
