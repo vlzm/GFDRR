@@ -23,6 +23,32 @@ part that lies and says it already understood.
    Generalize from two points, not from imagination.
 5. **Polish — last**: names, format, optimization. Never first.
 
+## Head, paper, code — when each
+
+**Head** — for the single next move: what to do next, which guess to test, which
+example to pick. Not for holding the whole task. Sign the head is enough: I can say
+the whole answer out loud without pausing to rebuild it. The moment I catch "wait,
+where was I" or re-derive something I already worked out — go to paper.
+
+**Paper** — for understanding one concrete case: the input state, the output rows,
+the invariants. Cheap to be wrong here and to find out what I actually need. Sign of
+"won't fit in the head → paper": more than one thing changes over time; I need to
+check several things against each other; a "what if" showed up.
+
+**Code** — to make it real, runnable, and checkable, and to lock in what I
+understood (so I never re-derive it). Sign of "paper → code": the by-hand trace has
+settled and I trust it; or I am no longer sure the by-hand trace is even right (run
+it and find out); or re-tracing by hand got tedious (let the machine trace it).
+
+## The card runs per scenario
+
+The card is one loop **per scenario**, not one pass for the whole project. Between
+scenarios, code goes in the middle: the card (steps 1–3) gives the spec, then I make
+exactly that one scenario work in code and check its output against the rows I wrote
+by hand — the paper case becomes the test. Only then do I take the next, harder
+scenario. "Generalize" (step 4) is a refactor of working code when a new case forces
+it, not a paper design of everything up front.
+
 ## When I'm pulled into my head
 
 - **"What if" is not an order to think the general case. It is a new example for
