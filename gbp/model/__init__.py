@@ -8,7 +8,8 @@ one producer or consumer: the loaders and the simulator both depend on it, and
 it depends on neither.
 
 The public surface is the journal vocabulary: event constructors
-(``departed_events``, ``arrived_events``, ``redirected_events``, ``lost_events``),
+(``departed_events``, ``arrived_events``, ``redirected_events``,
+``redirect_continuation_events``, ``lost_events``),
 empty-state factories, ``finalize_flows``, the ``flows_to_*`` projections,
 and the journal-level run invariants (``check_demand_split``, ``check_flow_closure``).
 """
@@ -26,6 +27,7 @@ from .journal import (
     flows_to_od_matrix,
     get_inventory_df,
     lost_events,
+    redirect_continuation_events,
     redirected_events,
 )
 
@@ -42,5 +44,6 @@ __all__ = [
     "flows_to_od_matrix",
     "get_inventory_df",
     "lost_events",
+    "redirect_continuation_events",
     "redirected_events",
 ]

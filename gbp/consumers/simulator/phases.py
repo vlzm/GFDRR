@@ -17,7 +17,13 @@ import pandas as pd
 from .config import EnvironmentConfig
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
-from gbp.model import arrived_events, departed_events, lost_events, redirected_events
+from gbp.model import (
+    arrived_events,
+    departed_events,
+    lost_events,
+    redirect_continuation_events,
+    redirected_events,
+)
 
 from .mechanics import (
     dock_up_to_capacity,
@@ -114,8 +120,17 @@ class DockArrivals(Phase):
             )
             n_redirected, n_lost = len(redirected), len(lost)
             if not redirected.empty:
+                # A redirect is two arcs: the bounce off the full station B (the
+                # ``redirected`` event, no docking) and the continuation B->C (a
+                # move-1 ``departed`` + ``arrived``). The continuation docks the
+                # bike at C in this same phase, so its move-1 ``departed`` never
+                # joins ``in_transit`` -- it is journalled here and closed at once.
                 events = pd.concat(
-                    [events, redirected_events(redirected, redirected["realized_target_id"], t)],
+                    [
+                        events,
+                        redirected_events(redirected, t),
+                        redirect_continuation_events(redirected, t),
+                    ],
                     ignore_index=True,
                 )
                 inventory = adjust_inventory(

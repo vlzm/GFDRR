@@ -49,9 +49,10 @@ projection of them. This is the anchor; read it first.
 
 | Column | What it holds |
 |---|---|
-| `event_id` | Monotonic id of the event, assigned at `finalize_flows`. |
-| `period_id` | The period the event happened in (§8). |
 | `flow_id` | Id of the flow this event belongs to (§3). |
+| `move_id` | Arc index inside the trip, `0..m`. One physical edge of the trip; a redirect adds a second arc (`move_id = 1`). Set by the builders. |
+| `event_id` | Event ordinal inside the trip, `0..n`, set by the builders at emit time. Row uniqueness is the pair `(flow_id, event_id)`. |
+| `period_id` | The period the event happened in (§8). |
 | `flow_type` | The kind of flow. Only value today: `user_trip`. |
 | `event_type` | One of the four outcomes: `departed`, `arrived`, `redirected`, `lost` (§1). |
 | `commodity_category` | The bike type (§9). |
@@ -65,6 +66,23 @@ projection of them. This is the anchor; read it first.
 | `quantity` | Bikes in the event. One per bike after expansion (§3). |
 | `reason` | Why a flow did not simply arrive: `stockout` or `dock_full`; NA otherwise (§1). |
 
+**Two arcs and the two roles of `departed`.** A normal trip is one arc
+(`move_id = 0`): a `departed` then an `arrived`. A redirect is **two** arcs: the
+bike reaches its full planned target, bounces (`redirected`, still `move_id = 0`),
+then departs again on a second arc (`move_id = 1`) to the free station it docks at.
+So a `departed` means one of two things:
+
+- `departed` with `move_id == 0` — a **real user departure** from a dock (`−1` to
+  the source's inventory; it is the outflow and the trip the OD model learns from).
+- `departed` with `move_id >= 1` — a **redirect continuation leg** (pure
+  transport). The bike never occupied a dock at the full station it left, so this
+  event changes **no** inventory and is **not** demand or outflow.
+
+Every reader that means "a user departure" filters `move_id == 0`
+(`flows_to_departures`, `flows_to_od_matrix`, the `−1` in `get_inventory_df`).
+`lost` always has `move_id = 0`: a stockout has no arc, a dock-full loss has the
+single arc of an ordinary trip.
+
 ---
 
 ## 1. The four flow outcomes and the two reasons
@@ -76,11 +94,15 @@ outcomes — the `event_type` values, the most important words here.
 |---|---|---|---|
 | `departed` | A bike left its source. Opens the flow. | `departed_events` | `dispatched`, `released` |
 | `arrived` | A bike docked at its planned target. | `arrived_events` | — |
-| `redirected` | A bike docked at a *different* station because the planned target was full. | `redirected_events` | `placed`, `rerouted` |
+| `redirected` | A bike *bounced* off its full planned target; it docks at a different station on its second arc (`move_id = 1`). The bounce itself docks nowhere. | `redirected_events` | `placed`, `rerouted` |
 | `lost` | A trip that did not happen / a bike that left the system. | `lost_events` | `shortfall`, `missing`, `dropped`, `failed` |
 
-*Dock* is the verb for landing a bike; both `arrived` and `redirected` dock a
-bike. When you mean one specific outcome, use its event word, not `docked`.
+*Dock* is the verb for landing a bike. Only `arrived` docks a bike: it ends a
+normal trip, and it also ends a redirect's second arc (so a redirected bike's real
+docking is its final `arrived`). `redirected` is now the intermediate *bounce* off
+a full station — the bike did not dock there — so it is **not** a docking event
+(`DOCKING_EVENT_TYPES = ["arrived"]`). When you mean one specific outcome, use its
+event word, not `docked`.
 
 **The `reason` tags.** When a flow does not simply arrive, the `reason` field says
 why. There are exactly two values, and they are **tags on a `lost` (or
@@ -90,8 +112,11 @@ why. There are exactly two values, and they are **tags on a `lost` (or
 - `dock_full` — the planned target had no free dock. If another station had one,
   the outcome is `redirected`; if none did, it is `lost`.
 
-So demand splits exactly into `departed + lost(stockout)`, and every departed flow
-ends as `arrived`, `redirected`, or `lost(dock_full)`.
+So demand splits exactly into `departed + lost(stockout)`, and every departed
+flow's first arc ends as `arrived`, `redirected`, or `lost(dock_full)`. A
+`redirected` flow is not yet finished — it docks on a second arc (`move_id = 1`)
+that ends in `arrived` — so every departed flow ultimately closes with one
+terminal: `arrived` or `lost(dock_full)`.
 
 **`stockout` is a `reason` value only — never a data name.** A frame or variable
 holding demand lost to a stockout is `lost_demand` (§7). A bike that left and
@@ -240,7 +265,7 @@ historical, simulated, and live-state views alike (§10).
 |---|---|
 | `inventory` | Per-period bikes on hand per `(facility, commodity)` (§2). |
 | `departures` | Outflow per period and source (§7). |
-| `arrivals` | Inflow per period and target (docking events: `arrived` + `redirected`). |
+| `arrivals` | Inflow per period and target (docking events: `arrived` only — a redirected bike's inflow is the `arrived` that ends its second arc). |
 | `demand` | Realized user demand (= `departures` in an exact replay). |
 | `od_matrix` | Origin–destination demand model: per `(source, target, commodity)` a `count`, a `probability` `P(target | source, commodity)`, and a mean `duration`. |
 

@@ -53,14 +53,15 @@ def get_historical_flows_df(
     """Expand each historical trip into a realized-flow event log.
 
     Ground-truth history contains only flows that actually happened, so each
-    completed trip is one flow that emits two events in order: ``departed`` at
-    the start period and ``arrived`` at the end period. The lifecycle states
-    that exist only under simulation (``requested``, ``lost``, ``redirected``,
-    ``cancelled``) are intentionally absent here — this is a representation of
-    input data, not the simulator's own journal. Each field is filled only by
-    the event that determines it (e.g. ``realized_end_period`` is null until
-    ``arrived``); the full picture of a flow is recovered by stitching its rows
-    on ``flow_id``.
+    completed trip is one flow that emits two events in order: ``departed``
+    (move 0, event 0) at the start period and ``arrived`` (move 0, event 1) at
+    the end period. History never redirects, so every historical flow stays on a
+    single arc (``move_id == 0``). The outcomes that exist only under simulation
+    (``lost``, ``redirected``) are intentionally absent here — this is a
+    representation of input data, not the simulator's own journal. Each field is
+    filled only by the event that determines it (e.g. ``realized_end_period`` is
+    null until ``arrived``); the full picture of a flow is recovered by stitching
+    its rows on ``flow_id``.
 
     ``flow_id`` is namespaced with a ``hist_`` prefix so it cannot collide with
     flows the simulator generates and appends to the same journal.
@@ -85,7 +86,8 @@ def get_historical_flows_df(
     -------
     pandas.DataFrame
         Event log with columns :data:`FLOW_EVENT_COLUMNS`, sorted by
-        ``period_id`` then ``flow_id``, with a monotonic ``event_id``.
+        ``period_id`` then ``flow_id`` then ``event_id`` (the per-trip
+        ``move_id`` / ``event_id`` are set by the builders).
     """
     trips = pd.DataFrame({
         "flow_id":            "hist_" + trips_df.index.astype("string"),
@@ -208,11 +210,17 @@ def build_potential_trips(historical_flows_df: pd.DataFrame) -> pd.DataFrame:
     """Replay demand: one concrete desired trip per historical departure.
 
     Carries the real target and duration of every trip, which is what makes the
-    base run reproduce history exactly instead of resampling it.
+    base run reproduce history exactly instead of resampling it. Only move-0
+    departures are real user departures; history never redirects, so all its
+    departures are already ``move_id == 0``, but the filter is kept defensively.
     """
     cols = ["flow_id", "source_id", "planned_target_id",
             "commodity_category", "start_period", "planned_end_period"]
-    return historical_flows_df.query("event_type == 'departed'")[cols].reset_index(drop=True)
+    departed = historical_flows_df[
+        (historical_flows_df["event_type"] == "departed")
+        & (historical_flows_df["move_id"] == 0)
+    ]
+    return departed[cols].reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
