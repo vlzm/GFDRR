@@ -15,7 +15,7 @@ Claude rely on it, and lets close-by concepts be recognized by their names.
 **The two anchors.** Every word here is anchored to real names in the code, not
 chosen by taste:
 
-- **The flow journal** (`gbp/model/journal.py`) is the anchor for everything
+- **The flow journal** (`gbp/model/flows.py`) is the anchor for everything
   about *movement* — the event schema (§0), the four outcomes, the planned/realized
   axis, the marginals. The journal is the single source of truth for what happened
   in a run, and the layer the whole system speaks.
@@ -43,7 +43,7 @@ field. A frame of demand lost to a stockout is `lost_demand`, not `stockout`. Se
 
 ## 0. The flow-event schema (the symbol table)
 
-The literal columns of one flow event (`FLOW_EVENT_COLUMNS` in `journal.py`).
+The literal columns of one flow event (`FLOW_EVENT_COLUMNS` in `flows.py`).
 Every other word in this file is one of these columns, one of their values, or a
 projection of them. This is the anchor; read it first.
 
@@ -160,6 +160,21 @@ Three levels of the same physical movement. Keep them distinct.
 Rule of thumb: aggregate counts and the OD matrix = `trip`; anything with a
 `flow_id` = `flow`; the physical count = `bike`.
 
+### 3.1. The flow-event table and its names
+
+A `flow` is made of one or more **flow events** (rows, schema in §0). The table of
+those rows has one canonical stem -- `flows` -- and one role word -- `journal`.
+Keep the two jobs apart so they never read as two different things:
+
+| Canonical | Meaning |
+|---|---|
+| `flows` | The data name of the flow-event table, taken by the prefix system (§10): `state_flows_df`, `historical_flows_df`, `simulated_flows_df`. |
+| `new_flows` | The batch of new flow-event rows a phase just emitted, not yet appended (`PhaseResult.new_flows`, `append_flows(new_flows)`). Same row schema as `flows`. |
+| `journal` | Role word only, used in prose for the append-only book / single source of truth ("the `flows` table is the journal"). **Never a variable or column name** -- the data is always `flows`, never `journal` or `journal_events`. |
+
+One stem, one root: row = `flow event`, trip = `flow`, table = `flows`, new rows =
+`new_flows`. `journal` names the role, not the data.
+
 ---
 
 ## 4. Facility and its roles in a trip
@@ -258,7 +273,7 @@ Classic and electric bikes share the same physical docks but are counted per
 ## 9. Marginals (the read-models of the journal)
 
 The marginal observations are pure functions of the journal (`observe` →
-`Observations` in `journal.py`). Each has one canonical word, used for the
+`Observations` in `flows.py`). Each has one canonical word, used for the
 historical, simulated, and live-state views alike (§10).
 
 | Canonical | Meaning |

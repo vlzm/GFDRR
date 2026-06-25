@@ -15,7 +15,7 @@ enforcing in production, promote it next to the other journal invariants.)
 
 import pandas as pd
 
-from gbp.model.journal import FLOW_EVENT_COLUMNS
+from gbp.model.flows import FLOW_EVENT_COLUMNS
 
 #: The only event-type sequences a single flow may show, read in ``event_id``
 #: order. A lone ``departed`` is a flow still in transit when the run window

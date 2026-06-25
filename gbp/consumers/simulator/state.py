@@ -5,11 +5,11 @@ working set, the period clock and the run-config primitives (:class:`Schedule`,
 :class:`PeriodRow`) -- plus the inventory arithmetic that maintains it
 (:func:`adjust_inventory` and the per-event delta builders).
 
-The flow journal that backs the state lives in :mod:`journal` (the single source
+The flow journal that backs the state lives in :mod:`flows` (the single source
 of truth); the rules that mutate the state in a period live in :mod:`mechanics`.
 ``SimulationState`` keeps the journal and two materialized projections of it
 (inventory, ``in_transit``) and exposes the marginal observations as read-only
-properties derived on demand through :mod:`journal`. Dependency direction:
+properties derived on demand through :mod:`flows`. Dependency direction:
 ``journal <- state <- mechanics <- phases <- engine``.
 """
 
@@ -197,12 +197,12 @@ class SimulationState:
         """Return a copy with the resources replaced."""
         return dataclasses.replace(self, state_resources_df=new_resources)
 
-    def append_flows(self, events: pd.DataFrame | None) -> "SimulationState":
-        """Append a phase's emitted events to the journal (source of truth)."""
-        if events is None or not len(events):
+    def append_flows(self, new_flows: pd.DataFrame | None) -> "SimulationState":
+        """Append a phase's emitted flow events to ``flows`` (the journal, source of truth)."""
+        if new_flows is None or not len(new_flows):
             return self
-        journal = pd.concat([self.state_flows_df, events], ignore_index=True)
-        return dataclasses.replace(self, state_flows_df=journal)
+        flows = pd.concat([self.state_flows_df, new_flows], ignore_index=True)
+        return dataclasses.replace(self, state_flows_df=flows)
 
     def with_intermediates(self, **updates: Any) -> "SimulationState":
         """Return a copy with the given per-period hand-offs merged in."""
@@ -216,12 +216,17 @@ class SimulationState:
 
 @dataclasses.dataclass
 class PhaseResult:
-    """What a phase returns: the next state plus any flow events it emitted."""
+    """What a phase returns: the next state plus any flow events it emitted.
+
+    ``new_flows`` is the batch of new flow-event rows the phase produced this
+    period -- the same row schema as ``flows``, not yet appended. The engine
+    appends it to the journal via :meth:`SimulationState.append_flows`.
+    """
 
     state: SimulationState
-    events: Any = None   # DataFrame of new flow-event rows, or None
+    new_flows: Any = None   # DataFrame of new flow-event rows, or None
 
     @classmethod
     def empty(cls, state: SimulationState) -> "PhaseResult":
-        """Build a result that changes nothing: the same state, no events."""
-        return cls(state=state, events=None)
+        """Build a result that changes nothing: the same state, no new flows."""
+        return cls(state=state, new_flows=None)

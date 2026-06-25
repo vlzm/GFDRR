@@ -81,7 +81,7 @@ class Environment:
         for phase in self._config.phases:
             if phase.should_run(period):
                 result = phase.execute(self._state, self._resolved, period, self._config)
-                self._state = result.state.append_flows(result.events)
+                self._state = result.state.append_flows(result.new_flows)
 
         self._period_cursor += 1
         if not self.is_done:

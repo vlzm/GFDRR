@@ -3,7 +3,7 @@
 Status: **approved, not yet implemented.** This document is a self-contained
 hand-off so the work can be done in a fresh chat, step by step. Read it together
 with [`Notations.md`](../../Notations.md) (the canonical vocabulary) and
-[`gbp/model/journal.py`](../../gbp/model/journal.py) (the event schema).
+[`gbp/model/flows.py`](../../gbp/model/flows.py) (the event schema).
 
 ---
 
@@ -12,7 +12,7 @@ with [`Notations.md`](../../Notations.md) (the canonical vocabulary) and
 ### The current model
 
 One row of the flow journal is one **event**. Today there are three ids in the
-schema (`FLOW_EVENT_COLUMNS` in `journal.py`):
+schema (`FLOW_EVENT_COLUMNS` in `flows.py`):
 
 - `flow_id` — string id of one bike's whole journey (`hist_5`, `sim_7_2`). One
   flow = one bike's movement. This is the journal's atomic unit (`Notations.md`
@@ -181,7 +181,7 @@ phases already nets `−1 A / +1 C`; we only add journal rows.
 
 ## 5. File-by-file changes
 
-### 5.1 `gbp/model/journal.py` (the core — most of the work)
+### 5.1 `gbp/model/flows.py` (the core — most of the work)
 
 - `FLOW_EVENT_COLUMNS` / `FLOW_EVENT_DTYPES`: add `move_id` and `event_id`
   (`Int64`); remove `event_order`; remove the global `event_id` assignment.

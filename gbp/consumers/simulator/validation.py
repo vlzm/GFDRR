@@ -4,7 +4,7 @@ Tier-2 of the loss-logging design: properties of the whole journal at run end,
 too broad for a single phase's contract. ``validate_run`` runs once, behind
 ``EnvironmentConfig.validate`` -- off the hot path, always available, exercised
 by the canonical notebook. I1/I2 are pure functions of the journal
-(:mod:`gbp.model.journal`); I3/I4 also read the live final inventory, the
+(:mod:`gbp.model.flows`); I3/I4 also read the live final inventory, the
 in-transit set and the initial inventory, so they live here in the simulator layer.
 
 All checks return a list of human-readable violations (empty == holds);

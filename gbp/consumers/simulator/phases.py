@@ -111,7 +111,7 @@ class DockArrivals(Phase):
         # bike that finds no free dock anywhere is lost: the whole network is full.
         free = free_docks(inventory, capacities)
         docked, overflow = dock_up_to_capacity(due, free)
-        events = arrived_events(docked, t)
+        new_flows = arrived_events(docked, t)
         inventory = adjust_inventory(inventory, dock_deltas(docked))
         n_redirected = n_lost = 0
         if not overflow.empty:
@@ -125,9 +125,9 @@ class DockArrivals(Phase):
                 # move-1 ``departed`` + ``arrived``). The continuation docks the
                 # bike at C in this same phase, so its move-1 ``departed`` never
                 # joins ``in_transit`` -- it is journalled here and closed at once.
-                events = pd.concat(
+                new_flows = pd.concat(
                     [
-                        events,
+                        new_flows,
                         redirected_events(redirected, t),
                         redirect_continuation_events(redirected, t),
                     ],
@@ -141,8 +141,8 @@ class DockArrivals(Phase):
                 # The event ends this bike's trip; the inventory does not change,
                 # because the bike already left its start station at ``departed``
                 # and now docks nowhere.
-                events = pd.concat(
-                    [events, lost_events(lost, t, "dock_full")],
+                new_flows = pd.concat(
+                    [new_flows, lost_events(lost, t, "dock_full")],
                     ignore_index=True,
                 )
 
@@ -158,7 +158,7 @@ class DockArrivals(Phase):
         assert int(inventory["quantity"].sum()) - inventory_before == len(docked) + n_redirected, (
             "lost or redirected count moved inventory incorrectly"
         )
-        return PhaseResult(new_state, events)
+        return PhaseResult(new_state, new_flows)
 
 
 class FormDeparturesPhase(Phase):
@@ -203,18 +203,18 @@ class FormDeparturesPhase(Phase):
         # It changes no inventory (the bike never left), so we only emit the event.
         new_state = (state.with_inventory(inventory)
                      .with_intermediates(departures=departures))
-        events = None
+        new_flows = None
         if not lost_demand.empty:
             lost_demand = lost_demand.rename(
                 columns={"facility_id": "source_id", "lost": "quantity"}
             )
-            events = lost_events(lost_demand, t, "stockout")
+            new_flows = lost_events(lost_demand, t, "stockout")
 
         # Check -- the inventory falls by exactly the bikes that left; the lost
         # demand never left a dock, so it changes no inventory.
         departed = inventory_before - int(inventory["quantity"].sum())
         assert departed == int(departures["departed"].sum()), "stockout moves no inventory"
-        return PhaseResult(new_state, events)
+        return PhaseResult(new_state, new_flows)
 
 
 class FormPotentialTripsPhase(Phase):
@@ -247,11 +247,11 @@ class FormPotentialTripsPhase(Phase):
         trips_now = expand_potential_trips(potential, t)
         if trips_now.empty:
             return PhaseResult.empty(state)
-        events = departed_events(trips_now)
+        new_flows = departed_events(trips_now)
 
         # Writes -- add the new departed flows to the in-transit set.
-        in_transit = pd.concat([state.in_transit, events], ignore_index=True)
+        in_transit = pd.concat([state.in_transit, new_flows], ignore_index=True)
         new_state = state.with_in_transit(in_transit)
-        return PhaseResult(new_state, events)
+        return PhaseResult(new_state, new_flows)
 
 
