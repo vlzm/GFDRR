@@ -9,6 +9,7 @@ subset of them: ``periods_df``, ``initial_inventory_df``, ``potential_trips_df``
 ``facilities_capacities_df`` and ``facilities_geo_df``.
 """
 
+import numpy as np
 import pandas as pd
 
 from gbp.loaders.dataloader_raw import RawModelData, get_initial_inventory_df
@@ -16,10 +17,11 @@ from gbp.model import (
     arrived_events,
     departed_events,
     finalize_flows,
+    flows_to_arrivals,
+    flows_to_departures,
+    flows_to_od_matrix,
+    get_inventory_df,
 )
-
-from gbp.model import flows_to_departures, flows_to_arrivals, flows_to_od_matrix, get_inventory_df
-
 
 # ---------------------------------------------------------------------------
 # Period grid (the simulation clock)
@@ -377,3 +379,217 @@ def attach_simulation(
     resolved.simulated_departures_df = simulated_departures_df
     resolved.simulated_arrivals_df = flows_to_arrivals(resolved.simulated_flows_df)
     resolved.simulated_od_matrix_df = flows_to_od_matrix(resolved.simulated_flows_df)
+
+
+# ---------------------------------------------------------------------------
+# Wide flow journal: every event joined to its facility attributes
+# ---------------------------------------------------------------------------
+#: The three facility roles a flow event names, each joined to its own copy of
+#: every facility attribute (capacity, geo, inventory) under a role prefix.
+_FLOW_FACILITY_ROLES = ("source", "planned_target", "realized_target")
+
+_EARTH_RADIUS_KM = 6371.0088
+
+
+def _haversine_km(
+    lat1: pd.Series, lng1: pd.Series, lat2: pd.Series, lng2: pd.Series
+) -> pd.Series:
+    """Great-circle distance in kilometres between two coordinate columns.
+
+    Vectorised over the rows. Any row with a missing coordinate yields ``NaN``.
+    """
+    lat1_r, lng1_r, lat2_r, lng2_r = (np.radians(x) for x in (lat1, lng1, lat2, lng2))
+    dlat = lat2_r - lat1_r
+    dlng = lng2_r - lng1_r
+    h = np.sin(dlat / 2) ** 2 + np.cos(lat1_r) * np.cos(lat2_r) * np.sin(dlng / 2) ** 2
+    return _EARTH_RADIUS_KM * 2 * np.arcsin(np.sqrt(h))
+
+
+def _join_capacity(
+    flows: pd.DataFrame, capacities: pd.DataFrame, role: str
+) -> pd.DataFrame:
+    """Join a facility's dock capacity to one role of every flow event.
+
+    Adds ``{role}_capacity_total`` and ``{role}_capacity_per_commodity_cat``.
+    ``facilities_capacities_df`` carries no ``commodity_category`` in the base
+    scenario, so the per-commodity capacity equals the total; the branch is kept
+    for the day a per-commodity capacity table exists.
+    """
+    id_col = f"{role}_id"
+
+    total = capacities[["facility_id", "capacity"]].rename(
+        columns={"capacity": f"{role}_capacity_total"}
+    )
+    flows = flows.merge(total, left_on=id_col, right_on="facility_id", how="left")
+    flows = flows.drop(columns=["facility_id"])
+
+    per_cat = f"{role}_capacity_per_commodity_cat"
+    if "commodity_category" in capacities.columns:
+        cat = capacities.rename(columns={"capacity": per_cat})
+        flows = flows.merge(
+            cat,
+            left_on=[id_col, "commodity_category"],
+            right_on=["facility_id", "commodity_category"],
+            how="left",
+        )
+        flows = flows.drop(columns=["facility_id"])
+    else:
+        flows[per_cat] = flows[f"{role}_capacity_total"]
+    return flows
+
+
+def _join_geo(flows: pd.DataFrame, geo: pd.DataFrame, role: str) -> pd.DataFrame:
+    """Join a facility's coordinates to one role: ``{role}_lat`` and ``{role}_lng``."""
+    id_col = f"{role}_id"
+    cols = geo[["facility_id", "lat", "lng"]].rename(
+        columns={"lat": f"{role}_lat", "lng": f"{role}_lng"}
+    )
+    flows = flows.merge(cols, left_on=id_col, right_on="facility_id", how="left")
+    return flows.drop(columns=["facility_id"])
+
+
+def _join_inventory(flows: pd.DataFrame, inventory: pd.DataFrame, role: str) -> pd.DataFrame:
+    """Join a facility's inventory before and after the event period to one role.
+
+    ``inventory`` holds the on-hand bikes at the *end* of each period, per
+    ``(period_id, facility_id, commodity_category)``. For an event in period
+    ``p`` the inventory *after* it is the end-of-``p`` value, and the inventory
+    *before* it is the end-of-``p-1`` value. The "before" join shifts the
+    inventory period forward by one so its end-of-``p-1`` row lines up with the
+    event's period ``p``. Adds ``{role}_inventory_before`` and
+    ``{role}_inventory_after``.
+    """
+    id_col = f"{role}_id"
+    keys = ["period_id", id_col, "commodity_category"]
+
+    after = inventory.rename(
+        columns={"facility_id": id_col, "quantity": f"{role}_inventory_after"}
+    )
+    flows = flows.merge(after, on=keys, how="left")
+
+    before = inventory.copy()
+    before["period_id"] = before["period_id"] + 1
+    before = before.rename(
+        columns={"facility_id": id_col, "quantity": f"{role}_inventory_before"}
+    )
+    flows = flows.merge(before, on=keys, how="left")
+    return flows
+
+
+def get_flows_wide(
+    graph_data: "ResolvedModelData", flows_df: pd.DataFrame | None = None
+) -> pd.DataFrame:
+    """Build the wide flow journal: every event joined to its facility attributes.
+
+    Starts from a flow journal (one row per event) and, for each of the three
+    facility roles an event names -- ``source``, ``planned_target``,
+    ``realized_target`` -- attaches that facility's capacity, coordinates, and
+    inventory before/after the event, plus the trip's duration and distance.
+
+    Parameters
+    ----------
+    graph_data : ResolvedModelData
+        The resolved tables to join from: ``facilities_capacities_df``,
+        ``facilities_geo_df``, and ``initial_inventory_df`` (used to rebuild the
+        per-period inventory from ``flows_df`` itself, so the wide table is
+        self-consistent with whichever journal is passed).
+    flows_df : pandas.DataFrame, optional
+        The flow journal to widen. Defaults to ``graph_data.simulated_flows_df``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The flow journal with these columns added, per role
+        ``{source, planned_target, realized_target}``:
+
+        - ``{role}_capacity_total``, ``{role}_capacity_per_commodity_cat``
+        - ``{role}_lat``, ``{role}_lng``
+        - ``{role}_inventory_before``, ``{role}_inventory_after``
+
+        and, for the trip itself (``planned_`` / ``realized_`` pairs):
+
+        - ``planned_duration`` (``planned_end_period - start_period``),
+          ``realized_duration`` (``realized_end_period - start_period``)
+        - ``planned_distance_km`` (source to planned target),
+          ``realized_distance_km`` (source to realized target)
+    """
+    if flows_df is None:
+        flows_df = graph_data.simulated_flows_df
+    if flows_df is None:
+        raise ValueError(
+            "No flow journal to widen: pass flows_df, or run a simulation and "
+            "attach_simulation first so graph_data.simulated_flows_df is set."
+        )
+    wide = flows_df.copy()
+
+    inventory = get_inventory_df(flows_df, graph_data.initial_inventory_df)
+    # The initial inventory is the on-hand state before period 0 (end of period
+    # -1). Adding it as a period -1 row lets the "before" join resolve period-0
+    # events instead of leaving them empty.
+    initial = graph_data.initial_inventory_df.copy()
+    initial["period_id"] = -1
+    inventory = pd.concat([initial[inventory.columns], inventory], ignore_index=True)
+
+    for role in _FLOW_FACILITY_ROLES:
+        wide = _join_capacity(wide, graph_data.facilities_capacities_df, role)
+        wide = _join_geo(wide, graph_data.facilities_geo_df, role)
+        wide = _join_inventory(wide, inventory, role)
+
+    wide["planned_duration"] = wide["planned_end_period"] - wide["start_period"]
+    wide["realized_duration"] = wide["realized_end_period"] - wide["start_period"]
+    wide["planned_distance_km"] = _haversine_km(
+        wide["source_lat"], wide["source_lng"],
+        wide["planned_target_lat"], wide["planned_target_lng"],
+    )
+    wide["realized_distance_km"] = _haversine_km(
+        wide["source_lat"], wide["source_lng"],
+        wide["realized_target_lat"], wide["realized_target_lng"],
+    )
+    return wide
+
+
+def slice_flows_wide(
+    wide: pd.DataFrame,
+    role: str,
+    facility_id: str,
+    period_id: int,
+    window: int,
+) -> pd.DataFrame:
+    """Slice the wide flow journal around one facility and one period.
+
+    Keeps the rows where the chosen facility role equals ``facility_id`` and the
+    event period is within ``window`` periods of ``period_id`` (both ends
+    included: ``period_id - window <= row.period_id <= period_id + window``).
+    The ``role`` picks which of the three facility roles to filter on, so the one
+    function covers all three modes.
+
+    Parameters
+    ----------
+    wide : pandas.DataFrame
+        The wide flow journal from :func:`get_flows_wide`.
+    role : {"source", "planned_target", "realized_target"}
+        Which facility role to filter on. Selects the ``{role}_id`` column.
+    facility_id : str
+        The facility id to keep.
+    period_id : int
+        Centre of the period window.
+    window : int
+        Half-width of the period window, in periods. ``0`` keeps only
+        ``period_id`` itself.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The matching rows, in their original order.
+    """
+    if role not in _FLOW_FACILITY_ROLES:
+        raise ValueError(f"role must be one of {_FLOW_FACILITY_ROLES}, got {role!r}")
+
+    id_col = f"{role}_id"
+    low, high = period_id - window, period_id + window
+    mask = (
+        (wide[id_col] == facility_id)
+        & (wide["period_id"] >= low)
+        & (wide["period_id"] <= high)
+    )
+    return wide[mask]
