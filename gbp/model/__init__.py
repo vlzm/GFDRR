@@ -1,6 +1,6 @@
 """Model layer: the shared domain vocabulary the whole system speaks.
 
-The flow journal (:mod:`gbp.model.journal`) is the central abstraction of the
+The flow journal (:mod:`gbp.model.flows`) is the central abstraction of the
 platform -- the format in which both the loaders (historical flows) and the
 simulator (simulated flows) express what happened, and from which every marginal
 observation is derived. It lives here, in its own layer, rather than inside any
@@ -14,7 +14,7 @@ empty-state factories, ``finalize_flows``, the ``flows_to_*`` projections,
 and the journal-level run invariants (``check_demand_split``, ``check_flow_closure``).
 """
 
-from .journal import (
+from .flows import (
     arrived_events,
     check_demand_split,
     check_flow_closure,

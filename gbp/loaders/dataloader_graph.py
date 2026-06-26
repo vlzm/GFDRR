@@ -66,9 +66,9 @@ def get_historical_flows_df(
     ``flow_id`` is namespaced with a ``hist_`` prefix so it cannot collide with
     flows the simulator generates and appends to the same journal.
 
-    The rows are built with the shared :func:`~gbp.model.journal.departed_events` /
-    :func:`~gbp.model.journal.arrived_events` builders and ordered by
-    :func:`~gbp.model.journal.finalize_flows` -- the same primitives the simulator uses --
+    The rows are built with the shared :func:`~gbp.model.flows.departed_events` /
+    :func:`~gbp.model.flows.arrived_events` builders and ordered by
+    :func:`~gbp.model.flows.finalize_flows` -- the same primitives the simulator uses --
     so a base replay's finalized journal is identical to this log by
     construction.
 

@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 
 from gbp.consumers.simulator.validation import validate_run
-from gbp.model import journal as J
+from gbp.model import flows as J
 from tests import scenarios
 from tests.invariants import check_journal_well_formed
 

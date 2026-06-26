@@ -32,7 +32,7 @@ from gbp.consumers.simulator import (
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.engine import Environment
 from gbp.loaders.dataloader_graph import build_potential_trips
-from gbp.model import journal as J
+from gbp.model import flows as J
 
 CLASSIC = "classic_bike"
 

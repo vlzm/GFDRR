@@ -42,7 +42,7 @@ If no list is given, use `phases_canonical` from `notebooks/test_pipeline.ipynb`
 1. **Read the code first.** For every phase in the list, read its `execute()`
    in `gbp/consumers/simulator/phases.py` and every mechanic it calls in
    `gbp/consumers/simulator/mechanics.py`, plus the state/journal helpers it
-   touches (`gbp/consumers/simulator/state.py`, `gbp/model/journal.py`).
+   touches (`gbp/consumers/simulator/state.py`, `gbp/model/flows.py`).
    Never write a signature, a read, a write, or an invariant from memory —
    every line of the diagram must be checkable against the code.
 2. **Identify the pools.** Participants are the places bikes live, not code

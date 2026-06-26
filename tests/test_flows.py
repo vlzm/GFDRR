@@ -10,8 +10,8 @@ claims to (a checker that never fails is worthless).
 import pandas as pd
 import pytest
 
-from gbp.model import journal as J
-from gbp.model.journal import FLOW_EVENT_COLUMNS
+from gbp.model import flows as J
+from gbp.model.flows import FLOW_EVENT_COLUMNS
 from tests.invariants import check_journal_well_formed
 
 CLASSIC = "classic_bike"
