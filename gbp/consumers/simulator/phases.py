@@ -176,8 +176,7 @@ class FormDeparturesPhase(Phase):
     def execute(self, state: SimulationState, resolved: ResolvedModelData,
                 period: PeriodRow, config: EnvironmentConfig) -> PhaseResult:
         """Split this period's demand into departures and stockout losses, bounded by inventory."""
-        # Reads -- the demand for this period and the starting inventory the check
-        # below uses.
+
         t = period.period_id
         demand = resolved.historical_demand_df
         demand_now = demand[demand["period_id"] == t].copy()
@@ -187,20 +186,12 @@ class FormDeparturesPhase(Phase):
             return PhaseResult.empty(state)
         inventory_before = int(state.state_inventory_df["quantity"].sum())
 
-        # Mechanics -- limit the demand by the inventory we have, and split it
-        # into the bikes that leave and the lost demand (demand above inventory).
-        # In an exact replay the inventory always covers the demand, so the lost
-        # demand is zero.
         departures = realize_departures(demand_now, state.state_inventory_df)
         inventory = adjust_inventory(
             state.state_inventory_df, departure_deltas_from_counts(departures)
         )
         lost_demand = departures[departures["lost"] > 0]
 
-        # Writes -- save the lowered inventory, pass the counts to the next
-        # phase, and journal the lost demand. A stockout loss is demand that
-        # never became a trip: summed per source, with no flow_id and no target.
-        # It changes no inventory (the bike never left), so we only emit the event.
         new_state = (state.with_inventory(inventory)
                      .with_intermediates(departures=departures))
         new_flows = None
@@ -210,8 +201,6 @@ class FormDeparturesPhase(Phase):
             )
             new_flows = lost_events(lost_demand, t, "stockout")
 
-        # Check -- the inventory falls by exactly the bikes that left; the lost
-        # demand never left a dock, so it changes no inventory.
         departed = inventory_before - int(inventory["quantity"].sum())
         assert departed == int(departures["departed"].sum()), "stockout moves no inventory"
         return PhaseResult(new_state, new_flows)
