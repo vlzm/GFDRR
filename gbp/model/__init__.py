@@ -15,6 +15,9 @@ and the journal-level run invariants (``check_demand_split``, ``check_flow_closu
 """
 
 from .flows import (
+    DOCK_PREVIOUS_RANK,
+    DOCK_SAME_RANK,
+    PERIOD_OWN_RANK,
     arrived_events,
     check_demand_split,
     check_flow_closure,
@@ -29,12 +32,16 @@ from .flows import (
     get_inventory_df,
     inventory_at_moments,
     lost_events,
+    phase_rank_by_timing,
     redirect_continuation_events,
     redirect_neighbor_table,
     redirected_events,
 )
 
 __all__ = [
+    "DOCK_PREVIOUS_RANK",
+    "DOCK_SAME_RANK",
+    "PERIOD_OWN_RANK",
     "arrived_events",
     "check_demand_split",
     "check_flow_closure",
@@ -49,6 +56,7 @@ __all__ = [
     "get_inventory_df",
     "inventory_at_moments",
     "lost_events",
+    "phase_rank_by_timing",
     "redirect_continuation_events",
     "redirect_neighbor_table",
     "redirected_events",

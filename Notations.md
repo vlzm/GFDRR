@@ -65,6 +65,7 @@ projection of them. This is the anchor; read it first.
 | `resource_id` | The resource that carried it; NA for user trips (§5b). |
 | `quantity` | Bikes in the event. One per bike after expansion (§3). |
 | `reason` | Why a flow did not simply arrive: `stockout` or `dock_full`; NA otherwise (§1). |
+| `phase_rank` | Which of a period's three sub-phases applied the event's change: `0` dock-previous, `1` the period's own departures and stockout losses, `2` dock-same. Stamped by the emitting phase (the historical loader stamps it by timing, `phase_rank_by_timing`). Part of the `step_id` order (§0.1). |
 | `redirect_round` | The round a redirected flow docked in: `0` for a normal dock batch, `1..` for a redirect's rounds. Set by the redirect mechanics; `0` on every other row. Part of the `step_id` order (§0.1). |
 | `step_id` | Run-global ordinal of the inventory step the event belongs to; the inventory time axis below the period (§0.1). Assigned by `finalize_flows`. |
 
@@ -98,11 +99,12 @@ departures, one redirect round). Between two steps inventory is constant.
 
 `step_id` is derived by **one rule** from the journal itself: `finalize_flows`
 numbers the distinct `(period_id, phase_rank, redirect_round)` tuples in order,
-0, 1, 2, …. `phase_rank` (read from the event semantics: dock-previous = 0,
-the period's own departures and stockout losses = 1, dock-same = 2) orders the
-phases inside a period; `redirect_round` orders a redirect's rounds inside the
-docking phase. History and simulation get their `step_id` from this same formula,
-so they agree by construction rather than by two definitions kept in sync.
+0, 1, 2, …. `phase_rank` (dock-previous = 0, the period's own departures and
+stockout losses = 1, dock-same = 2) orders the phases inside a period;
+`redirect_round` orders a redirect's rounds inside the docking phase. The phase
+that emits an event stamps its `phase_rank`; the historical loader, which has no
+phases, stamps it by timing (`phase_rank_by_timing`), so history and simulation
+order their steps the same way rather than by two definitions kept in sync.
 
 `step_id` carries only the *order*, never the inventory: inventory at any moment
 stays a pure function of the journal (initial inventory plus the cumulative

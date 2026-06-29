@@ -50,6 +50,7 @@ FLOW_EVENT_COLUMNS = [
     "resource_id",
     "quantity",
     "reason",
+    "phase_rank",
     "redirect_round",
     "step_id",
 ]
@@ -71,9 +72,20 @@ FLOW_EVENT_DTYPES = {
     "resource_id": "string",
     "quantity": "Int64",
     "reason": "string",
+    "phase_rank": "Int64",
     "redirect_round": "Int64",
     "step_id": "Int64",
 }
+
+# phase_rank: which of a period's three sub-phases applied an event's inventory
+# change. The phases run in this fixed order, so a lower rank is applied first
+# (Notations.md, "step / step_id"). An event source that runs as an explicit
+# phase (the simulator) stamps its phase's rank straight onto the events it
+# emits; a source with no phases (the historical loader) stamps it with
+# :func:`phase_rank_by_timing` instead.
+DOCK_PREVIOUS_RANK = 0  # dock bikes that left in an earlier period
+PERIOD_OWN_RANK = 1  # this period's own departures and stockout losses
+DOCK_SAME_RANK = 2  # dock bikes that left and arrive within this same period
 
 # Event types that dock a bike (+1 at ``realized_target_id``). Only a normal
 # ``arrived`` lands a bike now -- including the ``arrived`` that ends a redirect's
@@ -90,10 +102,12 @@ DOCKING_EVENT_TYPES = ["arrived"]
 def _typed_events(events_df: pd.DataFrame) -> pd.DataFrame:
     """Cast event columns to the canonical dtypes so frames concat cleanly.
 
-    The two ordering columns -- ``step_id`` and ``redirect_round`` -- are filled
-    by :func:`finalize_flows`, not the builders, so they are cast only when
-    already present (an empty journal carries them; a freshly built event batch
-    does not, except a redirect batch the phase tags with ``redirect_round``).
+    The phase-ordering columns -- ``phase_rank``, ``redirect_round`` and
+    ``step_id`` -- are not set by the builders, so they are cast only when already
+    present (an empty journal carries them; a freshly built event batch does not).
+    The emitting phase stamps ``phase_rank`` (and a redirect batch ``redirect_round``)
+    onto the events after a builder makes them; ``step_id`` is the run-global
+    ordinal :func:`finalize_flows` assigns last.
     """
     for col, dtype in FLOW_EVENT_DTYPES.items():
         if col in events_df.columns:
@@ -387,34 +401,42 @@ def empty_flows_journal() -> pd.DataFrame:
     return pd.DataFrame({col: pd.Series(dtype=dtype) for col, dtype in FLOW_EVENT_DTYPES.items()})
 
 
-def _phase_rank(flows: pd.DataFrame) -> pd.Series:
-    """Order events inside a period by the phase that moves inventory.
+def phase_rank_by_timing(flows: pd.DataFrame) -> pd.Series:
+    """Derive each event's ``phase_rank`` from its own columns (the write-time rule).
 
-    Read from the event semantics alone, matching the simulator's phase order
-    (dock-previous -> form departures -> dock-same). ``t`` is the flow's opening
-    period, which is ``start_period`` on every row of a flow (the move-1
-    continuation included):
+    This is for an event source that has **no** explicit phases: the historical
+    loader turns raw trips into a journal in one pass, so it stamps ``phase_rank``
+    with this rule rather than knowing it from a phase. The simulator, which runs
+    real phases, stamps its phase's rank directly and never calls this.
 
-    - ``0`` -- a docking-phase event for a flow that opened in an **earlier**
-      period (``period_id > t``): the ``DockArrivals("previous")`` batch.
-    - ``1`` -- the period's own activity: a real user ``departed`` (``move_id ==
-      0``, the ``-1``) and a stockout ``lost`` (touches no inventory). The middle
-      phase.
-    - ``2`` -- a docking-phase event for a flow that opened in **this** period
-      (``period_id == t``): the ``DockArrivals("same")`` batch.
+    The rule matches the simulator's phase order (dock-previous -> form departures
+    -> dock-same). ``t`` is the flow's opening period, which is ``start_period`` on
+    every row of a flow (the move-1 continuation included):
+
+    - :data:`DOCK_PREVIOUS_RANK` (0) -- a docking-phase event for a flow that
+      opened in an **earlier** period (``period_id > t``).
+    - :data:`PERIOD_OWN_RANK` (1) -- the period's own activity: a real user
+      ``departed`` (``move_id == 0``, the ``-1``) and a stockout ``lost`` (touches
+      no inventory).
+    - :data:`DOCK_SAME_RANK` (2) -- a docking-phase event for a flow that opened in
+      **this** period (``period_id == t``).
 
     A docking-phase event is anything emitted while docking arrivals: an
     ``arrived`` (either arc), a ``redirected`` bounce, a redirect's move-1
     ``departed``, or a dock-full ``lost``. A docking-phase event can never precede
-    its own flow's departure, so ``period_id >= t`` always and the two cases above
-    are exhaustive.
+    its own flow's departure, so ``period_id >= t`` always and the two docking
+    cases above are exhaustive.
+
+    The rule and the simulator's stamped constants must agree; the scenario test
+    ``test_step_id_is_a_pure_function_of_the_journal`` uses this function as the
+    independent oracle that locks that agreement.
     """
     is_departure = (flows["event_type"] == "departed") & (flows["move_id"] == 0)
     is_stockout = (flows["event_type"] == "lost") & (flows["reason"] == "stockout")
     is_period_own = is_departure | is_stockout
-    rank = pd.Series(0, index=flows.index, dtype="int64")
-    rank = rank.mask(is_period_own, 1)
-    rank = rank.mask(~is_period_own & (flows["period_id"] == flows["start_period"]), 2)
+    rank = pd.Series(DOCK_PREVIOUS_RANK, index=flows.index, dtype="int64")
+    rank = rank.mask(is_period_own, PERIOD_OWN_RANK)
+    rank = rank.mask(~is_period_own & (flows["period_id"] == flows["start_period"]), DOCK_SAME_RANK)
     return rank
 
 
@@ -426,17 +448,27 @@ def _assign_step_id(flows: pd.DataFrame) -> pd.DataFrame:
     function of the journal: the distinct ``(period_id, phase_rank,
     redirect_round)`` tuples, numbered 0, 1, 2, ... in that sorted order.
 
-    - ``phase_rank`` (:func:`_phase_rank`) orders the phases inside a period.
+    - ``phase_rank`` orders the phases inside a period. The emitting phase stamps
+      it (the historical loader uses :func:`phase_rank_by_timing`), so this reads
+      the stored column; any row that arrives without one is filled by the rule as
+      a safety net.
     - ``redirect_round`` orders a redirect's rounds inside the docking phase: 0
       for a normal dock batch, 1.. for the redirect rounds. It is the one piece of
       order not recoverable from the other columns (a redirect's rounds are the
       mechanics' internal iteration), so the phase stores it; rows without it
       (everything but a redirect's continuation) carry 0.
 
-    History and simulation get their ``step_id`` from this same formula. Events
-    that share a step (one ``adjust_inventory`` batch) share a ``step_id``.
+    History and simulation order their steps the same way. Events that share a
+    step (one ``adjust_inventory`` batch) share a ``step_id``.
     """
-    phase_rank = _phase_rank(flows)
+    if "phase_rank" in flows.columns:
+        phase_rank = flows["phase_rank"]
+        missing = phase_rank.isna()
+        if missing.any():
+            phase_rank = phase_rank.where(~missing, phase_rank_by_timing(flows))
+        phase_rank = phase_rank.astype("int64")
+    else:
+        phase_rank = phase_rank_by_timing(flows)
     if "redirect_round" in flows.columns:
         redirect_round = flows["redirect_round"].fillna(0).astype("int64")
     else:
@@ -453,6 +485,7 @@ def _assign_step_id(flows: pd.DataFrame) -> pd.DataFrame:
     )
     order = order.sort_values([*keys, "flow_id", "event_id"], kind="stable")
     flows = flows.loc[order.index].copy()
+    flows["phase_rank"] = order["phase_rank"].to_numpy()
     flows["redirect_round"] = order["redirect_round"].to_numpy()
     # ngroup over the sorted frame numbers the distinct (period_id, phase_rank,
     # redirect_round) batches 0, 1, 2, ... in order of appearance -- step order.
@@ -467,9 +500,11 @@ def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
     and a replay run's journal are finalized through this one function, so they
     share their order, their ``step_id`` and their column projection by
     construction rather than by two definitions kept in sync by hand. The trip ids
-    (``move_id``, ``event_id``) are already set by the builders at emit time; this
-    adds only ``step_id`` -- the inventory-step ordinal (Notations.md §0.1) -- via
-    :func:`_assign_step_id`, derived by one rule from the journal itself, and fills
+    (``move_id``, ``event_id``) and ``phase_rank`` are already set at emit time
+    (the emitting phase stamps ``phase_rank``; the historical loader uses
+    :func:`phase_rank_by_timing`); this adds only ``step_id`` -- the inventory-step
+    ordinal (Notations.md §0.1) -- via :func:`_assign_step_id`, the run-global
+    ordinal of the ``(period_id, phase_rank, redirect_round)`` steps, and fills
     ``redirect_round`` with 0 wherever a builder did not set it.
 
     Parameters
@@ -489,6 +524,7 @@ def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
         if col in flows.columns:
             flows[col] = flows[col].astype(dtype)
     flows = _assign_step_id(flows)
+    flows["phase_rank"] = flows["phase_rank"].astype("Int64")
     flows["redirect_round"] = flows["redirect_round"].astype("Int64")
     flows["step_id"] = flows["step_id"].astype("Int64")
     return flows[FLOW_EVENT_COLUMNS]

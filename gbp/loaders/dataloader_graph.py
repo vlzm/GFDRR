@@ -21,6 +21,7 @@ from gbp.model import (
     flows_to_departures,
     flows_to_od_matrix,
     get_inventory_df,
+    phase_rank_by_timing,
 )
 
 # ---------------------------------------------------------------------------
@@ -103,7 +104,12 @@ def get_historical_flows_df(
     )
     departed = departed_events(trips)
     arrived = arrived_events(trips, trips["planned_end_period"])
-    return finalize_flows(pd.concat([departed, arrived], ignore_index=True))
+    journal = pd.concat([departed, arrived], ignore_index=True)
+    # The loader has no phases, so it stamps phase_rank with the timing rule
+    # (departed -> period-own; an arrival -> dock-same or dock-previous by whether
+    # it closes in its own period). The simulator stamps its phase's rank instead.
+    journal["phase_rank"] = phase_rank_by_timing(journal)
+    return finalize_flows(journal)
 
 
 # ---------------------------------------------------------------------------
@@ -430,9 +436,7 @@ _FLOW_FACILITY_ROLES = ("source", "planned_target", "realized_target")
 _EARTH_RADIUS_KM = 6371.0088
 
 
-def _haversine_km(
-    lat1: pd.Series, lng1: pd.Series, lat2: pd.Series, lng2: pd.Series
-) -> pd.Series:
+def _haversine_km(lat1: pd.Series, lng1: pd.Series, lat2: pd.Series, lng2: pd.Series) -> pd.Series:
     """Great-circle distance in kilometres between two coordinate columns.
 
     Vectorised over the rows. Any row with a missing coordinate yields ``NaN``.
@@ -444,9 +448,7 @@ def _haversine_km(
     return _EARTH_RADIUS_KM * 2 * np.arcsin(np.sqrt(h))
 
 
-def _join_capacity(
-    flows: pd.DataFrame, capacities: pd.DataFrame, role: str
-) -> pd.DataFrame:
+def _join_capacity(flows: pd.DataFrame, capacities: pd.DataFrame, role: str) -> pd.DataFrame:
     """Join a facility's dock capacity to one role of every flow event.
 
     Adds ``{role}_capacity_total`` and ``{role}_capacity_per_commodity_cat``.
@@ -501,16 +503,12 @@ def _join_inventory(flows: pd.DataFrame, inventory: pd.DataFrame, role: str) -> 
     id_col = f"{role}_id"
     keys = ["period_id", id_col, "commodity_category"]
 
-    after = inventory.rename(
-        columns={"facility_id": id_col, "quantity": f"{role}_inventory_after"}
-    )
+    after = inventory.rename(columns={"facility_id": id_col, "quantity": f"{role}_inventory_after"})
     flows = flows.merge(after, on=keys, how="left")
 
     before = inventory.copy()
     before["period_id"] = before["period_id"] + 1
-    before = before.rename(
-        columns={"facility_id": id_col, "quantity": f"{role}_inventory_before"}
-    )
+    before = before.rename(columns={"facility_id": id_col, "quantity": f"{role}_inventory_before"})
     flows = flows.merge(before, on=keys, how="left")
     return flows
 
@@ -577,12 +575,16 @@ def get_flows_wide(
     wide["planned_duration"] = wide["planned_end_period"] - wide["start_period"]
     wide["realized_duration"] = wide["realized_end_period"] - wide["start_period"]
     wide["planned_distance_km"] = _haversine_km(
-        wide["source_lat"], wide["source_lng"],
-        wide["planned_target_lat"], wide["planned_target_lng"],
+        wide["source_lat"],
+        wide["source_lng"],
+        wide["planned_target_lat"],
+        wide["planned_target_lng"],
     )
     wide["realized_distance_km"] = _haversine_km(
-        wide["source_lat"], wide["source_lng"],
-        wide["realized_target_lat"], wide["realized_target_lng"],
+        wide["source_lat"],
+        wide["source_lng"],
+        wide["realized_target_lat"],
+        wide["realized_target_lng"],
     )
     return wide
 
@@ -626,9 +628,5 @@ def slice_flows_wide(
 
     id_col = f"{role}_id"
     low, high = period_id - window, period_id + window
-    mask = (
-        (wide[id_col] == facility_id)
-        & (wide["period_id"] >= low)
-        & (wide["period_id"] <= high)
-    )
+    mask = (wide[id_col] == facility_id) & (wide["period_id"] >= low) & (wide["period_id"] <= high)
     return wide[mask]

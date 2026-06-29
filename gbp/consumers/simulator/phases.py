@@ -16,6 +16,9 @@ import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import (
+    DOCK_PREVIOUS_RANK,
+    DOCK_SAME_RANK,
+    PERIOD_OWN_RANK,
     arrived_events,
     departed_events,
     lost_events,
@@ -158,6 +161,12 @@ class DockArrivals(Phase):
                     ignore_index=True,
                 )
 
+        # Stamp the phase that applied these changes: every event this phase emits
+        # (arrived, the redirect bounce and its continuation, a dock-full lost)
+        # belongs to one docking phase, fixed by ``when`` -- "previous" docks bikes
+        # from an earlier period, "same" docks bikes that left this period.
+        new_flows["phase_rank"] = DOCK_PREVIOUS_RANK if self.when == "previous" else DOCK_SAME_RANK
+
         # Writes -- remove the docked bikes from the in-transit set and save the
         # inventory.
         in_transit = state.in_transit.drop(due.index)
@@ -217,6 +226,8 @@ class FormDeparturesPhase(Phase):
                 columns={"facility_id": "source_id", "lost": "quantity"}
             )
             new_flows = lost_events(lost_demand, t, "stockout")
+            # A stockout loss is this period's own activity (the middle phase).
+            new_flows["phase_rank"] = PERIOD_OWN_RANK
 
         departed = inventory_before - int(inventory["quantity"].sum())
         assert departed == int(departures["departed"].sum()), "stockout moves no inventory"
@@ -259,6 +270,8 @@ class FormPotentialTripsPhase(Phase):
         if trips_now.empty:
             return PhaseResult.empty(state)
         new_flows = departed_events(trips_now)
+        # A real user departure is this period's own activity (the middle phase).
+        new_flows["phase_rank"] = PERIOD_OWN_RANK
 
         # Writes -- add the new departed flows to the in-transit set.
         in_transit = pd.concat([state.in_transit, new_flows], ignore_index=True)

@@ -49,12 +49,13 @@ def _history(trips: list[tuple[str, str, int, int]]) -> pd.DataFrame:
             "planned_end_period": [t[3] for t in trips],
         }
     )
-    return J.finalize_flows(
-        pd.concat(
-            [J.departed_events(df), J.arrived_events(df, df["planned_end_period"])],
-            ignore_index=True,
-        )
+    journal = pd.concat(
+        [J.departed_events(df), J.arrived_events(df, df["planned_end_period"])],
+        ignore_index=True,
     )
+    # Like the real loader, this has no phases, so it stamps phase_rank by timing.
+    journal["phase_rank"] = J.phase_rank_by_timing(journal)
+    return J.finalize_flows(journal)
 
 
 def build_resolved(

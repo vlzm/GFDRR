@@ -1,5 +1,15 @@
 # Plan: make the `step_id` ordering one rule, and fix two smaller id issues
 
+> **Update (2026-06-29).** This plan is done, and the design has since moved one
+> step further. `phase_rank` is no longer derived at `finalize_flows` time: it is
+> now a stored journal column that the emitting phase stamps at the moment it
+> creates an event (`DockArrivals` by its `when`, the departure phases as
+> period-own). The function this plan calls `_phase_rank` was renamed to the
+> public `phase_rank_by_timing` and is now used only by the historical loader,
+> which has no phases. `_assign_step_id` reads the stored `phase_rank` column
+> instead of recomputing it. The rest of this document is kept as the original
+> plan record.
+
 A fresh-eyes review of the id / period / step design. The identifiers
 themselves (`flow_id`, `move_id`, `event_id`, `period_id`, `step_id`) are
 correct and lean. The debt is in **how `step_id` is assigned**, plus two smaller

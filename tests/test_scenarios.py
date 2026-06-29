@@ -118,17 +118,19 @@ def _period_end_inventory_from_moments(journal, initial):
 
 @pytest.mark.parametrize("name", list(scenarios.ALL_SCENARIOS))
 def test_step_id_is_a_pure_function_of_the_journal(name, run_scenario):
-    # step_id is one rule: the dense rank of the distinct (period_id, phase_rank,
-    # redirect_round) tuples. Recompute it from the finalized journal's own
-    # columns and check it matches the stored step_id -- this locks "step_id
-    # depends only on those three columns", with no hidden ordering input.
+    # step_id is one rule: numbering the distinct (period_id, phase_rank,
+    # redirect_round) tuples 0, 1, 2, ... in sorted order. Recompute phase_rank
+    # independently with the timing rule (the oracle) and rebuild step_id from it,
+    # then check it matches the stored step_id. This locks two things at once:
+    # step_id depends only on those three columns, and the phase_rank the phases
+    # stamped agrees with the timing rule.
     _resolved, journal, _state = run_scenario(name)
     if journal.empty:
         return
     keys = pd.DataFrame(
         {
             "period_id": journal["period_id"],
-            "phase_rank": J._phase_rank(journal),
+            "phase_rank": J.phase_rank_by_timing(journal),
             "redirect_round": journal["redirect_round"].fillna(0),
         }
     )
