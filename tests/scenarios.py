@@ -39,18 +39,22 @@ CLASSIC = "classic_bike"
 
 def _history(trips: list[tuple[str, str, int, int]]) -> pd.DataFrame:
     """Build a historical flow log from ``(source, target, start, end)`` trips."""
-    df = pd.DataFrame({
-        "flow_id":            [f"hist_{i}" for i in range(len(trips))],
-        "source_id":          [t[0] for t in trips],
-        "planned_target_id":  [t[1] for t in trips],
-        "commodity_category": CLASSIC,
-        "start_period":       [t[2] for t in trips],
-        "planned_end_period": [t[3] for t in trips],
-    })
-    return J.finalize_flows(pd.concat(
-        [J.departed_events(df), J.arrived_events(df, df["planned_end_period"])],
-        ignore_index=True,
-    ))
+    df = pd.DataFrame(
+        {
+            "flow_id": [f"hist_{i}" for i in range(len(trips))],
+            "source_id": [t[0] for t in trips],
+            "planned_target_id": [t[1] for t in trips],
+            "commodity_category": CLASSIC,
+            "start_period": [t[2] for t in trips],
+            "planned_end_period": [t[3] for t in trips],
+        }
+    )
+    return J.finalize_flows(
+        pd.concat(
+            [J.departed_events(df), J.arrived_events(df, df["planned_end_period"])],
+            ignore_index=True,
+        )
+    )
 
 
 def build_resolved(
@@ -72,14 +76,16 @@ def build_resolved(
     hist = _history(trips)
     facilities = sorted({t[0] for t in trips} | {t[1] for t in trips})
 
-    geo = pd.DataFrame({
-        "facility_id": facilities,
-        "lat": [40.0 + i * 1e-3 for i in range(len(facilities))],
-        "lng": [-74.0 + i * 1e-3 for i in range(len(facilities))],
-    })
+    geo = pd.DataFrame(
+        {
+            "facility_id": facilities,
+            "lat": [40.0 + i * 1e-3 for i in range(len(facilities))],
+            "lng": [-74.0 + i * 1e-3 for i in range(len(facilities))],
+        }
+    )
     periods = pd.DataFrame({"period_id": range(n_periods)})
-    periods["start_timestamp"] = (
-        pd.Timestamp("2026-01-01") + periods["period_id"] * pd.Timedelta(hours=1)
+    periods["start_timestamp"] = pd.Timestamp("2026-01-01") + periods["period_id"] * pd.Timedelta(
+        hours=1
     )
     periods["end_timestamp"] = periods["start_timestamp"] + pd.Timedelta(hours=1)
 
@@ -90,8 +96,14 @@ def build_resolved(
         [{"facility_id": f, "capacity": capacities.get(f, 10_000)} for f in facilities]
     )
     resolved.initial_inventory_df = pd.DataFrame(
-        [{"facility_id": f, "commodity_category": CLASSIC,
-          "quantity": initial_inventory.get(f, 0)} for f in facilities]
+        [
+            {
+                "facility_id": f,
+                "commodity_category": CLASSIC,
+                "quantity": initial_inventory.get(f, 0),
+            }
+            for f in facilities
+        ]
     )
     resolved.historical_flows_df = hist
     resolved.historical_demand_df = J.flows_to_departures(hist)
@@ -134,8 +146,10 @@ def run(
 def canonical() -> types.SimpleNamespace:
     """Saturated replay: inventory and capacity never bind, so no constraint fires."""
     trips = [
-        ("s1", "s2", 0, 1), ("s1", "s3", 0, 2),
-        ("s2", "s1", 1, 2), ("s2", "s3", 1, 2),
+        ("s1", "s2", 0, 1),
+        ("s1", "s3", 0, 2),
+        ("s2", "s1", 1, 2),
+        ("s2", "s3", 1, 2),
         ("s3", "s1", 2, 3),
     ]
     return build_resolved(trips, initial_inventory={"s1": 500, "s2": 500, "s3": 500})

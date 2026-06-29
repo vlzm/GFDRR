@@ -17,28 +17,35 @@ import requests
 def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
     """Load the raw Citi Bike trip CSV and drop rows with missing key fields."""
     trips_dtypes = {
-        'ride_id': 'string',
-        'rideable_type': 'string',
-        'start_station_name': 'string',
-        'start_station_id': 'string',
-        'end_station_name': 'string',
-        'end_station_id': 'string',
-        'start_lat': 'float64',
-        'start_lng': 'float64',
-        'end_lat': 'float64',
-        'end_lng': 'float64',
-        'member_casual': 'string',
+        "ride_id": "string",
+        "rideable_type": "string",
+        "start_station_name": "string",
+        "start_station_id": "string",
+        "end_station_name": "string",
+        "end_station_id": "string",
+        "start_lat": "float64",
+        "start_lng": "float64",
+        "end_lat": "float64",
+        "end_lng": "float64",
+        "member_casual": "string",
     }
     trips_df = pd.read_csv(
         trips_path,
         dtype=trips_dtypes,
-        parse_dates=['started_at', 'ended_at'],
+        parse_dates=["started_at", "ended_at"],
     )
-    trips_df = trips_df.dropna(subset=[
-        'started_at', 'ended_at',
-        'start_station_id', 'end_station_id',
-        'start_lat', 'start_lng', 'end_lat', 'end_lng',
-    ])
+    trips_df = trips_df.dropna(
+        subset=[
+            "started_at",
+            "ended_at",
+            "start_station_id",
+            "end_station_id",
+            "start_lat",
+            "start_lng",
+            "end_lat",
+            "end_lng",
+        ]
+    )
     trips_df = trips_df.reset_index(drop=True)
     return trips_df
 
@@ -86,11 +93,13 @@ def get_stations_costs(stations_df: pd.DataFrame) -> pd.DataFrame:
 
 def get_depots(rng: np.random.Generator, n: int) -> pd.DataFrame:
     """Synthesize ``n`` depots at random coordinates within the city box."""
-    return pd.DataFrame({
-        "depot_id": [f"depot_{i + 1}" for i in range(n)],
-        "lat":     rng.uniform(40.68, 40.86, size=n),
-        "lng":     rng.uniform(-74.03, -73.90, size=n),
-    })
+    return pd.DataFrame(
+        {
+            "depot_id": [f"depot_{i + 1}" for i in range(n)],
+            "lat": rng.uniform(40.68, 40.86, size=n),
+            "lng": rng.uniform(-74.03, -73.90, size=n),
+        }
+    )
 
 
 def get_depots_capacities(
@@ -127,26 +136,38 @@ def get_initial_inventory_df(gbfs_raw: pd.DataFrame, stations_df: pd.DataFrame) 
     )
     ebikes = g["num_ebikes_available"] if "num_ebikes_available" in g.columns else 0
     classic = g["num_bikes_available"] - ebikes
-    return pd.concat([
-        pd.DataFrame({
-            "facility_id": g["facility_id"],
-            "commodity_category": "classic_bike",
-            "quantity": classic,
-        }),
-        pd.DataFrame({
-            "facility_id": g["facility_id"],
-            "commodity_category": "electric_bike",
-            "quantity": ebikes,
-        }),
-    ], ignore_index=True).reset_index(drop=True)
+    return pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "facility_id": g["facility_id"],
+                    "commodity_category": "classic_bike",
+                    "quantity": classic,
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "facility_id": g["facility_id"],
+                    "commodity_category": "electric_bike",
+                    "quantity": ebikes,
+                }
+            ),
+        ],
+        ignore_index=True,
+    ).reset_index(drop=True)
 
 
 def get_trips_df(trips_raw_df: pd.DataFrame) -> pd.DataFrame:
     """Select the trip columns the rest of the pipeline needs."""
     cols = [
-        'ride_id', 'rideable_type', 'started_at', 'ended_at',
-        'start_station_name', 'start_station_id',
-        'end_station_name', 'end_station_id',
+        "ride_id",
+        "rideable_type",
+        "started_at",
+        "ended_at",
+        "start_station_name",
+        "start_station_id",
+        "end_station_name",
+        "end_station_id",
     ]
     return trips_raw_df[cols].copy()
 
@@ -169,10 +190,12 @@ def get_trucks_capacities_df(truck_capacity_bikes: int, df_trucks: pd.DataFrame)
 
 def get_bike_rates_df(electric_bike_rate: float, classic_bike_rate: float) -> pd.DataFrame:
     """Build the per-unit rate table for the two bike commodities."""
-    return pd.DataFrame({
-        "rideable_type": ["electric_bike", "classic_bike"],
-        "rate": [electric_bike_rate, classic_bike_rate],
-    })
+    return pd.DataFrame(
+        {
+            "rideable_type": ["electric_bike", "classic_bike"],
+            "rate": [electric_bike_rate, classic_bike_rate],
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -217,8 +240,8 @@ class RawModelData:
         # Stations
         self.stations_df = get_stations(self.trips_raw_df)
         # self.stations_capacities_df = get_stations_capacities(self.gbfs_raw_df, self.stations_df)
-        self.stations_capacities_df = self.stations_df[['station_id']]
-        self.stations_capacities_df['capacity'] = 100
+        self.stations_capacities_df = self.stations_df[["station_id"]]
+        self.stations_capacities_df["capacity"] = 100
         self.stations_costs_df = get_stations_costs(self.stations_df)
 
         # Depots

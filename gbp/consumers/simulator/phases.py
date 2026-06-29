@@ -14,8 +14,6 @@ level.
 
 import pandas as pd
 
-from .config import EnvironmentConfig
-
 from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import (
     arrived_events,
@@ -25,6 +23,7 @@ from gbp.model import (
     redirected_events,
 )
 
+from .config import EnvironmentConfig
 from .mechanics import (
     dock_up_to_capacity,
     expand_potential_trips,
@@ -56,8 +55,13 @@ class Phase:
         """Report whether this phase runs in ``period`` (per its schedule)."""
         return self._schedule.should_run(period)
 
-    def execute(self, state: SimulationState, resolved: ResolvedModelData,
-                period: PeriodRow, config: EnvironmentConfig) -> PhaseResult:
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+        config: EnvironmentConfig,
+    ) -> PhaseResult:
         """Apply the phase to the state; return the next state and emitted events."""
         raise NotImplementedError
 
@@ -88,8 +92,13 @@ class DockArrivals(Phase):
         self.when = when
         self.name = f"dock_arrivals_{when}"
 
-    def execute(self, state: SimulationState, resolved: ResolvedModelData,
-                period: PeriodRow, config: EnvironmentConfig) -> PhaseResult:
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+        config: EnvironmentConfig,
+    ) -> PhaseResult:
         """Dock this period's arriving bikes, redirect the overflow, lose what fits nowhere."""
         # Reads -- the in-transit bikes that should dock this period, the dock
         # capacities, and the starting inventory the check below uses.
@@ -125,12 +134,15 @@ class DockArrivals(Phase):
                 # move-1 ``departed`` + ``arrived``). The continuation docks the
                 # bike at C in this same phase, so its move-1 ``departed`` never
                 # joins ``in_transit`` -- it is journalled here and closed at once.
+                # Carry each flow's ``redirect_round`` (from plan_overflow_redirect)
+                # onto its events so finalize_flows orders the rounds as steps.
+                round_by_flow = redirected.set_index("flow_id")["redirect_round"]
+                bounce = redirected_events(redirected, t)
+                bounce["redirect_round"] = bounce["flow_id"].map(round_by_flow)
+                continuation = redirect_continuation_events(redirected, t)
+                continuation["redirect_round"] = continuation["flow_id"].map(round_by_flow)
                 new_flows = pd.concat(
-                    [
-                        new_flows,
-                        redirected_events(redirected, t),
-                        redirect_continuation_events(redirected, t),
-                    ],
+                    [new_flows, bounce, continuation],
                     ignore_index=True,
                 )
                 inventory = adjust_inventory(
@@ -173,15 +185,21 @@ class FormDeparturesPhase(Phase):
 
     name = "form_departures"
 
-    def execute(self, state: SimulationState, resolved: ResolvedModelData,
-                period: PeriodRow, config: EnvironmentConfig) -> PhaseResult:
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+        config: EnvironmentConfig,
+    ) -> PhaseResult:
         """Split this period's demand into departures and stockout losses, bounded by inventory."""
-
         t = period.period_id
         demand = resolved.historical_demand_df
         demand_now = demand[demand["period_id"] == t].copy()
         demand_scale_factor = getattr(config, "demand_scale_factor", 1.0)
-        demand_now.loc[:, 'quantity'] = (demand_now['quantity'] * demand_scale_factor).round().astype("Int64")
+        demand_now.loc[:, "quantity"] = (
+            (demand_now["quantity"] * demand_scale_factor).round().astype("Int64")
+        )
         if demand_now.empty:
             return PhaseResult.empty(state)
         inventory_before = int(state.state_inventory_df["quantity"].sum())
@@ -192,8 +210,7 @@ class FormDeparturesPhase(Phase):
         )
         lost_demand = departures[departures["lost"] > 0]
 
-        new_state = (state.with_inventory(inventory)
-                     .with_intermediates(departures=departures))
+        new_state = state.with_inventory(inventory).with_intermediates(departures=departures)
         new_flows = None
         if not lost_demand.empty:
             lost_demand = lost_demand.rename(
@@ -219,8 +236,13 @@ class FormPotentialTripsPhase(Phase):
 
     name = "form_potential_trips"
 
-    def execute(self, state: SimulationState, resolved: ResolvedModelData,
-                period: PeriodRow, config: EnvironmentConfig) -> PhaseResult:
+    def execute(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+        config: EnvironmentConfig,
+    ) -> PhaseResult:
         """Turn this period's departure counts into departed flows via the OD matrix."""
         # Reads -- the departure counts passed on by FormDeparturesPhase.
         t = period.period_id
@@ -242,5 +264,3 @@ class FormPotentialTripsPhase(Phase):
         in_transit = pd.concat([state.in_transit, new_flows], ignore_index=True)
         new_state = state.with_in_transit(in_transit)
         return PhaseResult(new_state, new_flows)
-
-

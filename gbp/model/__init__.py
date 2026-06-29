@@ -25,9 +25,12 @@ from .flows import (
     flows_to_arrivals,
     flows_to_departures,
     flows_to_od_matrix,
+    flows_with_inventory,
     get_inventory_df,
+    inventory_at_moments,
     lost_events,
     redirect_continuation_events,
+    redirect_neighbor_table,
     redirected_events,
 )
 
@@ -42,8 +45,11 @@ __all__ = [
     "flows_to_arrivals",
     "flows_to_departures",
     "flows_to_od_matrix",
+    "flows_with_inventory",
     "get_inventory_df",
+    "inventory_at_moments",
     "lost_events",
     "redirect_continuation_events",
+    "redirect_neighbor_table",
     "redirected_events",
 ]

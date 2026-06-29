@@ -12,7 +12,7 @@ subset of them: ``periods_df``, ``initial_inventory_df``, ``potential_trips_df``
 import numpy as np
 import pandas as pd
 
-from gbp.loaders.dataloader_raw import RawModelData, get_initial_inventory_df
+from gbp.loaders.dataloader_raw import RawModelData
 from gbp.model import (
     arrived_events,
     departed_events,
@@ -91,14 +91,16 @@ def get_historical_flows_df(
         ``period_id`` then ``flow_id`` then ``event_id`` (the per-trip
         ``move_id`` / ``event_id`` are set by the builders).
     """
-    trips = pd.DataFrame({
-        "flow_id":            "hist_" + trips_df.index.astype("string"),
-        "source_id":          trips_df["start_station_id"],
-        "planned_target_id":  trips_df["end_station_id"],
-        "commodity_category": trips_df["rideable_type"],
-        "start_period":       to_period_id(trips_df["started_at"], t0, period_len),
-        "planned_end_period": to_period_id(trips_df["ended_at"], t0, period_len),
-    })
+    trips = pd.DataFrame(
+        {
+            "flow_id": "hist_" + trips_df.index.astype("string"),
+            "source_id": trips_df["start_station_id"],
+            "planned_target_id": trips_df["end_station_id"],
+            "commodity_category": trips_df["rideable_type"],
+            "start_period": to_period_id(trips_df["started_at"], t0, period_len),
+            "planned_end_period": to_period_id(trips_df["ended_at"], t0, period_len),
+        }
+    )
     departed = departed_events(trips)
     arrived = arrived_events(trips, trips["planned_end_period"])
     return finalize_flows(pd.concat([departed, arrived], ignore_index=True))
@@ -109,48 +111,62 @@ def get_historical_flows_df(
 # ---------------------------------------------------------------------------
 def get_facilities_df(stations_df: pd.DataFrame, depots_df: pd.DataFrame) -> pd.DataFrame:
     """Combine stations and depots into one facility table with categories."""
-    return pd.concat([
-        stations_df[['station_id']]
-        .rename(columns={"station_id": "facility_id"})
-        .assign(facility_category="station"),
-        depots_df[['depot_id']]
-        .rename(columns={"depot_id": "facility_id"})
-        .assign(facility_category="depot"),
-    ], ignore_index=True)
+    return pd.concat(
+        [
+            stations_df[["station_id"]]
+            .rename(columns={"station_id": "facility_id"})
+            .assign(facility_category="station"),
+            depots_df[["depot_id"]]
+            .rename(columns={"depot_id": "facility_id"})
+            .assign(facility_category="depot"),
+        ],
+        ignore_index=True,
+    )
 
 
 def get_resources_df(trucks_df: pd.DataFrame) -> pd.DataFrame:
     """Build the resource table from trucks with their category."""
-    return pd.concat([
-        trucks_df[['truck_id']]
-        .rename(columns={"truck_id": "resource_id"})
-        .assign(resource_category="truck"),
-    ], ignore_index=True)
+    return pd.concat(
+        [
+            trucks_df[["truck_id"]]
+            .rename(columns={"truck_id": "resource_id"})
+            .assign(resource_category="truck"),
+        ],
+        ignore_index=True,
+    )
 
 
 def get_commodities_categories_df() -> pd.DataFrame:
     """Return the two bike commodity categories."""
-    return pd.DataFrame({
-        "commodity_category": ["classic_bike", "electric_bike"],
-    })
+    return pd.DataFrame(
+        {
+            "commodity_category": ["classic_bike", "electric_bike"],
+        }
+    )
 
 
 def get_facilities_geo_df(stations_df: pd.DataFrame, depots_df: pd.DataFrame) -> pd.DataFrame:
     """Geographical attributes: facility_id, lat, lng."""
-    return pd.concat([
-        stations_df[["station_id", "lat", "lng"]].rename(columns={"station_id": "facility_id"}),
-        depots_df[["depot_id", "lat", "lng"]].rename(columns={"depot_id": "facility_id"}),
-    ], ignore_index=True)
+    return pd.concat(
+        [
+            stations_df[["station_id", "lat", "lng"]].rename(columns={"station_id": "facility_id"}),
+            depots_df[["depot_id", "lat", "lng"]].rename(columns={"depot_id": "facility_id"}),
+        ],
+        ignore_index=True,
+    )
 
 
 def get_facilities_capacities_df(
     stations_capacities_df: pd.DataFrame, depot_capacities_df: pd.DataFrame
 ) -> pd.DataFrame:
     """Capacities: facility_id, capacity."""
-    return pd.concat([
-        stations_capacities_df.rename(columns={"station_id": "facility_id"}),
-        depot_capacities_df.rename(columns={"depot_id": "facility_id"}),
-    ], ignore_index=True)
+    return pd.concat(
+        [
+            stations_capacities_df.rename(columns={"station_id": "facility_id"}),
+            depot_capacities_df.rename(columns={"depot_id": "facility_id"}),
+        ],
+        ignore_index=True,
+    )
 
 
 def get_resources_capacities_df(trucks_capacities_df: pd.DataFrame) -> pd.DataFrame:
@@ -162,14 +178,17 @@ def get_facilities_costs_df(
     stations_costs_df: pd.DataFrame, depot_costs_df: pd.DataFrame
 ) -> pd.DataFrame:
     """Costs: facility_id, fixed_cost."""
-    return pd.concat([
-        stations_costs_df.rename(
-            columns={"station_id": "facility_id", "fixed_cost_station": "fixed_cost"}
-        ),
-        depot_costs_df.rename(
-            columns={"depot_id": "facility_id", "fixed_cost_depot": "fixed_cost"}
-        ),
-    ], ignore_index=True)
+    return pd.concat(
+        [
+            stations_costs_df.rename(
+                columns={"station_id": "facility_id", "fixed_cost_station": "fixed_cost"}
+            ),
+            depot_costs_df.rename(
+                columns={"depot_id": "facility_id", "fixed_cost_depot": "fixed_cost"}
+            ),
+        ],
+        ignore_index=True,
+    )
 
 
 def get_resources_rates_df(trucks_rates_df: pd.DataFrame) -> pd.DataFrame:
@@ -184,9 +203,7 @@ def get_commodities_categories_rates_df(bike_rates_df: pd.DataFrame) -> pd.DataF
 
 def get_resources_additional_attributes_df(trucks_df: pd.DataFrame) -> pd.DataFrame:
     """Additional attributes: resource_id, home_facility_id."""
-    return (
-        trucks_df.rename(columns={"truck_id": "resource_id"}).assign(home_facility_id="depot_1")
-    )
+    return trucks_df.rename(columns={"truck_id": "resource_id"}).assign(home_facility_id="depot_1")
 
 
 # ---------------------------------------------------------------------------
@@ -197,12 +214,14 @@ RESOURCE_OBS_COLUMNS = ["period_id", "resource_id", "facility_id", "load"]
 
 def empty_resources_obs_df() -> pd.DataFrame:
     """Empty resource-observation table (trucks are idle in the replay)."""
-    return pd.DataFrame({
-        "period_id":   pd.Series(dtype="Int64"),
-        "resource_id": pd.Series(dtype="string"),
-        "facility_id": pd.Series(dtype="string"),
-        "load":        pd.Series(dtype="Int64"),
-    })
+    return pd.DataFrame(
+        {
+            "period_id": pd.Series(dtype="Int64"),
+            "resource_id": pd.Series(dtype="string"),
+            "facility_id": pd.Series(dtype="string"),
+            "load": pd.Series(dtype="Int64"),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -216,11 +235,16 @@ def build_potential_trips(historical_flows_df: pd.DataFrame) -> pd.DataFrame:
     departures are real user departures; history never redirects, so all its
     departures are already ``move_id == 0``, but the filter is kept defensively.
     """
-    cols = ["flow_id", "source_id", "planned_target_id",
-            "commodity_category", "start_period", "planned_end_period"]
+    cols = [
+        "flow_id",
+        "source_id",
+        "planned_target_id",
+        "commodity_category",
+        "start_period",
+        "planned_end_period",
+    ]
     departed = historical_flows_df[
-        (historical_flows_df["event_type"] == "departed")
-        & (historical_flows_df["move_id"] == 0)
+        (historical_flows_df["event_type"] == "departed") & (historical_flows_df["move_id"] == 0)
     ]
     return departed[cols].reset_index(drop=True)
 
@@ -254,6 +278,7 @@ def get_saturated_inventory_df(
     inv = stations.merge(commodities_categories_df[["commodity_category"]], how="cross")
     inv["quantity"] = quantity
     return inv.reset_index(drop=True)
+
 
 # ---------------------------------------------------------------------------
 # Resolved model data container
@@ -299,9 +324,13 @@ class ResolvedModelData:
         self.facilities_capacities_df = get_facilities_capacities_df(
             raw.stations_capacities_df, raw.depot_capacities_df
         )
-        self.facilities_capacities_df["capacity"] = self.facilities_capacities_df["capacity"]*scale_capacity_factor
+        self.facilities_capacities_df["capacity"] = (
+            self.facilities_capacities_df["capacity"] * scale_capacity_factor
+        )
         # if capacity < 10 then capacity = 10
-        self.facilities_capacities_df["capacity"] = self.facilities_capacities_df["capacity"].apply(lambda x: max(x, 10))
+        self.facilities_capacities_df["capacity"] = self.facilities_capacities_df["capacity"].apply(
+            lambda x: max(x, 10)
+        )
         self.resources_capacities_df = get_resources_capacities_df(raw.trucks_capacities_df)
         self.facilities_costs_df = get_facilities_costs_df(
             raw.stations_costs_df, raw.depot_costs_df
@@ -315,18 +344,26 @@ class ResolvedModelData:
         self.period_len = period_len
         self.t0 = raw.trips_df["started_at"].min().floor("h")
         self.periods_df = get_periods_df(raw.trips_df, self.t0, period_len)
-  
+
         # Historical observations: the marginals of the flow log, assembled by
         # the shared ``observe`` bundle so they match the simulated set below.
         self.historical_flows_df = get_historical_flows_df(raw.trips_df, self.t0, period_len)
         self.historical_resources_df = empty_resources_obs_df()
-        
+
         historical_departures_df = flows_to_departures(self.historical_flows_df)
 
-        self.initial_inventory_df = historical_departures_df.groupby(['facility_id','commodity_category'])['quantity'].max().reset_index().sort_values('quantity', ascending=False).reset_index(drop=True)
-        self.initial_inventory_df['quantity'] = self.initial_inventory_df['quantity'] + 10
+        self.initial_inventory_df = (
+            historical_departures_df.groupby(["facility_id", "commodity_category"])["quantity"]
+            .max()
+            .reset_index()
+            .sort_values("quantity", ascending=False)
+            .reset_index(drop=True)
+        )
+        self.initial_inventory_df["quantity"] = self.initial_inventory_df["quantity"] + 10
 
-        self.historical_inventory_df = get_inventory_df(self.historical_flows_df, self.initial_inventory_df)
+        self.historical_inventory_df = get_inventory_df(
+            self.historical_flows_df, self.initial_inventory_df
+        )
         self.historical_demand_df = historical_departures_df
         self.historical_departures_df = historical_departures_df
         self.historical_arrivals_df = flows_to_arrivals(self.historical_flows_df)
@@ -373,7 +410,9 @@ def attach_simulation(
     resolved.simulated_resources_df = (
         simulated_resources_df if simulated_resources_df is not None else empty_resources_obs_df()
     )
-    resolved.simulated_inventory_df = get_inventory_df(resolved.simulated_flows_df, resolved.initial_inventory_df)
+    resolved.simulated_inventory_df = get_inventory_df(
+        resolved.simulated_flows_df, resolved.initial_inventory_df
+    )
     simulated_departures_df = flows_to_departures(resolved.simulated_flows_df)
     resolved.simulated_demand_df = simulated_departures_df
     resolved.simulated_departures_df = simulated_departures_df

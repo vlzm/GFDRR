@@ -6,7 +6,12 @@
       "Bash(python -m pytest tests/unit/consumers/simulator/test_latent_demand_inflator.py -v)",
       "Bash(uv run *)",
       "Bash(.venv/Scripts/pytest.exe tests/unit/consumers/simulator/test_latent_demand_inflator.py tests/unit/consumers/simulator/test_dispatch_lifecycle.py -v --no-cov)",
-      "PowerShell(& .\\\\.venv\\\\Scripts\\\\pytest.exe tests/unit/consumers/simulator/test_latent_demand_inflator.py tests/unit/consumers/simulator/test_dispatch_lifecycle.py -v --no-cov 2>&1 | Select-Object -Last 80)"
+      "PowerShell(& .\\\\.venv\\\\Scripts\\\\pytest.exe tests/unit/consumers/simulator/test_latent_demand_inflator.py tests/unit/consumers/simulator/test_dispatch_lifecycle.py -v --no-cov 2>&1 | Select-Object -Last 80)",
+      "Bash(python -)",
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(ruff check *)",
+      "Bash(git stash *)",
+      "Bash(mypy gbp/model/flows.py gbp/consumers/simulator/engine.py)"
     ]
   }
 }

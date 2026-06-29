@@ -39,8 +39,10 @@ def adjust_inventory(inventory: pd.DataFrame, deltas: pd.DataFrame) -> pd.DataFr
 def departure_deltas(trips: pd.DataFrame) -> pd.DataFrame:
     """-1 per departing bike, grouped by (source, commodity)."""
     deltas = (
-        trips.groupby(["source_id", "commodity_category"]).size()
-        .reset_index(name="delta").rename(columns={"source_id": "facility_id"})
+        trips.groupby(["source_id", "commodity_category"])
+        .size()
+        .reset_index(name="delta")
+        .rename(columns={"source_id": "facility_id"})
     )
     deltas["delta"] = -deltas["delta"]
     return deltas
@@ -54,16 +56,20 @@ def dock_deltas(docked: pd.DataFrame, target_col: str = "planned_target_id") -> 
     flow was redirected elsewhere.
     """
     return (
-        docked.groupby([target_col, "commodity_category"]).size()
-        .reset_index(name="delta").rename(columns={target_col: "facility_id"})
+        docked.groupby([target_col, "commodity_category"])
+        .size()
+        .reset_index(name="delta")
+        .rename(columns={target_col: "facility_id"})
     )
 
 
 def departure_deltas_from_counts(departures: pd.DataFrame) -> pd.DataFrame:
     """``-departed`` per (facility, commodity) for the inventory decrement."""
-    d = (departures[departures["departed"] > 0]
-         .rename(columns={"departed": "delta"})
-         [["facility_id", "commodity_category", "delta"]].copy())
+    d = (
+        departures[departures["departed"] > 0]
+        .rename(columns={"departed": "delta"})[["facility_id", "commodity_category", "delta"]]
+        .copy()
+    )
     d["delta"] = -d["delta"]
     return d
 
@@ -224,7 +230,7 @@ class PhaseResult:
     """
 
     state: SimulationState
-    new_flows: Any = None   # DataFrame of new flow-event rows, or None
+    new_flows: Any = None  # DataFrame of new flow-event rows, or None
 
     @classmethod
     def empty(cls, state: SimulationState) -> "PhaseResult":

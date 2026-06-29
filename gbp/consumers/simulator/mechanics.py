@@ -50,9 +50,7 @@ def free_docks(inventory: pd.DataFrame, capacities: pd.DataFrame) -> pd.Series:
     return free.clip(lower=0).astype("int64")
 
 
-def dock_up_to_capacity(
-    due: pd.DataFrame, free: pd.Series
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def dock_up_to_capacity(due: pd.DataFrame, free: pd.Series) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split docking flows at their planned target into ``(fits, overflow)``.
 
     Within each target the first ``free`` flows (in row order) dock; the rest are
@@ -103,10 +101,16 @@ def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame
     """
     candidates = free[free > 0].index
     coords = geo.set_index("facility_id")[["lat", "lng"]]
-    target_coords = (coords.loc[coords.index.intersection(targets.unique())]
-                     .reset_index().rename(columns={"facility_id": "target"}))
-    cand = (coords.loc[coords.index.intersection(candidates)]
-            .reset_index().rename(columns={"facility_id": "candidate"}))
+    target_coords = (
+        coords.loc[coords.index.intersection(targets.unique())]
+        .reset_index()
+        .rename(columns={"facility_id": "target"})
+    )
+    cand = (
+        coords.loc[coords.index.intersection(candidates)]
+        .reset_index()
+        .rename(columns={"facility_id": "candidate"})
+    )
     pairs = target_coords.merge(cand, how="cross")
     pairs = pairs[pairs["target"] != pairs["candidate"]]
     pairs["dist2"] = (pairs["lat_x"] - pairs["lat_y"]) ** 2 + (pairs["lng_x"] - pairs["lng_y"]) ** 2
@@ -151,7 +155,14 @@ def plan_overflow_redirect(
     redirected_batches = []
     remaining = overflow
     running = inventory
+    # Each round is its own inventory step: it docks bikes (filling some docks)
+    # before the next round sees the docks it left. ``redirect_round`` records
+    # which round a flow docked in (1-based; round 0 is the dock batch that runs
+    # before any redirect), so finalize_flows can order the rounds as steps and a
+    # neighbour's inventory at one flow's redirect reflects the earlier rounds.
+    redirect_round = 0
     while not remaining.empty:
+        redirect_round += 1
         free = free_docks(running, capacities)
         if not (free > 0).any():
             break
@@ -162,7 +173,7 @@ def plan_overflow_redirect(
             break
         rank = candidate.groupby("realized_target_id").cumcount()
         fits = rank < candidate["realized_target_id"].map(free)
-        docked = candidate[fits]
+        docked = candidate[fits].assign(redirect_round=redirect_round)
         redirected_batches.append(docked)
         running = adjust_inventory(running, dock_deltas(docked, "realized_target_id"))
         remaining = candidate[~fits].drop(columns="realized_target_id")
@@ -238,13 +249,23 @@ def form_potential_trips(
         ``period_id``, ``source_id``, ``planned_target_id``, ``commodity_category``,
         ``quantity``, ``planned_end_period`` -- only rows with ``quantity > 0``.
     """
-    cols = ["period_id", "source_id", "planned_target_id", "commodity_category",
-            "quantity", "planned_end_period"]
+    cols = [
+        "period_id",
+        "source_id",
+        "planned_target_id",
+        "commodity_category",
+        "quantity",
+        "planned_end_period",
+    ]
     dep = departures[departures["quantity"] > 0]
     if dep.empty:
         return pd.DataFrame({c: pd.Series(dtype="object") for c in cols})
-    
-    m = dep.merge(od_matrix[od_matrix['period_id'] == period_id].drop(columns = ['period_id']), on=["source_id", "commodity_category"], how="left")
+
+    m = dep.merge(
+        od_matrix[od_matrix["period_id"] == period_id].drop(columns=["period_id"]),
+        on=["source_id", "commodity_category"],
+        how="left",
+    )
     m = m[m["probability"].notna()].copy()
     m["expected"] = m["quantity"] * m["probability"]
     m["base"] = np.floor(m["expected"]).astype("int64")
@@ -252,22 +273,25 @@ def form_potential_trips(
 
     # Largest-remainder rounding: hand the per-source leftover to the targets
     # with the largest fractional parts, so sum(quantity) == departures exactly.
-    m = m.sort_values(["source_id", "commodity_category", "remainder"],
-                      ascending=[True, True, False])
+    m = m.sort_values(
+        ["source_id", "commodity_category", "remainder"], ascending=[True, True, False]
+    )
     grp = m.groupby(["source_id", "commodity_category"])
     m["rank"] = grp.cumcount()
     m["leftover"] = m["quantity"] - grp["base"].transform("sum")
     m["qty"] = m["base"] + (m["rank"] < m["leftover"]).astype("int64")
     m = m[m["qty"] > 0]
 
-    return pd.DataFrame({
-        "period_id":          period_id,
-        "source_id":          m["source_id"].values,
-        "planned_target_id":  m["planned_target_id"].values,
-        "commodity_category": m["commodity_category"].values,
-        "quantity":           m["qty"].astype("Int64").values,
-        "planned_end_period": (period_id + m["duration"]).astype("Int64").values,
-    })
+    return pd.DataFrame(
+        {
+            "period_id": period_id,
+            "source_id": m["source_id"].values,
+            "planned_target_id": m["planned_target_id"].values,
+            "commodity_category": m["commodity_category"].values,
+            "quantity": m["qty"].astype("Int64").values,
+            "planned_end_period": (period_id + m["duration"]).astype("Int64").values,
+        }
+    )
 
 
 def expand_potential_trips(potential_trips: pd.DataFrame, period_id: int) -> pd.DataFrame:
@@ -277,13 +301,16 @@ def expand_potential_trips(potential_trips: pd.DataFrame, period_id: int) -> pd.
     that many trip rows and assigns a simulator ``flow_id`` (``sim_`` prefix so it
     cannot collide with the historical ``hist_`` ids).
     """
-    rep = (potential_trips.loc[potential_trips.index.repeat(potential_trips["quantity"])]
-           .reset_index(drop=True))
-    return pd.DataFrame({
-        "flow_id":            "sim_" + str(period_id) + "_" + rep.index.astype("string"),
-        "source_id":          rep["source_id"],
-        "planned_target_id":  rep["planned_target_id"],
-        "commodity_category": rep["commodity_category"],
-        "start_period":       period_id,
-        "planned_end_period": rep["planned_end_period"],
-    })
+    rep = potential_trips.loc[
+        potential_trips.index.repeat(potential_trips["quantity"])
+    ].reset_index(drop=True)
+    return pd.DataFrame(
+        {
+            "flow_id": "sim_" + str(period_id) + "_" + rep.index.astype("string"),
+            "source_id": rep["source_id"],
+            "planned_target_id": rep["planned_target_id"],
+            "commodity_category": rep["commodity_category"],
+            "start_period": period_id,
+            "planned_end_period": rep["planned_end_period"],
+        }
+    )

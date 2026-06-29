@@ -22,8 +22,8 @@ from gbp.model.flows import FLOW_EVENT_COLUMNS
 #: ended; the four-event form is a redirect (bounce, then a second arc).
 LEGAL_FLOW_SHAPES = {
     ("departed",),
-    ("departed", "arrived"),                            # normal trip
-    ("departed", "lost"),                               # dock-full loss
+    ("departed", "arrived"),  # normal trip
+    ("departed", "lost"),  # dock-full loss
     ("departed", "redirected", "departed", "arrived"),  # redirect: two arcs
 }
 

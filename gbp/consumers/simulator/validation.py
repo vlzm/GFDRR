@@ -66,12 +66,15 @@ def _check_projection_consistency(
         return []
     projected = get_inventory_df(flows, initial)
     last = int(projected["period_id"].max())
-    proj = (projected[projected["period_id"] == last]
-            .rename(columns={"quantity": "projected"})[_KEYS + ["projected"]])
+    proj = projected[projected["period_id"] == last].rename(columns={"quantity": "projected"})[
+        _KEYS + ["projected"]
+    ]
     live = live.rename(columns={"quantity": "live"})[_KEYS + ["live"]]
-    merged = (live.astype(dict.fromkeys(_KEYS, "string"))
-              .merge(proj.astype(dict.fromkeys(_KEYS, "string")), on=_KEYS, how="outer")
-              .fillna(0))
+    merged = (
+        live.astype(dict.fromkeys(_KEYS, "string"))
+        .merge(proj.astype(dict.fromkeys(_KEYS, "string")), on=_KEYS, how="outer")
+        .fillna(0)
+    )
     bad = merged[merged["live"] != merged["projected"]]
     return [
         f"I3 {r.facility_id}/{r.commodity_category}: "

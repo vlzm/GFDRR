@@ -65,6 +65,8 @@ projection of them. This is the anchor; read it first.
 | `resource_id` | The resource that carried it; NA for user trips (§5b). |
 | `quantity` | Bikes in the event. One per bike after expansion (§3). |
 | `reason` | Why a flow did not simply arrive: `stockout` or `dock_full`; NA otherwise (§1). |
+| `redirect_round` | The round a redirected flow docked in: `0` for a normal dock batch, `1..` for a redirect's rounds. Set by the redirect mechanics; `0` on every other row. Part of the `step_id` order (§0.1). |
+| `step_id` | Run-global ordinal of the inventory step the event belongs to; the inventory time axis below the period (§0.1). Assigned by `finalize_flows`. |
 
 **Two arcs and the two roles of `departed`.** A normal trip is one arc
 (`move_id = 0`): a `departed` then an `arrived`. A redirect is **two** arcs: the
@@ -82,6 +84,32 @@ Every reader that means "a user departure" filters `move_id == 0`
 (`flows_to_departures`, `flows_to_od_matrix`, the `−1` in `get_inventory_df`).
 `lost` always has `move_id = 0`: a stockout has no arc, a dock-full loss has the
 single arc of an ordinary trip.
+
+### 0.1. Moment and step (the inventory time axis)
+
+The journal also carries time *below* the period. Inventory changes in discrete
+**steps**: one batch of `+1`/`-1` applied together (a dock batch, a period's
+departures, one redirect round). Between two steps inventory is constant.
+
+| Canonical | Meaning | Avoid |
+|---|---|---|
+| `step` / `step_id` | One inventory step. `step_id` is its run-global ordinal, monotonic: it orders periods, and inside a period the phases (dock-previous → departures → dock-same) and, inside a redirect, its rounds. Events applied together share one `step_id`. | `seq`, `tick`, `moment_id` |
+| `moment` | Inventory seen just **before** or just **after** a step — a prose word and the `_before`/`_after` suffix on inventory read-models. A step has two moments around it; the after-moment of step `s-1` is the before-moment of step `s`. | `moment` as a column name |
+
+`step_id` is derived by **one rule** from the journal itself: `finalize_flows`
+numbers the distinct `(period_id, phase_rank, redirect_round)` tuples in order,
+0, 1, 2, …. `phase_rank` (read from the event semantics: dock-previous = 0,
+the period's own departures and stockout losses = 1, dock-same = 2) orders the
+phases inside a period; `redirect_round` orders a redirect's rounds inside the
+docking phase. History and simulation get their `step_id` from this same formula,
+so they agree by construction rather than by two definitions kept in sync.
+
+`step_id` carries only the *order*, never the inventory: inventory at any moment
+stays a pure function of the journal (initial inventory plus the cumulative
+`+1`/`-1` along `step_id`). Per-period inventory (`get_inventory_df`, §9) is the
+coarse view — the value at each period's last step; `inventory_at_moments` is the
+fine view, with `inventory_before` / `inventory_after` per step (§2 — never
+`stock_before` / `inventory_snapshot`).
 
 ---
 

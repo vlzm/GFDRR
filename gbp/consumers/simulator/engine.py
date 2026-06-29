@@ -63,7 +63,7 @@ class Environment:
     @property
     def is_done(self) -> bool:
         """True once every period has been stepped."""
-        return self._period_cursor >= len(self._periods[:self._config.number_of_periods])
+        return self._period_cursor >= len(self._periods[: self._config.number_of_periods])
 
     def run(self) -> SimulationState:
         """Step every period to the end, optionally check invariants, return the state."""

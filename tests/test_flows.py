@@ -19,14 +19,16 @@ CLASSIC = "classic_bike"
 
 def _trip_frame() -> pd.DataFrame:
     """One trip A->B, departing period 5, due to dock period 7."""
-    return pd.DataFrame({
-        "flow_id":            ["sim_5_0"],
-        "source_id":          ["A"],
-        "planned_target_id":  ["B"],
-        "commodity_category": [CLASSIC],
-        "start_period":       [5],
-        "planned_end_period": [7],
-    })
+    return pd.DataFrame(
+        {
+            "flow_id": ["sim_5_0"],
+            "source_id": ["A"],
+            "planned_target_id": ["B"],
+            "commodity_category": [CLASSIC],
+            "start_period": [5],
+            "planned_end_period": [7],
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -68,12 +70,14 @@ def test_redirect_continuation_is_the_second_arc():
 
 @pytest.mark.parametrize("reason, expected_event_id", [("stockout", 0), ("dock_full", 1)])
 def test_lost_event_id_follows_reason(reason, expected_event_id):
-    losses = pd.DataFrame({
-        "flow_id":            ["sim_5_0"] if reason == "dock_full" else [pd.NA],
-        "source_id":          ["A"],
-        "commodity_category": [CLASSIC],
-        "quantity":           [1 if reason == "dock_full" else 3],
-    })
+    losses = pd.DataFrame(
+        {
+            "flow_id": ["sim_5_0"] if reason == "dock_full" else [pd.NA],
+            "source_id": ["A"],
+            "commodity_category": [CLASSIC],
+            "quantity": [1 if reason == "dock_full" else 3],
+        }
+    )
     row = J.lost_events(losses, 7, reason).iloc[0]
     assert (row["move_id"], row["event_id"]) == (0, expected_event_id)
     assert pd.isna(row["realized_target_id"])
@@ -85,11 +89,16 @@ def test_lost_event_id_follows_reason(reason, expected_event_id):
 def test_full_redirect_journal_is_well_formed():
     trip = _trip_frame()
     redirected = trip.assign(realized_target_id="C")
-    journal = J.finalize_flows(pd.concat([
-        J.departed_events(trip),               # (0, 0)
-        J.redirected_events(redirected, 7),    # (0, 1) bounce
-        J.redirect_continuation_events(redirected, 7),  # (1, 2) + (1, 3)
-    ], ignore_index=True))
+    journal = J.finalize_flows(
+        pd.concat(
+            [
+                J.departed_events(trip),  # (0, 0)
+                J.redirected_events(redirected, 7),  # (0, 1) bounce
+                J.redirect_continuation_events(redirected, 7),  # (1, 2) + (1, 3)
+            ],
+            ignore_index=True,
+        )
+    )
     assert check_journal_well_formed(journal) == []
 
 
@@ -102,9 +111,9 @@ def test_empty_journal_is_well_formed():
 # ---------------------------------------------------------------------------
 def _good_normal_journal() -> pd.DataFrame:
     trip = _trip_frame()
-    return J.finalize_flows(pd.concat(
-        [J.departed_events(trip), J.arrived_events(trip, 7)], ignore_index=True
-    ))
+    return J.finalize_flows(
+        pd.concat([J.departed_events(trip), J.arrived_events(trip, 7)], ignore_index=True)
+    )
 
 
 def test_checker_flags_duplicate_event_id():
@@ -117,10 +126,12 @@ def test_checker_flags_duplicate_event_id():
 def test_checker_flags_a_redirect_with_no_continuation():
     # A bounce with no second arc -- the exact bug the redesign must avoid.
     trip = _trip_frame()
-    journal = J.finalize_flows(pd.concat(
-        [J.departed_events(trip), J.redirected_events(trip.assign(realized_target_id="C"), 7)],
-        ignore_index=True,
-    ))
+    journal = J.finalize_flows(
+        pd.concat(
+            [J.departed_events(trip), J.redirected_events(trip.assign(realized_target_id="C"), 7)],
+            ignore_index=True,
+        )
+    )
     violations = check_journal_well_formed(journal)
     assert any("illegal event sequence" in m for m in violations)
 
@@ -143,9 +154,9 @@ def test_checker_flags_time_running_backwards():
 def test_finalize_orders_events_within_a_flow():
     trip = _trip_frame()
     # Concatenate arrived before departed; finalize must still order 0 then 1.
-    journal = J.finalize_flows(pd.concat(
-        [J.arrived_events(trip, 7), J.departed_events(trip)], ignore_index=True
-    ))
+    journal = J.finalize_flows(
+        pd.concat([J.arrived_events(trip, 7), J.departed_events(trip)], ignore_index=True)
+    )
     assert journal["event_id"].tolist() == [0, 1]
     assert journal["event_type"].tolist() == ["departed", "arrived"]
     assert list(journal.columns) == FLOW_EVENT_COLUMNS

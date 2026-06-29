@@ -34,10 +34,24 @@ import pandas as pd
 # time, so the live and finalized journals carry them alike. Row uniqueness is
 # the pair ``(flow_id, event_id)``.
 FLOW_EVENT_COLUMNS = [
-    "flow_id", "move_id", "event_id", "period_id", "flow_type", "event_type",
-    "commodity_category", "source_id", "planned_target_id", "realized_target_id",
-    "start_period", "planned_end_period", "realized_end_period",
-    "resource_id", "quantity", "reason",
+    "flow_id",
+    "move_id",
+    "event_id",
+    "period_id",
+    "flow_type",
+    "event_type",
+    "commodity_category",
+    "source_id",
+    "planned_target_id",
+    "realized_target_id",
+    "start_period",
+    "planned_end_period",
+    "realized_end_period",
+    "resource_id",
+    "quantity",
+    "reason",
+    "redirect_round",
+    "step_id",
 ]
 
 FLOW_EVENT_DTYPES = {
@@ -57,6 +71,8 @@ FLOW_EVENT_DTYPES = {
     "resource_id": "string",
     "quantity": "Int64",
     "reason": "string",
+    "redirect_round": "Int64",
+    "step_id": "Int64",
 }
 
 # Event types that dock a bike (+1 at ``realized_target_id``). Only a normal
@@ -72,9 +88,16 @@ DOCKING_EVENT_TYPES = ["arrived"]
 # Flow-event builders
 # ---------------------------------------------------------------------------
 def _typed_events(events_df: pd.DataFrame) -> pd.DataFrame:
-    """Cast event columns to the canonical dtypes so frames concat cleanly."""
+    """Cast event columns to the canonical dtypes so frames concat cleanly.
+
+    The two ordering columns -- ``step_id`` and ``redirect_round`` -- are filled
+    by :func:`finalize_flows`, not the builders, so they are cast only when
+    already present (an empty journal carries them; a freshly built event batch
+    does not, except a redirect batch the phase tags with ``redirect_round``).
+    """
     for col, dtype in FLOW_EVENT_DTYPES.items():
-        events_df[col] = events_df[col].astype(dtype)
+        if col in events_df.columns:
+            events_df[col] = events_df[col].astype(dtype)
     return events_df
 
 
@@ -86,24 +109,28 @@ def departed_events(trips: pd.DataFrame) -> pd.DataFrame:
     :func:`redirect_continuation_events` instead and carries ``move_id == 1``, so
     readers that count user departures filter on ``move_id == 0``.
     """
-    return _typed_events(pd.DataFrame({
-        "flow_id":             trips["flow_id"],
-        "move_id":             0,
-        "event_id":            0,
-        "period_id":           trips["start_period"],
-        "flow_type":           "user_trip",
-        "event_type":          "departed",
-        "commodity_category":  trips["commodity_category"],
-        "source_id":           trips["source_id"],
-        "planned_target_id":   trips["planned_target_id"],
-        "realized_target_id":  pd.NA,
-        "start_period":        trips["start_period"],
-        "planned_end_period":  trips["planned_end_period"],
-        "realized_end_period": pd.NA,
-        "resource_id":         pd.NA,
-        "quantity":            1,
-        "reason":              pd.NA,
-    }))
+    return _typed_events(
+        pd.DataFrame(
+            {
+                "flow_id": trips["flow_id"],
+                "move_id": 0,
+                "event_id": 0,
+                "period_id": trips["start_period"],
+                "flow_type": "user_trip",
+                "event_type": "departed",
+                "commodity_category": trips["commodity_category"],
+                "source_id": trips["source_id"],
+                "planned_target_id": trips["planned_target_id"],
+                "realized_target_id": pd.NA,
+                "start_period": trips["start_period"],
+                "planned_end_period": trips["planned_end_period"],
+                "realized_end_period": pd.NA,
+                "resource_id": pd.NA,
+                "quantity": 1,
+                "reason": pd.NA,
+            }
+        )
+    )
 
 
 def arrived_events(in_transit_due: pd.DataFrame, period_id: int | pd.Series) -> pd.DataFrame:
@@ -117,24 +144,28 @@ def arrived_events(in_transit_due: pd.DataFrame, period_id: int | pd.Series) -> 
     in the same period (the simulator), or a per-row Series of end periods when
     each flow docks at its own time (the historical log).
     """
-    return _typed_events(pd.DataFrame({
-        "flow_id":             in_transit_due["flow_id"],
-        "move_id":             0,
-        "event_id":            1,
-        "period_id":           period_id,
-        "flow_type":           "user_trip",
-        "event_type":          "arrived",
-        "commodity_category":  in_transit_due["commodity_category"],
-        "source_id":           in_transit_due["source_id"],
-        "planned_target_id":   in_transit_due["planned_target_id"],
-        "realized_target_id":  in_transit_due["planned_target_id"],
-        "start_period":        in_transit_due["start_period"],
-        "planned_end_period":  in_transit_due["planned_end_period"],
-        "realized_end_period": period_id,
-        "resource_id":         pd.NA,
-        "quantity":            1,
-        "reason":              pd.NA,
-    }))
+    return _typed_events(
+        pd.DataFrame(
+            {
+                "flow_id": in_transit_due["flow_id"],
+                "move_id": 0,
+                "event_id": 1,
+                "period_id": period_id,
+                "flow_type": "user_trip",
+                "event_type": "arrived",
+                "commodity_category": in_transit_due["commodity_category"],
+                "source_id": in_transit_due["source_id"],
+                "planned_target_id": in_transit_due["planned_target_id"],
+                "realized_target_id": in_transit_due["planned_target_id"],
+                "start_period": in_transit_due["start_period"],
+                "planned_end_period": in_transit_due["planned_end_period"],
+                "realized_end_period": period_id,
+                "resource_id": pd.NA,
+                "quantity": 1,
+                "reason": pd.NA,
+            }
+        )
+    )
 
 
 def redirected_events(flows: pd.DataFrame, period_id: int) -> pd.DataFrame:
@@ -160,24 +191,28 @@ def redirected_events(flows: pd.DataFrame, period_id: int) -> pd.DataFrame:
     pandas.DataFrame
         One ``redirected`` flow-event row per flow.
     """
-    return _typed_events(pd.DataFrame({
-        "flow_id":             flows["flow_id"],
-        "move_id":             0,
-        "event_id":            1,
-        "period_id":           period_id,
-        "flow_type":           "user_trip",
-        "event_type":          "redirected",
-        "commodity_category":  flows["commodity_category"],
-        "source_id":           flows["source_id"],
-        "planned_target_id":   flows["planned_target_id"],
-        "realized_target_id":  pd.NA,
-        "start_period":        flows["start_period"],
-        "planned_end_period":  flows["planned_end_period"],
-        "realized_end_period": period_id,
-        "resource_id":         pd.NA,
-        "quantity":            1,
-        "reason":              "dock_full",
-    }))
+    return _typed_events(
+        pd.DataFrame(
+            {
+                "flow_id": flows["flow_id"],
+                "move_id": 0,
+                "event_id": 1,
+                "period_id": period_id,
+                "flow_type": "user_trip",
+                "event_type": "redirected",
+                "commodity_category": flows["commodity_category"],
+                "source_id": flows["source_id"],
+                "planned_target_id": flows["planned_target_id"],
+                "realized_target_id": pd.NA,
+                "start_period": flows["start_period"],
+                "planned_end_period": flows["planned_end_period"],
+                "realized_end_period": period_id,
+                "resource_id": pd.NA,
+                "quantity": 1,
+                "reason": "dock_full",
+            }
+        )
+    )
 
 
 def redirect_continuation_events(redirected: pd.DataFrame, period_id: int) -> pd.DataFrame:
@@ -196,8 +231,9 @@ def redirect_continuation_events(redirected: pd.DataFrame, period_id: int) -> pd
     ----------
     redirected : pandas.DataFrame
         The overflow flows that were redirected, carrying ``flow_id``,
-        ``commodity_category``, ``planned_target_id`` (B, the full station) and
-        ``realized_target_id`` (C, the station found for them).
+        ``commodity_category``, ``planned_target_id`` (B, the full station),
+        ``realized_target_id`` (C, the station found for them) and ``start_period``
+        (the flow's opening period, copied onto the continuation rows).
     period_id : int
         The period the redirect happens in (departure from B and docking at C
         both fall here).
@@ -208,36 +244,49 @@ def redirect_continuation_events(redirected: pd.DataFrame, period_id: int) -> pd
         Two rows per redirected flow: a move-1 ``departed`` then a move-1
         ``arrived``, ready to append to the journal.
     """
-    full_station = redirected["planned_target_id"]   # B: source of the second leg
-    docked_at = redirected["realized_target_id"]      # C: where the bike docks
+    full_station = redirected["planned_target_id"]  # B: source of the second leg
+    docked_at = redirected["realized_target_id"]  # C: where the bike docks
+    # ``start_period`` is the flow's opening period on every row of the flow, the
+    # move-1 continuation included -- it is when the *flow* departed, not when the
+    # second arc starts. The second arc's own timing (its bounce and docking) is
+    # ``period_id`` here, both this period. (If a second arc ever needs its own
+    # start, add an ``arc_start_period`` column rather than overloading this one.)
     common = {
-        "flow_id":             redirected["flow_id"],
-        "period_id":           period_id,
-        "flow_type":           "user_trip",
-        "commodity_category":  redirected["commodity_category"],
-        "source_id":           full_station,
-        "planned_target_id":   docked_at,
-        "start_period":        period_id,
-        "planned_end_period":  period_id,
+        "flow_id": redirected["flow_id"],
+        "period_id": period_id,
+        "flow_type": "user_trip",
+        "commodity_category": redirected["commodity_category"],
+        "source_id": full_station,
+        "planned_target_id": docked_at,
+        "start_period": redirected["start_period"],
+        "planned_end_period": period_id,
         "realized_end_period": period_id,
-        "resource_id":         pd.NA,
-        "quantity":            1,
-        "reason":              pd.NA,
+        "resource_id": pd.NA,
+        "quantity": 1,
+        "reason": pd.NA,
     }
-    departed = _typed_events(pd.DataFrame({
-        **common,
-        "move_id":            1,
-        "event_id":           2,
-        "event_type":         "departed",
-        "realized_target_id": pd.NA,
-    }))
-    arrived = _typed_events(pd.DataFrame({
-        **common,
-        "move_id":            1,
-        "event_id":           3,
-        "event_type":         "arrived",
-        "realized_target_id": docked_at,
-    }))
+    departed = _typed_events(
+        pd.DataFrame(
+            {
+                **common,
+                "move_id": 1,
+                "event_id": 2,
+                "event_type": "departed",
+                "realized_target_id": pd.NA,
+            }
+        )
+    )
+    arrived = _typed_events(
+        pd.DataFrame(
+            {
+                **common,
+                "move_id": 1,
+                "event_id": 3,
+                "event_type": "arrived",
+                "realized_target_id": docked_at,
+            }
+        )
+    )
     return pd.concat([departed, arrived], ignore_index=True)
 
 
@@ -284,36 +333,44 @@ def lost_events(losses: pd.DataFrame, period_id: int, reason: str) -> pd.DataFra
     # the single arc of an ordinary trip.
     event_id = 0 if reason == "stockout" else 1
     na = pd.Series([pd.NA] * len(losses), index=losses.index)
-    return _typed_events(pd.DataFrame({
-        "flow_id":             losses.get("flow_id", na),
-        "move_id":             0,
-        "event_id":            event_id,
-        "period_id":           period_id,
-        "flow_type":           "user_trip",
-        "event_type":          "lost",
-        "commodity_category":  losses["commodity_category"],
-        "source_id":           losses["source_id"],
-        "planned_target_id":   losses.get("planned_target_id", na),
-        "realized_target_id":  pd.NA,
-        "start_period":        losses.get("start_period", na),
-        "planned_end_period":  losses.get("planned_end_period", na),
-        "realized_end_period": pd.NA,
-        "resource_id":         pd.NA,
-        "quantity":            losses["quantity"],
-        "reason":              reason,
-    }))
+    return _typed_events(
+        pd.DataFrame(
+            {
+                "flow_id": losses.get("flow_id", na),
+                "move_id": 0,
+                "event_id": event_id,
+                "period_id": period_id,
+                "flow_type": "user_trip",
+                "event_type": "lost",
+                "commodity_category": losses["commodity_category"],
+                "source_id": losses["source_id"],
+                "planned_target_id": losses.get("planned_target_id", na),
+                "realized_target_id": pd.NA,
+                "start_period": losses.get("start_period", na),
+                "planned_end_period": losses.get("planned_end_period", na),
+                "realized_end_period": pd.NA,
+                "resource_id": pd.NA,
+                "quantity": losses["quantity"],
+                "reason": reason,
+            }
+        )
+    )
 
 
 def empty_in_transit() -> pd.DataFrame:
     """Empty in-transit table (a ``departed``-event frame with no rows)."""
-    return departed_events(pd.DataFrame({
-        "flow_id":            pd.Series(dtype="string"),
-        "source_id":          pd.Series(dtype="string"),
-        "planned_target_id":  pd.Series(dtype="string"),
-        "commodity_category": pd.Series(dtype="string"),
-        "start_period":       pd.Series(dtype="Int64"),
-        "planned_end_period": pd.Series(dtype="Int64"),
-    }))
+    return departed_events(
+        pd.DataFrame(
+            {
+                "flow_id": pd.Series(dtype="string"),
+                "source_id": pd.Series(dtype="string"),
+                "planned_target_id": pd.Series(dtype="string"),
+                "commodity_category": pd.Series(dtype="string"),
+                "start_period": pd.Series(dtype="Int64"),
+                "planned_end_period": pd.Series(dtype="Int64"),
+            }
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -327,20 +384,93 @@ def empty_flows_journal() -> pd.DataFrame:
     creates it, so the growing journal already has them and
     :func:`finalize_flows` only sorts and projects -- it assigns no id.
     """
-    return pd.DataFrame(
-        {col: pd.Series(dtype=dtype) for col, dtype in FLOW_EVENT_DTYPES.items()}
+    return pd.DataFrame({col: pd.Series(dtype=dtype) for col, dtype in FLOW_EVENT_DTYPES.items()})
+
+
+def _phase_rank(flows: pd.DataFrame) -> pd.Series:
+    """Order events inside a period by the phase that moves inventory.
+
+    Read from the event semantics alone, matching the simulator's phase order
+    (dock-previous -> form departures -> dock-same). ``t`` is the flow's opening
+    period, which is ``start_period`` on every row of a flow (the move-1
+    continuation included):
+
+    - ``0`` -- a docking-phase event for a flow that opened in an **earlier**
+      period (``period_id > t``): the ``DockArrivals("previous")`` batch.
+    - ``1`` -- the period's own activity: a real user ``departed`` (``move_id ==
+      0``, the ``-1``) and a stockout ``lost`` (touches no inventory). The middle
+      phase.
+    - ``2`` -- a docking-phase event for a flow that opened in **this** period
+      (``period_id == t``): the ``DockArrivals("same")`` batch.
+
+    A docking-phase event is anything emitted while docking arrivals: an
+    ``arrived`` (either arc), a ``redirected`` bounce, a redirect's move-1
+    ``departed``, or a dock-full ``lost``. A docking-phase event can never precede
+    its own flow's departure, so ``period_id >= t`` always and the two cases above
+    are exhaustive.
+    """
+    is_departure = (flows["event_type"] == "departed") & (flows["move_id"] == 0)
+    is_stockout = (flows["event_type"] == "lost") & (flows["reason"] == "stockout")
+    is_period_own = is_departure | is_stockout
+    rank = pd.Series(0, index=flows.index, dtype="int64")
+    rank = rank.mask(is_period_own, 1)
+    rank = rank.mask(~is_period_own & (flows["period_id"] == flows["start_period"]), 2)
+    return rank
+
+
+def _assign_step_id(flows: pd.DataFrame) -> pd.DataFrame:
+    """Add ``step_id`` and ``redirect_round`` and return ``flows`` in step order.
+
+    ``step_id`` is the run-global ordinal of an inventory step -- one batch of
+    ``+1`` / ``-1`` applied together (Notations.md §0.1). It is one rule, a pure
+    function of the journal: the distinct ``(period_id, phase_rank,
+    redirect_round)`` tuples, numbered 0, 1, 2, ... in that sorted order.
+
+    - ``phase_rank`` (:func:`_phase_rank`) orders the phases inside a period.
+    - ``redirect_round`` orders a redirect's rounds inside the docking phase: 0
+      for a normal dock batch, 1.. for the redirect rounds. It is the one piece of
+      order not recoverable from the other columns (a redirect's rounds are the
+      mechanics' internal iteration), so the phase stores it; rows without it
+      (everything but a redirect's continuation) carry 0.
+
+    History and simulation get their ``step_id`` from this same formula. Events
+    that share a step (one ``adjust_inventory`` batch) share a ``step_id``.
+    """
+    phase_rank = _phase_rank(flows)
+    if "redirect_round" in flows.columns:
+        redirect_round = flows["redirect_round"].fillna(0).astype("int64")
+    else:
+        redirect_round = pd.Series(0, index=flows.index, dtype="int64")
+    keys = ["period_id", "phase_rank", "redirect_round"]
+    order = pd.DataFrame(
+        {
+            "period_id": flows["period_id"],
+            "phase_rank": phase_rank,
+            "redirect_round": redirect_round,
+            "flow_id": flows["flow_id"],
+            "event_id": flows["event_id"],
+        }
     )
+    order = order.sort_values([*keys, "flow_id", "event_id"], kind="stable")
+    flows = flows.loc[order.index].copy()
+    flows["redirect_round"] = order["redirect_round"].to_numpy()
+    # ngroup over the sorted frame numbers the distinct (period_id, phase_rank,
+    # redirect_round) batches 0, 1, 2, ... in order of appearance -- step order.
+    flows["step_id"] = order.groupby(keys, sort=False).ngroup().to_numpy()
+    return flows.reset_index(drop=True)
 
 
 def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
-    """Order the accumulated journal and project the canonical columns.
+    """Order the accumulated journal, assign ``step_id``, and project the columns.
 
     Both the historical log (:func:`dataloader_graph.get_historical_flows_df`)
     and a replay run's journal are finalized through this one function, so they
-    share their sort keys and column projection by construction rather than by
-    two definitions kept in sync by hand. The ids (``move_id``, ``event_id``) are
-    already set by the builders at emit time, so this assigns nothing -- it only
-    sorts and projects.
+    share their order, their ``step_id`` and their column projection by
+    construction rather than by two definitions kept in sync by hand. The trip ids
+    (``move_id``, ``event_id``) are already set by the builders at emit time; this
+    adds only ``step_id`` -- the inventory-step ordinal (Notations.md §0.1) -- via
+    :func:`_assign_step_id`, derived by one rule from the journal itself, and fills
+    ``redirect_round`` with 0 wherever a builder did not set it.
 
     Parameters
     ----------
@@ -350,15 +480,17 @@ def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
     Returns
     -------
     pandas.DataFrame
-        Event log with columns :data:`FLOW_EVENT_COLUMNS`, sorted by
-        ``period_id`` then ``flow_id`` then ``event_id``. Within a flow the
-        ``event_id`` order matches the events' time order, so the sort lists each
-        trip's events in sequence.
+        Event log with columns :data:`FLOW_EVENT_COLUMNS`, ordered by ``step_id``
+        then ``flow_id`` then ``event_id``. Within a flow the ``event_id`` order
+        matches the events' time order, so each trip's events stay in sequence.
     """
     flows = journal.copy()
     for col, dtype in FLOW_EVENT_DTYPES.items():
-        flows[col] = flows[col].astype(dtype)
-    flows = flows.sort_values(["period_id", "flow_id", "event_id"]).reset_index(drop=True)
+        if col in flows.columns:
+            flows[col] = flows[col].astype(dtype)
+    flows = _assign_step_id(flows)
+    flows["redirect_round"] = flows["redirect_round"].astype("Int64")
+    flows["step_id"] = flows["step_id"].astype("Int64")
     return flows[FLOW_EVENT_COLUMNS]
 
 
@@ -376,8 +508,10 @@ def flows_to_departures(flows: pd.DataFrame) -> pd.DataFrame:
     """
     departed = flows[(flows["event_type"] == "departed") & (flows["move_id"] == 0)]
     return (
-        departed
-        .groupby(["period_id", "source_id", "commodity_category"], as_index=False)["quantity"].sum()
+        departed.groupby(["period_id", "source_id", "commodity_category"], as_index=False)[
+            "quantity"
+        ]
+        .sum()
         .rename(columns={"source_id": "facility_id"})
     )
 
@@ -395,7 +529,8 @@ def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
     docked = flows[flows["event_type"].isin(DOCKING_EVENT_TYPES)]
     keys = ["period_id", "realized_target_id", "commodity_category"]
     return (
-        docked.groupby(keys, as_index=False)["quantity"].sum()
+        docked.groupby(keys, as_index=False)["quantity"]
+        .sum()
         .rename(columns={"realized_target_id": "facility_id"})
     )
 
@@ -405,11 +540,10 @@ def flows_to_od_matrix(flows: pd.DataFrame) -> pd.DataFrame:
     # a forced transport leg (duration 0) and would pollute the demand model.
     dep = flows[(flows["event_type"] == "departed") & (flows["move_id"] == 0)].copy()
     dep["duration"] = dep["planned_end_period"] - dep["start_period"]
-    od = (
-        dep.groupby(["source_id", "planned_target_id", "period_id", "commodity_category"], as_index=False)
-        .agg(count=("quantity", "sum"), duration=("duration", "mean"))
-    )
-    totals = od.groupby(["source_id", "period_id","commodity_category"])["count"].transform("sum")
+    od = dep.groupby(
+        ["source_id", "planned_target_id", "period_id", "commodity_category"], as_index=False
+    ).agg(count=("quantity", "sum"), duration=("duration", "mean"))
+    totals = od.groupby(["source_id", "period_id", "commodity_category"])["count"].transform("sum")
     od["probability"] = od["count"] / totals
     od["duration"] = od["duration"].round().astype("Int64")
     return od
@@ -445,29 +579,33 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
         ``quantity`` for every period in ``[0, max(period_id)]``.
     """
     if flows.empty:
-        return pd.DataFrame({
-            "period_id":          pd.Series(dtype="int64"),
-            "facility_id":        pd.Series(dtype="string"),
-            "commodity_category": pd.Series(dtype="string"),
-            "quantity":           pd.Series(dtype="int64"),
-        })
+        return pd.DataFrame(
+            {
+                "period_id": pd.Series(dtype="int64"),
+                "facility_id": pd.Series(dtype="string"),
+                "commodity_category": pd.Series(dtype="string"),
+                "quantity": pd.Series(dtype="int64"),
+            }
+        )
 
     dep = (
         flows[(flows["event_type"] == "departed") & (flows["move_id"] == 0)]
-        .groupby(["period_id", "source_id", "commodity_category"], as_index=False)["quantity"].sum()
+        .groupby(["period_id", "source_id", "commodity_category"], as_index=False)["quantity"]
+        .sum()
         .rename(columns={"source_id": "facility_id", "quantity": "delta"})
     )
     dep["delta"] = -dep["delta"]
     dock_keys = ["period_id", "realized_target_id", "commodity_category"]
     arr = (
         flows[flows["event_type"].isin(DOCKING_EVENT_TYPES)]
-        .groupby(dock_keys, as_index=False)["quantity"].sum()
+        .groupby(dock_keys, as_index=False)["quantity"]
+        .sum()
         .rename(columns={"realized_target_id": "facility_id", "quantity": "delta"})
     )
     deltas = pd.concat([dep, arr], ignore_index=True)
-    deltas = deltas.groupby(
-        ["period_id", "facility_id", "commodity_category"], as_index=False
-    )["delta"].sum()
+    deltas = deltas.groupby(["period_id", "facility_id", "commodity_category"], as_index=False)[
+        "delta"
+    ].sum()
 
     n_periods = int(flows["period_id"].max()) + 1
     net = deltas.pivot_table(
@@ -487,6 +625,274 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     inventory = cumulative.stack().rename("quantity").reset_index()
     inventory["quantity"] = inventory["quantity"].astype("int64")
     return inventory[["period_id", "facility_id", "commodity_category", "quantity"]]
+
+
+def _inventory_deltas(flows: pd.DataFrame) -> pd.DataFrame:
+    """One signed ``delta`` per inventory-moving event, at the facility it touches.
+
+    The same rule the inventory derivations use: a docking ``arrived`` is ``+1``
+    at its ``realized_target_id`` and a real user ``departed`` (``move_id == 0``)
+    is ``-1`` at its ``source_id``; every other event moves no inventory and is
+    dropped. Each row keeps its ``step_id`` so the deltas can be cumulated in
+    inventory-step order (Notations.md §0.1).
+    """
+    cols = ["step_id", "period_id", "facility_id", "commodity_category", "delta"]
+    dock = flows[flows["event_type"].isin(DOCKING_EVENT_TYPES)].copy()
+    dock["facility_id"] = dock["realized_target_id"]
+    dock["delta"] = 1
+    dep = flows[(flows["event_type"] == "departed") & (flows["move_id"] == 0)].copy()
+    dep["facility_id"] = dep["source_id"]
+    dep["delta"] = -1
+    return pd.concat([dock[cols], dep[cols]], ignore_index=True)
+
+
+def inventory_at_moments(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.DataFrame:
+    """Inventory just before and just after every inventory step, for all facilities.
+
+    The fine-grained companion of :func:`get_inventory_df`: where that gives one
+    value per period, this gives one value per *step* (Notations.md §0.1) -- the
+    full cross-section of every ``(facility, commodity)`` at each ``step_id``,
+    with its ``inventory_before`` and ``inventory_after``. A facility with no event
+    in a step keeps its value (forward-filled by the cumulative sum), so any
+    neighbour's inventory at the moment of a redirect is read straight off this
+    table. Per-period inventory is the value at each period's last step.
+
+    Like :func:`get_inventory_df` it is a pure function of the journal and the
+    initial inventory: ``inventory_after`` at a step is the initial inventory plus
+    the cumulative ``+1`` / ``-1`` up to and including that step, and
+    ``inventory_before`` is ``inventory_after`` minus the step's own delta.
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        A finalized flow-event log (it must carry ``step_id``).
+    initial_inventory : pandas.DataFrame
+        Starting inventory with ``facility_id``, ``commodity_category``, ``quantity``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``step_id``, ``period_id``, ``facility_id``, ``commodity_category``,
+        ``inventory_before``, ``inventory_after`` -- one row per (step, facility,
+        commodity), sorted by ``step_id``.
+    """
+    empty = pd.DataFrame(
+        {
+            "step_id": pd.Series(dtype="int64"),
+            "period_id": pd.Series(dtype="int64"),
+            "facility_id": pd.Series(dtype="string"),
+            "commodity_category": pd.Series(dtype="string"),
+            "inventory_before": pd.Series(dtype="int64"),
+            "inventory_after": pd.Series(dtype="int64"),
+        }
+    )
+    if flows.empty:
+        return empty
+
+    deltas = _inventory_deltas(flows)
+    steps = sorted(int(s) for s in flows["step_id"].dropna().unique())
+    # Each step belongs to exactly one period; keep the map for the output.
+    step_period = (
+        flows.dropna(subset=["step_id"])
+        .drop_duplicates("step_id")
+        .set_index("step_id")["period_id"]
+    )
+
+    # Per-step delta per facility, then the running total across steps gives the
+    # "after" value; the matrix is reindexed over every step so a facility that
+    # does not move in a step still carries its value forward.
+    step_delta = deltas.pivot_table(
+        index=["facility_id", "commodity_category"],
+        columns="step_id",
+        values="delta",
+        fill_value=0,
+        aggfunc="sum",
+    ).reindex(columns=steps, fill_value=0)
+
+    initial = initial_inventory.set_index(["facility_id", "commodity_category"])["quantity"]
+    full_index = step_delta.index.union(initial.index)
+    step_delta = step_delta.reindex(full_index, fill_value=0)
+    after = step_delta.cumsum(axis=1).add(initial.reindex(full_index).fillna(0), axis=0)
+    before = after - step_delta
+
+    long_after = after.stack().rename("inventory_after")
+    long_before = before.stack().rename("inventory_before")
+    out = pd.concat([long_before, long_after], axis=1).reset_index()
+    out["period_id"] = out["step_id"].map(step_period).astype("int64")
+    out["inventory_before"] = out["inventory_before"].astype("int64")
+    out["inventory_after"] = out["inventory_after"].astype("int64")
+    return out.sort_values(["step_id", "facility_id", "commodity_category"])[
+        [
+            "step_id",
+            "period_id",
+            "facility_id",
+            "commodity_category",
+            "inventory_before",
+            "inventory_after",
+        ]
+    ].reset_index(drop=True)
+
+
+def flows_with_inventory(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.DataFrame:
+    """Widen the journal with the inventory of each event's own facility.
+
+    Every event row gains ``inventory_before`` and ``inventory_after`` for the
+    ``(facility, commodity)`` it changes -- ``source_id`` for a move-0 ``departed``
+    (the ``-1``), ``realized_target_id`` for a docking ``arrived`` (the ``+1``).
+    Events that move no inventory (a redirect bounce, a move-1 ``departed``, a
+    ``lost``) touch no facility, so their two inventory columns are NA. This is the
+    "did this event change inventory correctly?" view; for a neighbour's inventory
+    at the same moment, slice :func:`inventory_at_moments` at the event's ``step_id``.
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        A finalized flow-event log (it must carry ``step_id``).
+    initial_inventory : pandas.DataFrame
+        Starting inventory with ``facility_id``, ``commodity_category``, ``quantity``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``flows`` plus a ``facility_id`` (the event's own facility, NA if none),
+        ``inventory_before`` and ``inventory_after``.
+    """
+    moments = inventory_at_moments(flows, initial_inventory)
+    out = flows.copy()
+    is_dock = out["event_type"].isin(DOCKING_EVENT_TYPES)
+    is_dep = (out["event_type"] == "departed") & (out["move_id"] == 0)
+    out["facility_id"] = pd.Series(pd.NA, index=out.index, dtype="string")
+    out.loc[is_dock, "facility_id"] = out.loc[is_dock, "realized_target_id"]
+    out.loc[is_dep, "facility_id"] = out.loc[is_dep, "source_id"]
+    out = out.merge(
+        moments[
+            ["step_id", "facility_id", "commodity_category", "inventory_before", "inventory_after"]
+        ],
+        on=["step_id", "facility_id", "commodity_category"],
+        how="left",
+    )
+    # Nullable Int64 so the no-facility rows stay <NA>, not a float NaN.
+    out["inventory_before"] = out["inventory_before"].astype("Int64")
+    out["inventory_after"] = out["inventory_after"].astype("Int64")
+    return out
+
+
+def _squared_distances(geo: pd.DataFrame, origin_id: str) -> pd.Series:
+    """Squared Euclidean distance on (lat, lng) from ``origin_id`` to every other facility.
+
+    The same metric the redirect mechanics ranks neighbours by
+    (``_nearest_free_station``), so the order here matches the order a redirect
+    actually walks. The origin itself is dropped. Squared distance keeps the
+    ranking exact without a square root (the order is identical).
+    """
+    coords = geo.set_index("facility_id")[["lat", "lng"]]
+    o = coords.loc[origin_id]
+    d2 = (coords["lat"] - o["lat"]) ** 2 + (coords["lng"] - o["lng"]) ** 2
+    return d2.drop(index=origin_id).sort_values()
+
+
+def redirect_neighbor_table(
+    flows: pd.DataFrame,
+    initial_inventory: pd.DataFrame,
+    geo: pd.DataFrame,
+    flow_id: str,
+    *,
+    capacities: pd.DataFrame | None = None,
+    n_neighbors: int | None = None,
+) -> pd.DataFrame:
+    """Explain one redirect: its full station's neighbours, in distance order, at the moment.
+
+    A redirected bike bounced off its full planned station ``B`` and docked at a
+    farther station ``C``. To check that landing was right, you want to see, *at
+    the redirect's moment*, every station between ``B`` and ``C`` in distance
+    order: the nearer ones should have been full (no free dock), and ``C`` the
+    first with room. This returns exactly that table -- ``B``'s neighbours ranked
+    by distance out to ``C`` (inclusive), each with its dock occupancy just before
+    and just after the redirect step (Notations.md §0.1).
+
+    Occupancy is the total bikes docked across commodities, because the docks are
+    shared (the same total the redirect's ``free_docks`` uses); pass ``capacities``
+    to also get ``capacity`` and the free docks before/after, which is what makes
+    "this neighbour was full" visible at a glance.
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        A finalized flow-event log (it must carry ``step_id``).
+    initial_inventory : pandas.DataFrame
+        Starting inventory with ``facility_id``, ``commodity_category``, ``quantity``.
+    geo : pandas.DataFrame
+        Facility geography: ``facility_id``, ``lat``, ``lng``.
+    flow_id : str
+        The redirected flow to explain. It must have a ``redirected`` event.
+    capacities : pandas.DataFrame, optional
+        Dock capacities (``facility_id``, ``capacity``). When given, the output
+        adds ``capacity``, ``free_before`` and ``free_after``.
+    n_neighbors : int, optional
+        Keep only the ``n_neighbors`` nearest. Default: keep every neighbour out
+        to ``C`` (the station the bike actually reached), inclusive.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per neighbour, nearest first: ``flow_id``, ``step_id``,
+        ``period_id``, ``planned_target_id`` (B), ``realized_target_id`` (C),
+        ``commodity_category``, ``neighbor_rank``, ``facility_id``, ``distance_sq``,
+        ``inventory_before``, ``inventory_after`` (and the capacity columns above
+        when ``capacities`` is given).
+    """
+    one = flows[flows["flow_id"] == flow_id]
+    bounce = one[one["event_type"] == "redirected"]
+    if bounce.empty:
+        raise ValueError(f"flow {flow_id!r} has no redirect (no 'redirected' event)")
+    bounce = bounce.iloc[0]
+    full_station = bounce["planned_target_id"]  # B: the full station it bounced off
+    step_id = int(bounce["step_id"])
+    period_id = int(bounce["period_id"])
+    commodity = bounce["commodity_category"]
+    docked = one[(one["event_type"] == "arrived") & (one["move_id"] == 1)]
+    realized = docked["realized_target_id"].iloc[0] if not docked.empty else pd.NA  # C
+
+    # Neighbours of B by distance, cut at C (inclusive) or the first n_neighbors.
+    distances = _squared_distances(geo, full_station)
+    order = list(distances.index)
+    if n_neighbors is not None:
+        order = order[:n_neighbors]
+    elif pd.notna(realized) and realized in order:
+        order = order[: order.index(realized) + 1]
+
+    # Dock occupancy at the redirect step, summed across commodities (shared docks).
+    # inventory_at_moments lists every facility at every step, so a neighbour with
+    # no bikes still appears; reindex fills any that never held one with 0.
+    moments = inventory_at_moments(flows, initial_inventory)
+    at_step = moments[moments["step_id"] == step_id]
+    occ = (
+        at_step.groupby("facility_id")[["inventory_before", "inventory_after"]]
+        .sum()
+        .reindex(order, fill_value=0)
+    )
+
+    out = pd.DataFrame(
+        {
+            "flow_id": flow_id,
+            "step_id": step_id,
+            "period_id": period_id,
+            "planned_target_id": full_station,
+            "realized_target_id": realized,
+            "commodity_category": commodity,
+            "neighbor_rank": range(len(order)),
+            "facility_id": pd.array(order, dtype="string"),
+            "distance_sq": distances.reindex(order).to_numpy(),
+            "inventory_before": occ["inventory_before"].to_numpy(),
+            "inventory_after": occ["inventory_after"].to_numpy(),
+        }
+    )
+    if capacities is not None:
+        cap = capacities.set_index("facility_id")["capacity"]
+        out["capacity"] = out["facility_id"].map(cap).astype("Int64")
+        out["free_before"] = (out["capacity"] - out["inventory_before"]).clip(lower=0)
+        out["free_after"] = (out["capacity"] - out["inventory_after"]).clip(lower=0)
+    return out
 
 
 @dataclasses.dataclass(frozen=True)
@@ -537,15 +943,20 @@ def check_demand_split(flows: pd.DataFrame, demand: pd.DataFrame) -> list[str]:
     (no stockout, so ``departed == demand``).
     """
     keys = ["period_id", "facility_id", "commodity_category"]
-    demand = demand.astype({
-        "period_id": "Int64", "facility_id": "string",
-        "commodity_category": "string", "quantity": "Int64",
-    }).rename(columns={"quantity": "demand"})
+    demand = demand.astype(
+        {
+            "period_id": "Int64",
+            "facility_id": "string",
+            "commodity_category": "string",
+            "quantity": "Int64",
+        }
+    ).rename(columns={"quantity": "demand"})
     served = flows_to_departures(flows).rename(columns={"quantity": "departed"})
     lost = flows[(flows["event_type"] == "lost") & (flows["reason"] == "stockout")]
     lost_keys = ["period_id", "source_id", "commodity_category"]
     lost_demand = (
-        lost.groupby(lost_keys, as_index=False)["quantity"].sum()
+        lost.groupby(lost_keys, as_index=False)["quantity"]
+        .sum()
         .rename(columns={"source_id": "facility_id", "quantity": "lost_demand"})
     )
     merged = (
