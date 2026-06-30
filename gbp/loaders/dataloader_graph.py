@@ -21,6 +21,7 @@ from gbp.model import (
     flows_to_departures,
     flows_to_od_matrix,
     get_inventory_df,
+    inventory_at_moments,
     phase_rank_by_timing,
 )
 
@@ -256,6 +257,100 @@ def build_potential_trips(historical_flows_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Self-consistent initial state for a clean replay (no stockout / dock-full)
+# ---------------------------------------------------------------------------
+def get_replay_initial_inventory_df(
+    historical_flows_df: pd.DataFrame,
+    facilities_df: pd.DataFrame,
+    commodities_categories_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Smallest initial inventory that lets the replay run with no stockout.
+
+    A stockout is checked *inside* a period, during the departures phase, before
+    that period's own same-period arrivals are docked (a same-period arrival is a
+    trip that both starts and ends within the one period). The binding low point
+    of inventory is therefore per inventory step (Notations.md "step"), not per
+    period: the end-of-period value already counts those late same-period
+    arrivals, so it overstates what is on hand at the moment of departure. Sizing
+    the start stock against the per-period low point leaves real stockouts.
+
+    Starting from zero stock, :func:`inventory_at_moments` gives the inventory
+    after every step; its per-``(facility, commodity)`` minimum is the deepest the
+    trajectory ever goes. Holding that much stock at the start lifts the whole
+    trajectory so its floor is exactly zero, and every historical departure finds
+    a bike.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per ``(station, commodity)`` with ``facility_id``,
+        ``commodity_category`` and ``quantity``.
+    """
+    stations = facilities_df.loc[facilities_df["facility_category"] == "station", ["facility_id"]]
+    grid = stations.merge(commodities_categories_df[["commodity_category"]], how="cross")
+
+    moments = inventory_at_moments(historical_flows_df, grid.assign(quantity=0))
+    low = moments.groupby(["facility_id", "commodity_category"], as_index=False)[
+        "inventory_after"
+    ].min()
+    low["quantity"] = (-low["inventory_after"]).clip(lower=0).astype("int64")
+
+    out = grid.merge(
+        low[["facility_id", "commodity_category", "quantity"]],
+        on=["facility_id", "commodity_category"],
+        how="left",
+    )
+    out["quantity"] = out["quantity"].fillna(0).astype("int64")
+    return out[["facility_id", "commodity_category", "quantity"]]
+
+
+def get_replay_capacities_df(
+    historical_flows_df: pd.DataFrame,
+    initial_inventory_df: pd.DataFrame,
+    facilities_capacities_df: pd.DataFrame,
+    min_capacity: int = 10,
+) -> pd.DataFrame:
+    """Smallest dock capacities that let the replay run with no dock-full/redirect.
+
+    The mirror of :func:`get_replay_initial_inventory_df`. Dock capacity is per
+    facility, shared across commodities, and a dock-full (then a redirect) happens
+    when incoming bikes would push the facility's total occupancy above its
+    capacity. With the initial inventory fixed, :func:`inventory_at_moments` gives
+    the occupancy after every step; the per-facility peak of the total across
+    commodities is the most docks ever needed at once. A capacity equal to that
+    peak holds every arrival, so no flow is ever redirected.
+
+    Parameters
+    ----------
+    historical_flows_df : pandas.DataFrame
+        The historical flow log.
+    initial_inventory_df : pandas.DataFrame
+        The start stock to size against (use the output of
+        :func:`get_replay_initial_inventory_df`).
+    facilities_capacities_df : pandas.DataFrame
+        The capacity table whose ``facility_id`` set defines the output rows.
+    min_capacity : int, optional
+        A floor applied to every facility, so facilities with no replay traffic
+        (e.g. depots) keep a usable capacity. Defaults to 10.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``facility_id`` and ``capacity`` set to each facility's required peak,
+        floored at ``min_capacity``.
+    """
+    moments = inventory_at_moments(historical_flows_df, initial_inventory_df)
+    facility_total = moments.groupby(["step_id", "facility_id"], as_index=False)[
+        "inventory_after"
+    ].sum()
+    peak = facility_total.groupby("facility_id", as_index=False)["inventory_after"].max()
+
+    out = facilities_capacities_df[["facility_id"]].merge(peak, on="facility_id", how="left")
+    out["capacity"] = out["inventory_after"].fillna(0).clip(lower=min_capacity).astype("int64")
+    return out[["facility_id", "capacity"]]
+
+
+# ---------------------------------------------------------------------------
 # Saturated (artificial) initial state for the base replay
 # ---------------------------------------------------------------------------
 def get_saturated_inventory_df(
@@ -319,6 +414,7 @@ class ResolvedModelData:
         raw: RawModelData,
         period_len: pd.Timedelta = DEFAULT_PERIOD_LEN,
         scale_capacity_factor: int = 1,
+        scale_init_inventory_factor: int = 1,
     ) -> None:
         # Entities
         self.facilities_df = get_facilities_df(raw.stations_df, raw.depots_df)
@@ -358,31 +454,19 @@ class ResolvedModelData:
 
         historical_departures_df = flows_to_departures(self.historical_flows_df)
 
-        self.initial_inventory_df = (
-            historical_departures_df.groupby(["facility_id", "commodity_category"])["quantity"]
-            .max()
-            .reset_index()
-            .sort_values("quantity", ascending=False)
-            .reset_index(drop=True)
+        # Size the start stock against the per-step low point of the inventory
+        # trajectory, so the replay never hits a stockout (see the function's
+        # docstring for why the per-period low point is not enough).
+        self.initial_inventory_df = get_replay_initial_inventory_df(
+            self.historical_flows_df, self.facilities_df, self.commodities_categories_df
         )
-        # self.initial_inventory_df["quantity"] = self.initial_inventory_df["quantity"] + 10
-        self.initial_inventory_df['quantity'] = 0
-
-        self.historical_inventory_df = get_inventory_df(
-            self.historical_flows_df, self.initial_inventory_df
+        self.initial_inventory_df['quantity'] = (self.initial_inventory_df['quantity']*scale_init_inventory_factor).astype('int64')
+        # Smallest per-facility capacity that holds every arrival, so the replay
+        # never hits a dock-full and never redirects. Exposed for inspection; the
+        # engine still reads facilities_capacities_df, which the caller controls.
+        self.facilities_required_capacities_df = get_replay_capacities_df(
+            self.historical_flows_df, self.initial_inventory_df, self.facilities_capacities_df
         )
-        inventory_res = (self.historical_inventory_df.
-         sort_values(['quantity']).
-         groupby(['facility_id', 'commodity_category'])['quantity'].
-         min().
-         reset_index().
-         sort_values('quantity', ascending=True))
-        inventory_res = inventory_res[inventory_res['quantity'] < 0].reset_index(drop=True)
-        inventory_res = inventory_res.rename(columns={'quantity': 'min_quantity'})
-        self.initial_inventory_df = self.initial_inventory_df.merge(inventory_res, on=['facility_id', 'commodity_category'], how='left')
-        self.initial_inventory_df['min_quantity'] = self.initial_inventory_df['min_quantity'].fillna(0)
-        self.initial_inventory_df['quantity'] = -self.initial_inventory_df['min_quantity']
-        self.initial_inventory_df = self.initial_inventory_df.drop(columns=['min_quantity'])
         self.historical_inventory_df = get_inventory_df(
             self.historical_flows_df, self.initial_inventory_df
         )
