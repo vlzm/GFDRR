@@ -365,11 +365,28 @@ class ResolvedModelData:
             .sort_values("quantity", ascending=False)
             .reset_index(drop=True)
         )
-        self.initial_inventory_df["quantity"] = self.initial_inventory_df["quantity"] + 10
+        # self.initial_inventory_df["quantity"] = self.initial_inventory_df["quantity"] + 10
+        self.initial_inventory_df['quantity'] = 0
 
         self.historical_inventory_df = get_inventory_df(
             self.historical_flows_df, self.initial_inventory_df
         )
+        inventory_res = (self.historical_inventory_df.
+         sort_values(['quantity']).
+         groupby(['facility_id', 'commodity_category'])['quantity'].
+         min().
+         reset_index().
+         sort_values('quantity', ascending=True))
+        inventory_res = inventory_res[inventory_res['quantity'] < 0].reset_index(drop=True)
+        inventory_res = inventory_res.rename(columns={'quantity': 'min_quantity'})
+        self.initial_inventory_df = self.initial_inventory_df.merge(inventory_res, on=['facility_id', 'commodity_category'], how='left')
+        self.initial_inventory_df['min_quantity'] = self.initial_inventory_df['min_quantity'].fillna(0)
+        self.initial_inventory_df['quantity'] = -self.initial_inventory_df['min_quantity']
+        self.initial_inventory_df = self.initial_inventory_df.drop(columns=['min_quantity'])
+        self.historical_inventory_df = get_inventory_df(
+            self.historical_flows_df, self.initial_inventory_df
+        )
+
         self.historical_demand_df = historical_departures_df
         self.historical_departures_df = historical_departures_df
         self.historical_arrivals_df = flows_to_arrivals(self.historical_flows_df)
