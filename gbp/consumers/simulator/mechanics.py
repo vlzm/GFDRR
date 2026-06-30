@@ -156,13 +156,13 @@ def plan_overflow_redirect(
     remaining = overflow
     running = inventory
     # Each round is its own inventory step: it docks bikes (filling some docks)
-    # before the next round sees the docks it left. ``redirect_round`` records
+    # before the next round sees the docks it left. ``phase_round`` records
     # which round a flow docked in (1-based; round 0 is the dock batch that runs
     # before any redirect), so finalize_flows can order the rounds as steps and a
     # neighbour's inventory at one flow's redirect reflects the earlier rounds.
-    redirect_round = 0
+    phase_round = 0
     while not remaining.empty:
-        redirect_round += 1
+        phase_round += 1
         free = free_docks(running, capacities)
         if not (free > 0).any():
             break
@@ -173,7 +173,7 @@ def plan_overflow_redirect(
             break
         rank = candidate.groupby("realized_target_id").cumcount()
         fits = rank < candidate["realized_target_id"].map(free)
-        docked = candidate[fits].assign(redirect_round=redirect_round)
+        docked = candidate[fits].assign(phase_round=phase_round)
         redirected_batches.append(docked)
         running = adjust_inventory(running, dock_deltas(docked, "realized_target_id"))
         remaining = candidate[~fits].drop(columns="realized_target_id")

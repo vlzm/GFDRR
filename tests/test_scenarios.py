@@ -22,6 +22,7 @@ fail.
 import pandas as pd
 import pytest
 
+from gbp.consumers.simulator.state import PeriodRow, SimulationState
 from gbp.consumers.simulator.validation import validate_run
 from gbp.model import flows as J
 from tests import scenarios
@@ -117,13 +118,16 @@ def _period_end_inventory_from_moments(journal, initial):
 
 
 @pytest.mark.parametrize("name", list(scenarios.ALL_SCENARIOS))
-def test_step_id_is_a_pure_function_of_the_journal(name, run_scenario):
-    # step_id is one rule: numbering the distinct (period_id, phase_rank,
-    # redirect_round) tuples 0, 1, 2, ... in sorted order. Recompute phase_rank
-    # independently with the timing rule (the oracle) and rebuild step_id from it,
-    # then check it matches the stored step_id. This locks two things at once:
-    # step_id depends only on those three columns, and the phase_rank the phases
-    # stamped agrees with the timing rule.
+def test_stamped_step_id_matches_tuple_order(name, run_scenario):
+    # The bridge (oracle) test. The simulator now stamps step_id when a phase opens
+    # a step, instead of deriving it from the (period_id, phase_rank, phase_round)
+    # tuple. For the phases that exist today -- all pure user trips -- the stamped
+    # number must still equal the old tuple-derived one: same numbers, new
+    # mechanism. We rebuild the tuple-derived number independently (recomputing
+    # phase_rank with the timing rule, the oracle) and check the stamped step_id
+    # matches it. A future rebalancer that emits two ordered batches under one
+    # tuple is allowed to break this equality -- that is the whole point of
+    # stamping -- and would simply not be a user-trip scenario.
     _resolved, journal, _state = run_scenario(name)
     if journal.empty:
         return
@@ -131,12 +135,30 @@ def test_step_id_is_a_pure_function_of_the_journal(name, run_scenario):
         {
             "period_id": journal["period_id"],
             "phase_rank": J.phase_rank_by_timing(journal),
-            "redirect_round": journal["redirect_round"].fillna(0),
+            "phase_round": journal["phase_round"].fillna(0),
         }
     )
     # ngroup with sort=True numbers the tuples in sorted (= step) order.
-    recomputed = keys.groupby(["period_id", "phase_rank", "redirect_round"], sort=True).ngroup()
+    recomputed = keys.groupby(["period_id", "phase_rank", "phase_round"], sort=True).ngroup()
     assert recomputed.tolist() == journal["step_id"].tolist()
+
+
+def test_open_step_gives_distinct_numbers_to_separate_opens():
+    # The guarantee stamping buys over the old tuple derivation: two batches opened
+    # separately always get different step_ids, even if their (period_id,
+    # phase_rank, phase_round) label is identical. No phase does this today (it is
+    # what a future rebalancer needs), so we lock it at the source -- open_step.
+    state = SimulationState(
+        state_period_id_obj=PeriodRow(0, None, None),
+        state_inventory_df=pd.DataFrame(),
+        state_flows_df=pd.DataFrame(),
+        state_resources_df=pd.DataFrame(),
+    )
+    first, state = state.open_step()
+    second, state = state.open_step()
+    third, state = state.open_step()
+    assert [first, second, third] == [0, 1, 2]
+    assert state.next_step_id == 3
 
 
 @pytest.mark.parametrize("name", list(scenarios.ALL_SCENARIOS))

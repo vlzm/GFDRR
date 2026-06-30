@@ -65,9 +65,9 @@ projection of them. This is the anchor; read it first.
 | `resource_id` | The resource that carried it; NA for user trips (§5b). |
 | `quantity` | Bikes in the event. One per bike after expansion (§3). |
 | `reason` | Why a flow did not simply arrive: `stockout` or `dock_full`; NA otherwise (§1). |
-| `phase_rank` | Which of a period's three sub-phases applied the event's change: `0` dock-previous, `1` the period's own departures and stockout losses, `2` dock-same. Stamped by the emitting phase (the historical loader stamps it by timing, `phase_rank_by_timing`). Part of the `step_id` order (§0.1). |
-| `redirect_round` | The round a redirected flow docked in: `0` for a normal dock batch, `1..` for a redirect's rounds. Set by the redirect mechanics; `0` on every other row. Part of the `step_id` order (§0.1). |
-| `step_id` | Run-global ordinal of the inventory step the event belongs to; the inventory time axis below the period (§0.1). Assigned by `finalize_flows`. |
+| `phase_rank` | Which inventory phase of a period applied the event's change. An **open-ended** integer that orders the phases inside a period, not a fixed set. Today's user trips use `0` dock-previous, `1` the period's own departures and stockout losses, `2` dock-same; a later phase (such as rebalancing) takes `3`, `4`, … Stamped by the emitting phase (the historical loader stamps it by timing, `phase_rank_by_timing`). A **label** that says which phase; the historical loader's step-ordering input (§0.1). |
+| `phase_round` | The round inside a single phase, for a phase that applies several ordered inventory batches in a row: `0` when the phase applies one batch, `1..` for each later round. Today only the redirect mechanics use it (a redirect's rounds); a later phase that iterates (such as a rebalancer's rounds) reuses the same column. `0` on every other row. A **label** that says which round; the historical loader's step-ordering input (§0.1). |
+| `step_id` | Run-global ordinal of the inventory step the event belongs to; the inventory time axis below the period (§0.1). In the simulator it is **opened at apply time** -- a phase takes the next number from a run-global counter when it begins an ordered change and writes it onto that step's events. The historical loader stamps no number, so `finalize_flows` **derives** it from the `(period_id, phase_rank, phase_round)` label instead. |
 
 **Two arcs and the two roles of `departed`.** A normal trip is one arc
 (`move_id = 0`): a `departed` then an `arrived`. A redirect is **two** arcs: the
@@ -94,17 +94,44 @@ departures, one redirect round). Between two steps inventory is constant.
 
 | Canonical | Meaning | Avoid |
 |---|---|---|
-| `step` / `step_id` | One inventory step. `step_id` is its run-global ordinal, monotonic: it orders periods, and inside a period the phases (dock-previous → departures → dock-same) and, inside a redirect, its rounds. Events applied together share one `step_id`. | `seq`, `tick`, `moment_id` |
+| `step` / `step_id` | One inventory step. `step_id` is its run-global ordinal, monotonic: it orders periods, and inside a period the phases (dock-previous → departures → dock-same, then any later phase) and, inside a phase that batches in rounds, its rounds. Events applied together share one `step_id`. | `seq`, `tick`, `moment_id` |
 | `moment` | Inventory seen just **before** or just **after** a step — a prose word and the `_before`/`_after` suffix on inventory read-models. A step has two moments around it; the after-moment of step `s-1` is the before-moment of step `s`. | `moment` as a column name |
 
-`step_id` is derived by **one rule** from the journal itself: `finalize_flows`
-numbers the distinct `(period_id, phase_rank, redirect_round)` tuples in order,
-0, 1, 2, …. `phase_rank` (dock-previous = 0, the period's own departures and
-stockout losses = 1, dock-same = 2) orders the phases inside a period;
-`redirect_round` orders a redirect's rounds inside the docking phase. The phase
-that emits an event stamps its `phase_rank`; the historical loader, which has no
-phases, stamps it by timing (`phase_rank_by_timing`), so history and simulation
-order their steps the same way rather than by two definitions kept in sync.
+`step_id` is filled two ways, depending on who produced the events.
+
+**Simulator: opened at apply time.** Each phase opens a step when it begins an
+ordered inventory change (`SimulationState.open_step`): it takes the next number
+from a single run-global counter and writes that number onto the step's events.
+The phases run in step order — dock-previous, then departures, then dock-same, then
+any later phase, and a redirect's rounds in turn — so the counter hands out
+0, 1, 2, … in exactly the order steps must sort. The number comes from the counter,
+never from the event columns, so two separately opened steps always get different
+`step_id` values.
+
+**Historical loader: derived from the label.** The loader has no phases and opens
+no step, so it stamps no number. `finalize_flows` then numbers the distinct
+`(period_id, phase_rank, phase_round)` tuples 0, 1, 2, … in sorted order. This is
+safe because history is pure user trips — no redirects, no rebalancing — so one
+tuple is always exactly one batch. `phase_rank` orders the phases inside a period
+(today: dock-previous = 0, the period's own departures and stockout losses = 1,
+dock-same = 2, with later phases taking 3, 4, …) and the loader stamps it by timing
+(`phase_rank_by_timing`); `phase_round` orders the rounds inside one phase.
+
+`phase_rank` and `phase_round` stay on every simulator row too, but only as
+**labels** — when / which phase / which round. They no longer *define* a step in
+the simulator (the opened number does); they remain the historical loader's
+step-ordering input.
+
+**Why opening beats deriving.** When a step is opened, two *separately ordered*
+inventory changes can never share a `step_id`, because the counter never hands out
+a number twice. Deriving from the tuple was correct only while every phase kept an
+unwritten contract — one `(period_id, phase_rank, phase_round)` tuple is exactly
+one batch — and the journal could not prove the contract held, because the batch
+boundary is not stored once events are written. A future rebalancer that emits two
+ordered batches under one tuple would have had them silently merged; opening the
+step makes that collision impossible to express. The per-step non-negativity check
+(`inventory_at_moments`, §2) stays as a cheap end-of-run guard, but it is no longer
+the only thing standing between us and a silent merge.
 
 `step_id` carries only the *order*, never the inventory: inventory at any moment
 stays a pure function of the journal (initial inventory plus the cumulative

@@ -143,6 +143,12 @@ class SimulationState:
         Internal projection: ``departed`` flows not yet docked.
     intermediates : dict
         Transient per-period hand-offs between phases.
+    next_step_id : int
+        The next inventory-step number to hand out (Notations.md §0.1). A phase
+        calls :meth:`open_step` when it begins an ordered inventory change; the
+        counter only ever grows, so two ordered batches can never share a
+        ``step_id``. Threaded through the immutable state, so the run stays
+        deterministic.
     """
 
     state_period_id_obj: PeriodRow
@@ -151,6 +157,7 @@ class SimulationState:
     state_resources_df: pd.DataFrame
     in_transit: pd.DataFrame = dataclasses.field(default_factory=empty_in_transit)
     intermediates: dict[str, Any] = dataclasses.field(default_factory=dict)
+    next_step_id: int = 0
 
     # -- clock ---------------------------------------------------------------
     @property
@@ -213,6 +220,18 @@ class SimulationState:
     def with_intermediates(self, **updates: Any) -> "SimulationState":
         """Return a copy with the given per-period hand-offs merged in."""
         return dataclasses.replace(self, intermediates={**self.intermediates, **updates})
+
+    def open_step(self) -> tuple[int, "SimulationState"]:
+        """Hand out the next inventory-step number and return the advanced state.
+
+        A phase calls this when it opens an ordered inventory change (a dock
+        batch, a period's departures, one redirect round); it stamps the returned
+        number on the events of that step. Because the number comes from this
+        counter and never from the event columns, two ordered batches always get
+        different ``step_id`` values, even if they share a ``(period_id,
+        phase_rank, phase_round)`` label (Notations.md §0.1).
+        """
+        return self.next_step_id, dataclasses.replace(self, next_step_id=self.next_step_id + 1)
 
     def advance_period(self, next_period_obj: PeriodRow) -> "SimulationState":
         """Return a copy moved to ``next_period_obj``, clearing the intermediates."""

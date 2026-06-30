@@ -1,14 +1,15 @@
-"""Run-level invariant checks (I1-I4) for a finished simulation.
+"""Run-level invariant checks (I1-I5) for a finished simulation.
 
 Tier-2 of the loss-logging design: properties of the whole journal at run end,
 too broad for a single phase's contract. ``validate_run`` runs once, behind
 ``EnvironmentConfig.validate`` -- off the hot path, always available, exercised
 by the canonical notebook. I1/I2 are pure functions of the journal
-(:mod:`gbp.model.flows`); I3/I4 also read the live final inventory, the
+(:mod:`gbp.model.flows`); I3/I4/I5 also read the live final inventory, the
 in-transit set and the initial inventory, so they live here in the simulator layer.
+I5 is the step-contract guard: no inventory step takes a station below zero.
 
 All checks return a list of human-readable violations (empty == holds);
-``validate_run`` collects I1-I4 and the engine raises :class:`RunInvariantError`
+``validate_run`` collects I1-I5 and the engine raises :class:`RunInvariantError`
 if the combined list is non-empty. Like the rest of the constraint logic, every
 invariant has no effect in an exact replay and only matters above the baseline.
 """
@@ -16,7 +17,13 @@ invariant has no effect in an exact replay and only matters above the baseline.
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
-from gbp.model import check_demand_split, check_flow_closure, finalize_flows, get_inventory_df
+from gbp.model import (
+    check_demand_split,
+    check_flow_closure,
+    finalize_flows,
+    get_inventory_df,
+    inventory_at_moments,
+)
 
 from .state import SimulationState
 
@@ -50,6 +57,7 @@ def validate_run(state: SimulationState, resolved: ResolvedModelData) -> list[st
     violations += check_flow_closure(flows)  # I2
     violations += _check_projection_consistency(state.state_inventory_df, flows, initial)  # I3
     violations += _check_conservation(state, flows, initial)  # I4
+    violations += _check_step_nonnegativity(flows, initial)  # I5
     return violations
 
 
@@ -105,3 +113,26 @@ def _check_conservation(
             f"lost_dock_full={lost_dock_full_total} + in_transit={transit_total}"
         ]
     return []
+
+
+def _check_step_nonnegativity(flows: pd.DataFrame, initial: pd.DataFrame) -> list[str]:
+    """I5 -- no inventory step drives a station's inventory below zero.
+
+    This guards the step contract (Notations.md §0.1): one ``(period_id,
+    phase_rank, phase_round)`` tuple is exactly one inventory batch. The journal
+    cannot prove that contract directly -- the batch boundary is not stored -- but
+    it catches the harmful case: if two batches that needed ordering collapse into
+    one step (one phase emitting a second ordered batch under the same tuple),
+    applying them as a single batch can take a station's inventory below zero. A
+    bike cannot be docked or undocked at a station that has none, so any negative
+    ``inventory_after`` is a real ordering bug, not just a bookkeeping one.
+    """
+    if flows.empty:
+        return []
+    moments = inventory_at_moments(flows, initial)
+    bad = moments[moments["inventory_after"] < 0]
+    return [
+        f"I5 step {int(r.step_id)} {r.facility_id}/{r.commodity_category}: "
+        f"inventory_after={int(r.inventory_after)} < 0"
+        for r in bad.itertuples(index=False)
+    ]

@@ -51,7 +51,7 @@ FLOW_EVENT_COLUMNS = [
     "quantity",
     "reason",
     "phase_rank",
-    "redirect_round",
+    "phase_round",
     "step_id",
 ]
 
@@ -73,16 +73,17 @@ FLOW_EVENT_DTYPES = {
     "quantity": "Int64",
     "reason": "string",
     "phase_rank": "Int64",
-    "redirect_round": "Int64",
+    "phase_round": "Int64",
     "step_id": "Int64",
 }
 
-# phase_rank: which of a period's three sub-phases applied an event's inventory
-# change. The phases run in this fixed order, so a lower rank is applied first
-# (Notations.md, "step / step_id"). An event source that runs as an explicit
-# phase (the simulator) stamps its phase's rank straight onto the events it
-# emits; a source with no phases (the historical loader) stamps it with
-# :func:`phase_rank_by_timing` instead.
+# phase_rank: which inventory phase of a period applied an event's change. It is
+# an open-ended integer (not a fixed set): the phases run in rank order, so a
+# lower rank is applied first (Notations.md, "step / step_id"). The three ranks
+# below are today's user-trip phases; a later phase (such as rebalancing) takes
+# 3, 4, ... An event source that runs as an explicit phase (the simulator) stamps
+# its phase's rank straight onto the events it emits; a source with no phases
+# (the historical loader) stamps it with :func:`phase_rank_by_timing` instead.
 DOCK_PREVIOUS_RANK = 0  # dock bikes that left in an earlier period
 PERIOD_OWN_RANK = 1  # this period's own departures and stockout losses
 DOCK_SAME_RANK = 2  # dock bikes that left and arrive within this same period
@@ -102,10 +103,10 @@ DOCKING_EVENT_TYPES = ["arrived"]
 def _typed_events(events_df: pd.DataFrame) -> pd.DataFrame:
     """Cast event columns to the canonical dtypes so frames concat cleanly.
 
-    The phase-ordering columns -- ``phase_rank``, ``redirect_round`` and
+    The phase-ordering columns -- ``phase_rank``, ``phase_round`` and
     ``step_id`` -- are not set by the builders, so they are cast only when already
     present (an empty journal carries them; a freshly built event batch does not).
-    The emitting phase stamps ``phase_rank`` (and a redirect batch ``redirect_round``)
+    The emitting phase stamps ``phase_rank`` (and a redirect batch ``phase_round``)
     onto the events after a builder makes them; ``step_id`` is the run-global
     ordinal :func:`finalize_flows` assigns last.
     """
@@ -441,25 +442,38 @@ def phase_rank_by_timing(flows: pd.DataFrame) -> pd.Series:
 
 
 def _assign_step_id(flows: pd.DataFrame) -> pd.DataFrame:
-    """Add ``step_id`` and ``redirect_round`` and return ``flows`` in step order.
+    """Set ``step_id`` and ``phase_round`` labels and return ``flows`` in step order.
 
     ``step_id`` is the run-global ordinal of an inventory step -- one batch of
-    ``+1`` / ``-1`` applied together (Notations.md §0.1). It is one rule, a pure
-    function of the journal: the distinct ``(period_id, phase_rank,
-    redirect_round)`` tuples, numbered 0, 1, 2, ... in that sorted order.
+    ``+1`` / ``-1`` applied together (Notations.md §0.1). It is filled one of two
+    ways, depending on whether the producer already stamped it:
 
-    - ``phase_rank`` orders the phases inside a period. The emitting phase stamps
-      it (the historical loader uses :func:`phase_rank_by_timing`), so this reads
-      the stored column; any row that arrives without one is filled by the rule as
-      a safety net.
-    - ``redirect_round`` orders a redirect's rounds inside the docking phase: 0
-      for a normal dock batch, 1.. for the redirect rounds. It is the one piece of
-      order not recoverable from the other columns (a redirect's rounds are the
-      mechanics' internal iteration), so the phase stores it; rows without it
-      (everything but a redirect's continuation) carry 0.
+    - **Stamped (the simulator).** Each phase opens a step at apply time
+      (:meth:`SimulationState.open_step`) and writes its number onto the events of
+      that step, so every event arrives with a ``step_id``. Here we trust it and
+      only sort by it. The number was opened from a run-global counter, never
+      derived from the columns, so two ordered batches can never share it.
+    - **Derived (the historical loader).** The loader has no phases and stamps no
+      ``step_id``, so it arrives absent (or all-NA). We then number the distinct
+      ``(period_id, phase_rank, phase_round)`` tuples 0, 1, 2, ... in sorted order.
+      This is safe because history is pure user trips -- no redirects, no
+      rebalancing -- so one tuple is always exactly one batch.
 
-    History and simulation order their steps the same way. Events that share a
-    step (one ``adjust_inventory`` batch) share a ``step_id``.
+    Either way ``phase_rank`` and ``phase_round`` stay on every row as labels (when
+    / which phase / which round):
+
+    - ``phase_rank`` orders the phases inside a period (an open-ended integer:
+      today 0/1/2 for user trips, later phases take 3, 4, ...). The emitting phase
+      stamps it (the historical loader uses :func:`phase_rank_by_timing`), so this
+      reads the stored column; any row that arrives without one is filled by the
+      rule as a safety net.
+    - ``phase_round`` orders the rounds inside one phase that applies several
+      ordered batches: 0 for a single-batch phase, 1.. for each later round (a
+      redirect's rounds today). It is the one piece of order not recoverable from
+      the other columns (the rounds are the mechanics' internal iteration), so the
+      phase stores it; rows without it carry 0.
+
+    Events that share a step share a ``step_id`` either way.
     """
     if "phase_rank" in flows.columns:
         phase_rank = flows["phase_rank"]
@@ -469,16 +483,37 @@ def _assign_step_id(flows: pd.DataFrame) -> pd.DataFrame:
         phase_rank = phase_rank.astype("int64")
     else:
         phase_rank = phase_rank_by_timing(flows)
-    if "redirect_round" in flows.columns:
-        redirect_round = flows["redirect_round"].fillna(0).astype("int64")
+    if "phase_round" in flows.columns:
+        phase_round = flows["phase_round"].fillna(0).astype("int64")
     else:
-        redirect_round = pd.Series(0, index=flows.index, dtype="int64")
-    keys = ["period_id", "phase_rank", "redirect_round"]
+        phase_round = pd.Series(0, index=flows.index, dtype="int64")
+
+    stamped = "step_id" in flows.columns and not flows["step_id"].isna().all()
+    if stamped:
+        # Trust the stamped number; order by it, then by the trip ids within a step.
+        order = pd.DataFrame(
+            {
+                "step_id": flows["step_id"].astype("int64"),
+                "phase_rank": phase_rank,
+                "phase_round": phase_round,
+                "flow_id": flows["flow_id"],
+                "event_id": flows["event_id"],
+            }
+        )
+        order = order.sort_values(["step_id", "flow_id", "event_id"], kind="stable")
+        flows = flows.loc[order.index].copy()
+        flows["phase_rank"] = order["phase_rank"].to_numpy()
+        flows["phase_round"] = order["phase_round"].to_numpy()
+        flows["step_id"] = order["step_id"].to_numpy()
+        return flows.reset_index(drop=True)
+
+    # Derive: number the distinct (period_id, phase_rank, phase_round) tuples.
+    keys = ["period_id", "phase_rank", "phase_round"]
     order = pd.DataFrame(
         {
             "period_id": flows["period_id"],
             "phase_rank": phase_rank,
-            "redirect_round": redirect_round,
+            "phase_round": phase_round,
             "flow_id": flows["flow_id"],
             "event_id": flows["event_id"],
         }
@@ -486,9 +521,9 @@ def _assign_step_id(flows: pd.DataFrame) -> pd.DataFrame:
     order = order.sort_values([*keys, "flow_id", "event_id"], kind="stable")
     flows = flows.loc[order.index].copy()
     flows["phase_rank"] = order["phase_rank"].to_numpy()
-    flows["redirect_round"] = order["redirect_round"].to_numpy()
+    flows["phase_round"] = order["phase_round"].to_numpy()
     # ngroup over the sorted frame numbers the distinct (period_id, phase_rank,
-    # redirect_round) batches 0, 1, 2, ... in order of appearance -- step order.
+    # phase_round) batches 0, 1, 2, ... in order of appearance -- step order.
     flows["step_id"] = order.groupby(keys, sort=False).ngroup().to_numpy()
     return flows.reset_index(drop=True)
 
@@ -498,14 +533,15 @@ def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
 
     Both the historical log (:func:`dataloader_graph.get_historical_flows_df`)
     and a replay run's journal are finalized through this one function, so they
-    share their order, their ``step_id`` and their column projection by
-    construction rather than by two definitions kept in sync by hand. The trip ids
-    (``move_id``, ``event_id``) and ``phase_rank`` are already set at emit time
-    (the emitting phase stamps ``phase_rank``; the historical loader uses
-    :func:`phase_rank_by_timing`); this adds only ``step_id`` -- the inventory-step
-    ordinal (Notations.md §0.1) -- via :func:`_assign_step_id`, the run-global
-    ordinal of the ``(period_id, phase_rank, redirect_round)`` steps, and fills
-    ``redirect_round`` with 0 wherever a builder did not set it.
+    share their order and their column projection by construction rather than by
+    two definitions kept in sync by hand. The trip ids (``move_id``, ``event_id``)
+    and ``phase_rank`` are already set at emit time (the emitting phase stamps
+    ``phase_rank``; the historical loader uses :func:`phase_rank_by_timing`).
+    :func:`_assign_step_id` then settles ``step_id`` -- the inventory-step ordinal
+    (Notations.md §0.1): it trusts the number the simulator stamped at apply time
+    and only derives it from the ``(period_id, phase_rank, phase_round)`` tuple
+    when none was stamped (the historical loader). It also fills ``phase_round``
+    with 0 wherever a builder did not set it.
 
     Parameters
     ----------
@@ -525,7 +561,7 @@ def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
             flows[col] = flows[col].astype(dtype)
     flows = _assign_step_id(flows)
     flows["phase_rank"] = flows["phase_rank"].astype("Int64")
-    flows["redirect_round"] = flows["redirect_round"].astype("Int64")
+    flows["phase_round"] = flows["phase_round"].astype("Int64")
     flows["step_id"] = flows["step_id"].astype("Int64")
     return flows[FLOW_EVENT_COLUMNS]
 

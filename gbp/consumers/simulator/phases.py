@@ -137,13 +137,13 @@ class DockArrivals(Phase):
                 # move-1 ``departed`` + ``arrived``). The continuation docks the
                 # bike at C in this same phase, so its move-1 ``departed`` never
                 # joins ``in_transit`` -- it is journalled here and closed at once.
-                # Carry each flow's ``redirect_round`` (from plan_overflow_redirect)
+                # Carry each flow's ``phase_round`` (from plan_overflow_redirect)
                 # onto its events so finalize_flows orders the rounds as steps.
-                round_by_flow = redirected.set_index("flow_id")["redirect_round"]
+                round_by_flow = redirected.set_index("flow_id")["phase_round"]
                 bounce = redirected_events(redirected, t)
-                bounce["redirect_round"] = bounce["flow_id"].map(round_by_flow)
+                bounce["phase_round"] = bounce["flow_id"].map(round_by_flow)
                 continuation = redirect_continuation_events(redirected, t)
-                continuation["redirect_round"] = continuation["flow_id"].map(round_by_flow)
+                continuation["phase_round"] = continuation["flow_id"].map(round_by_flow)
                 new_flows = pd.concat(
                     [new_flows, bounce, continuation],
                     ignore_index=True,
@@ -167,10 +167,29 @@ class DockArrivals(Phase):
         # from an earlier period, "same" docks bikes that left this period.
         new_flows["phase_rank"] = DOCK_PREVIOUS_RANK if self.when == "previous" else DOCK_SAME_RANK
 
+        # Stamp step_id: this phase opens one step per redirect round. ``phase_round``
+        # is 0 for the planned dock (and the dock-full lost, which docks nowhere) and
+        # 1.. for each redirect round; opening a fresh step for each distinct round in
+        # ascending order gives the rounds the order steps must sort in. The number
+        # comes from the run-global counter, not from the columns, so the rounds can
+        # never collapse into one step (Notations.md §0.1).
+        if "phase_round" in new_flows.columns:
+            rounds = new_flows["phase_round"].fillna(0).astype("int64")
+        else:
+            rounds = pd.Series(0, index=new_flows.index, dtype="int64")
+        new_flows = new_flows.copy()
+        new_flows["phase_round"] = rounds
+        working = state
+        step_ids = pd.Series(0, index=new_flows.index, dtype="int64")
+        for r in sorted(rounds.unique()):
+            sid, working = working.open_step()
+            step_ids[rounds == r] = sid
+        new_flows["step_id"] = step_ids
+
         # Writes -- remove the docked bikes from the in-transit set and save the
-        # inventory.
+        # inventory. ``working`` carries the advanced step counter forward.
         in_transit = state.in_transit.drop(due.index)
-        new_state = state.with_inventory(inventory).with_in_transit(in_transit)
+        new_state = working.with_inventory(inventory).with_in_transit(in_transit)
 
         # Check -- each arriving bike docks, is redirected, or is lost exactly
         # once. A lost bike docks nowhere, so the inventory grows only by the bikes
@@ -219,7 +238,22 @@ class FormDeparturesPhase(Phase):
         )
         lost_demand = departures[departures["lost"] > 0]
 
-        new_state = state.with_inventory(inventory).with_intermediates(departures=departures)
+        # Open the departures step. This one step spans two phases: the stockout
+        # ``lost`` events here and the ``departed`` events that
+        # :class:`FormPotentialTripsPhase` builds next both belong to it, so its
+        # number is opened once here and passed forward through ``intermediates``.
+        # Open only when the step will carry at least one event (a real departure
+        # or a stockout); a step opened for nothing would leave a gap in the
+        # numbering.
+        will_depart = int(departures["departed"].sum()) > 0
+        departures_step_id = None
+        working = state
+        if will_depart or not lost_demand.empty:
+            departures_step_id, working = working.open_step()
+
+        new_state = working.with_inventory(inventory).with_intermediates(
+            departures=departures, departures_step_id=departures_step_id
+        )
         new_flows = None
         if not lost_demand.empty:
             lost_demand = lost_demand.rename(
@@ -228,6 +262,7 @@ class FormDeparturesPhase(Phase):
             new_flows = lost_events(lost_demand, t, "stockout")
             # A stockout loss is this period's own activity (the middle phase).
             new_flows["phase_rank"] = PERIOD_OWN_RANK
+            new_flows["step_id"] = departures_step_id
 
         departed = inventory_before - int(inventory["quantity"].sum())
         assert departed == int(departures["departed"].sum()), "stockout moves no inventory"
@@ -272,6 +307,12 @@ class FormPotentialTripsPhase(Phase):
         new_flows = departed_events(trips_now)
         # A real user departure is this period's own activity (the middle phase).
         new_flows["phase_rank"] = PERIOD_OWN_RANK
+        # The departures step was opened by FormDeparturesPhase; reuse its number so
+        # the departures and any stockout losses share one step (Notations.md §0.1).
+        # A non-empty trips set means departures happened, so the step was opened.
+        departures_step_id = state.intermediates.get("departures_step_id")
+        assert departures_step_id is not None, "departures step was not opened"
+        new_flows["step_id"] = departures_step_id
 
         # Writes -- add the new departed flows to the in-transit set.
         in_transit = pd.concat([state.in_transit, new_flows], ignore_index=True)
