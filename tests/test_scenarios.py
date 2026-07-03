@@ -114,7 +114,7 @@ def _period_end_inventory_from_moments(journal, initial):
     moments = J.inventory_at_moments(journal, initial)
     last = moments.groupby("period_id")["step_id"].transform("max") == moments["step_id"]
     end = moments[last][["period_id", "facility_id", "commodity_category", "inventory_after"]]
-    return end.rename(columns={"inventory_after": "quantity"})
+    return end.rename(columns={"inventory_after": "quantity_eop"})
 
 
 @pytest.mark.parametrize("name", list(scenarios.ALL_SCENARIOS))
@@ -166,8 +166,9 @@ def test_moments_last_step_matches_per_period_inventory(name, run_scenario):
     # The per-period inventory (get_inventory_df) is the value at each period's
     # last step, so the fine inventory_at_moments must coarsen back to it exactly.
     resolved, journal, _state = run_scenario(name)
-    coarse = _sorted(J.get_inventory_df(journal, resolved.initial_inventory_df))
-    fine = _sorted(_period_end_inventory_from_moments(journal, resolved.initial_inventory_df))
+    cols = ["period_id", "facility_id", "commodity_category", "quantity_eop"]
+    coarse = _sorted(J.get_inventory_df(journal, resolved.initial_inventory_df))[cols]
+    fine = _sorted(_period_end_inventory_from_moments(journal, resolved.initial_inventory_df))[cols]
     pd.testing.assert_frame_equal(coarse, fine, check_dtype=False)
 
 

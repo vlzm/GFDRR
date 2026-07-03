@@ -74,7 +74,7 @@ def _check_projection_consistency(
         return []
     projected = get_inventory_df(flows, initial)
     last = int(projected["period_id"].max())
-    proj = projected[projected["period_id"] == last].rename(columns={"quantity": "projected"})[
+    proj = projected[projected["period_id"] == last].rename(columns={"quantity_eop": "projected"})[
         _KEYS + ["projected"]
     ]
     live = live.rename(columns={"quantity": "live"})[_KEYS + ["live"]]

@@ -648,7 +648,12 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     -------
     pandas.DataFrame
         Columns ``period_id``, ``facility_id``, ``commodity_category``,
-        ``quantity`` for every period in ``[0, max(period_id)]``.
+        ``quantity_sop`` (start-of-period stock: what is on hand before the
+        period's own flows, equal to the previous period's end value, and the
+        initial inventory for period 0) and ``quantity_eop`` (end-of-period
+        stock: after the period's own flows). One row per
+        ``(period, facility, commodity)`` for every period in
+        ``[0, max(period_id)]``.
     """
     if flows.empty:
         return pd.DataFrame(
@@ -656,7 +661,8 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
                 "period_id": pd.Series(dtype="int64"),
                 "facility_id": pd.Series(dtype="string"),
                 "commodity_category": pd.Series(dtype="string"),
-                "quantity": pd.Series(dtype="int64"),
+                "quantity_sop": pd.Series(dtype="int64"),
+                "quantity_eop": pd.Series(dtype="int64"),
             }
         )
 
@@ -692,11 +698,21 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     initial = initial_inventory.set_index(["facility_id", "commodity_category"])["quantity"]
     full_index = net.index.union(initial.index)
     net = net.reindex(full_index, fill_value=0)
-    cumulative = net.cumsum(axis=1).add(initial.reindex(full_index).fillna(0), axis=0)
+    # End-of-period stock: initial plus the running total of net flow up to and
+    # including each period. Start-of-period stock is that minus the period's own
+    # net flow, so it equals the previous period's end value (and the initial
+    # inventory for period 0).
+    eop = net.cumsum(axis=1).add(initial.reindex(full_index).fillna(0), axis=0)
+    sop = eop - net
 
-    inventory = cumulative.stack().rename("quantity").reset_index()
-    inventory["quantity"] = inventory["quantity"].astype("int64")
-    return inventory[["period_id", "facility_id", "commodity_category", "quantity"]]
+    inventory = pd.concat(
+        [sop.stack().rename("quantity_sop"), eop.stack().rename("quantity_eop")], axis=1
+    ).reset_index()
+    inventory["quantity_sop"] = inventory["quantity_sop"].astype("int64")
+    inventory["quantity_eop"] = inventory["quantity_eop"].astype("int64")
+    return inventory[
+        ["period_id", "facility_id", "commodity_category", "quantity_sop", "quantity_eop"]
+    ]
 
 
 def _inventory_deltas(flows: pd.DataFrame) -> pd.DataFrame:

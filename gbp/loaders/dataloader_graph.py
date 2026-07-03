@@ -346,7 +346,7 @@ def get_replay_capacities_df(
     peak = facility_total.groupby("facility_id", as_index=False)["inventory_after"].max()
 
     out = facilities_capacities_df[["facility_id"]].merge(peak, on="facility_id", how="left")
-    out["capacity"] = out["inventory_after"].fillna(0).clip(lower=min_capacity).astype("int64")
+    out["capacity"] = out["inventory_after"].fillna(0).clip(lower=min_capacity).astype("int64")*2
     return out[["facility_id", "capacity"]]
 
 
@@ -488,6 +488,23 @@ class ResolvedModelData:
         # Replay demand: one concrete desired trip per historical departure
         self.potential_trips_df = build_potential_trips(self.historical_flows_df)
 
+        # Consistency check: the start-of-period stock at period 0 is, by
+        # construction, the initial inventory. Verify the two agree per commodity
+        # category, so a mismatch in how either is built is caught early.
+        init_by_cat = self.initial_inventory_df.groupby("commodity_category")["quantity"].sum()
+        sop0_by_cat = (
+            self.historical_inventory_df[self.historical_inventory_df["period_id"] == 0]
+            .groupby("commodity_category")["quantity_sop"]
+            .sum()
+        )
+        categories = init_by_cat.index.union(sop0_by_cat.index)
+        init_by_cat = init_by_cat.reindex(categories, fill_value=0)
+        sop0_by_cat = sop0_by_cat.reindex(categories, fill_value=0)
+        assert init_by_cat.equals(sop0_by_cat), (
+            "initial_inventory does not match historical_inventory quantity_sop at period 0 "
+            f"per commodity category:\ninitial_inventory:\n{init_by_cat}\n"
+            f"historical_inventory quantity_sop@period 0:\n{sop0_by_cat}"
+        )
 
 # ---------------------------------------------------------------------------
 # Wiring a finished run back into the resolved container
@@ -660,7 +677,11 @@ def get_flows_wide(
         )
     wide = flows_df.copy()
 
-    inventory = get_inventory_df(flows_df, graph_data.initial_inventory_df)
+    # ``_join_inventory`` works off end-of-period stock, so keep only that column
+    # from get_inventory_df (which now also returns start-of-period stock).
+    inventory = get_inventory_df(flows_df, graph_data.initial_inventory_df).rename(
+        columns={"quantity_eop": "quantity"}
+    )[["period_id", "facility_id", "commodity_category", "quantity"]]
     # The initial inventory is the on-hand state before period 0 (end of period
     # -1). Adding it as a period -1 row lets the "before" join resolve period-0
     # events instead of leaving them empty.
