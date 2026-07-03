@@ -7,10 +7,10 @@ the replay demand the engine consumes.
 and exposes the graph tables. The :class:`~engine.Environment` and its phases
 read a narrow subset of them: ``periods_df``, ``initial_inventory_df``,
 ``historical_demand_df``, ``historical_od_matrix_df``,
-``facilities_capacities_df`` and ``facilities_geo_df``.
+``facilities_capacities_df``, ``facilities_geo_df`` and
+``trip_speed_km_per_period``.
 """
 
-import numpy as np
 import pandas as pd
 
 from gbp.loaders.dataloader_raw import RawModelData
@@ -22,6 +22,7 @@ from gbp.model import (
     flows_to_departures,
     flows_to_od_matrix,
     get_inventory_df,
+    haversine_km,
     inventory_at_moments,
     phase_rank_by_timing,
 )
@@ -112,6 +113,53 @@ def get_historical_flows_df(
     # it closes in its own period). The simulator stamps its phase's rank instead.
     journal["phase_rank"] = phase_rank_by_timing(journal)
     return finalize_flows(journal)
+
+
+def get_trip_speed_km_per_period(
+    trips_df: pd.DataFrame, facilities_geo_df: pd.DataFrame, period_len: pd.Timedelta
+) -> float:
+    """Mean riding speed over the historical trips, in kilometres per period.
+
+    Total great-circle distance divided by total ride time, so long trips weigh
+    more than short ones. Speed must come from the raw ``started_at`` /
+    ``ended_at`` timestamps: the OD matrix stores durations rounded to whole
+    periods, and most trips are shorter than one period, so a speed computed
+    from the OD matrix would divide by near-zero times.
+
+    Trips that start and end at the same station, take no time, or miss a
+    coordinate carry no speed information and are skipped.
+
+    The simulator uses this value to estimate a redirect leg's travel time when
+    the OD matrix has no entry for the pair (see
+    :func:`gbp.consumers.simulator.mechanics.plan_overflow_redirect`).
+
+    Parameters
+    ----------
+    trips_df : pandas.DataFrame
+        Trips with ``started_at``, ``ended_at``, ``start_station_id``,
+        ``end_station_id``.
+    facilities_geo_df : pandas.DataFrame
+        Facility geography: ``facility_id``, ``lat``, ``lng``.
+    period_len : pandas.Timedelta
+        Length of a single period.
+
+    Returns
+    -------
+    float
+        Kilometres a bike rides in one period, on average.
+    """
+    coords = facilities_geo_df.set_index("facility_id")
+    distance_km = haversine_km(
+        trips_df["start_station_id"].map(coords["lat"]),
+        trips_df["start_station_id"].map(coords["lng"]),
+        trips_df["end_station_id"].map(coords["lat"]),
+        trips_df["end_station_id"].map(coords["lng"]),
+    )
+    ride_periods = (trips_df["ended_at"] - trips_df["started_at"]) / period_len
+    valid = distance_km.notna() & (distance_km > 0) & (ride_periods > 0)
+    if not valid.any():
+        raise ValueError("no trip with distinct stations and positive ride time to compute speed")
+    return float(distance_km[valid].sum() / ride_periods[valid].sum())
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +502,12 @@ class ResolvedModelData:
         self.historical_arrivals_df = flows_to_arrivals(self.historical_flows_df)
         self.historical_od_matrix_df = flows_to_od_matrix(self.historical_flows_df)
 
+        # Mean riding speed from the raw timestamps; the simulator's travel-time
+        # fallback for a redirect leg whose pair has no OD entry.
+        self.trip_speed_km_per_period = get_trip_speed_km_per_period(
+            raw.trips_df, self.facilities_geo_df, period_len
+        )
+
         # Simulated observations -- filled by attach_simulation after a run
         self.simulated_flows_df: pd.DataFrame | None = None
         self.simulated_resources_df: pd.DataFrame | None = None
@@ -526,20 +580,6 @@ def attach_simulation(
 #: The three facility roles a flow event names, each joined to its own copy of
 #: every facility attribute (capacity, geo, inventory) under a role prefix.
 _FLOW_FACILITY_ROLES = ("source", "planned_target", "realized_target")
-
-_EARTH_RADIUS_KM = 6371.0088
-
-
-def _haversine_km(lat1: pd.Series, lng1: pd.Series, lat2: pd.Series, lng2: pd.Series) -> pd.Series:
-    """Great-circle distance in kilometres between two coordinate columns.
-
-    Vectorised over the rows. Any row with a missing coordinate yields ``NaN``.
-    """
-    lat1_r, lng1_r, lat2_r, lng2_r = (np.radians(x) for x in (lat1, lng1, lat2, lng2))
-    dlat = lat2_r - lat1_r
-    dlng = lng2_r - lng1_r
-    h = np.sin(dlat / 2) ** 2 + np.cos(lat1_r) * np.cos(lat2_r) * np.sin(dlng / 2) ** 2
-    return _EARTH_RADIUS_KM * 2 * np.arcsin(np.sqrt(h))
 
 
 def _join_capacity(flows: pd.DataFrame, capacities: pd.DataFrame, role: str) -> pd.DataFrame:
@@ -672,13 +712,13 @@ def get_flows_wide(
 
     wide["planned_duration"] = wide["planned_end_period"] - wide["start_period"]
     wide["realized_duration"] = wide["realized_end_period"] - wide["start_period"]
-    wide["planned_distance_km"] = _haversine_km(
+    wide["planned_distance_km"] = haversine_km(
         wide["source_lat"],
         wide["source_lng"],
         wide["planned_target_lat"],
         wide["planned_target_lng"],
     )
-    wide["realized_distance_km"] = _haversine_km(
+    wide["realized_distance_km"] = haversine_km(
         wide["source_lat"],
         wide["source_lng"],
         wide["realized_target_lat"],

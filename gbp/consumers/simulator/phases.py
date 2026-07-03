@@ -129,6 +129,7 @@ class DockArrivals(Phase):
             resolved.facilities_capacities_df,
             resolved.facilities_geo_df,
             resolved.historical_od_matrix_df,
+            resolved.trip_speed_km_per_period,
             overflow,
             t,
         )

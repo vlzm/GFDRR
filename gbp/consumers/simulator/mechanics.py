@@ -16,7 +16,7 @@ phases <- engine``.
 import numpy as np
 import pandas as pd
 
-from gbp.model import neighbor_distance_sq
+from gbp.model import haversine_km, neighbor_distance_sq
 
 from .state import adjust_inventory, dock_deltas
 
@@ -139,16 +139,34 @@ def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame
     return targets.map(nearest)
 
 
-def _leg_durations(od_matrix: pd.DataFrame, source: pd.Series, target: pd.Series) -> pd.Series:
+def _leg_durations(
+    od_matrix: pd.DataFrame,
+    geo: pd.DataFrame,
+    trip_speed_km_per_period: float,
+    source: pd.Series,
+    target: pd.Series,
+) -> pd.Series:
     """Travel time in periods for each (source, target) pair, aligned to ``source``.
 
     The pair's mean historical ``duration`` from the OD matrix, over all periods
-    and commodities; 0 for a pair no historical trip ever rode.
+    and commodities. For a pair no historical trip ever rode, the estimate is
+    the great-circle distance between the two stations divided by
+    ``trip_speed_km_per_period``. Both round to whole periods.
     """
     pair_duration = od_matrix.groupby(["source_id", "planned_target_id"])["duration"].mean()
     pairs = pd.MultiIndex.from_arrays([source, target])
-    values = pair_duration.reindex(pairs).fillna(0).round().astype("int64")
-    return pd.Series(values.to_numpy(), index=source.index)
+    from_od = pd.Series(pair_duration.reindex(pairs).to_numpy(), index=source.index)
+    coords = geo.set_index("facility_id")
+    estimate = (
+        haversine_km(
+            source.map(coords["lat"]),
+            source.map(coords["lng"]),
+            target.map(coords["lat"]),
+            target.map(coords["lng"]),
+        )
+        / trip_speed_km_per_period
+    )
+    return from_od.fillna(estimate).round().astype("int64")
 
 
 def plan_overflow_redirect(
@@ -156,6 +174,7 @@ def plan_overflow_redirect(
     capacities: pd.DataFrame,
     geo: pd.DataFrame,
     od_matrix: pd.DataFrame,
+    trip_speed_km_per_period: float,
     overflow: pd.DataFrame,
     period_id: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -184,6 +203,9 @@ def plan_overflow_redirect(
         Facility geography: ``facility_id``, ``lat``, ``lng``.
     od_matrix : pandas.DataFrame
         OD demand model; the source of the per-pair travel times.
+    trip_speed_km_per_period : float
+        Mean historical riding speed; the travel-time fallback for a pair with
+        no OD entry (see :func:`_leg_durations`).
     overflow : pandas.DataFrame
         The flows that found no free dock at their arc's target.
     period_id : int
@@ -207,7 +229,13 @@ def plan_overflow_redirect(
         found = found[found["realized_target_id"].notna()]
         if found.empty:
             break  # no station anywhere has a free dock: the rest is lost
-        travel = _leg_durations(od_matrix, found["planned_target_id"], found["realized_target_id"])
+        travel = _leg_durations(
+            od_matrix,
+            geo,
+            trip_speed_km_per_period,
+            found["planned_target_id"],
+            found["realized_target_id"],
+        )
         found = found.assign(leg_end_period=period_id + travel, phase_round=round_no)
 
         later = found[found["leg_end_period"] > period_id]

@@ -43,7 +43,10 @@
       "Bash(python -m pytest tests/test_scenarios.py -q)",
       "Bash(python -m pytest -q)",
       "Skill(artifact-design)",
-      "Artifact"
+      "Artifact",
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python /tmp/claude-1000/-mnt-outer-Documents-vlzm-GFDRR-ubuntu-GFDRR/50390f7f-8d2b-45d5-93ea-773db316220e/scratchpad/check_speed.py)",
+      "Bash(git -C /mnt/outer/Documents/vlzm/GFDRR_ubuntu/GFDRR diff --stat)"
     ]
   }
 }

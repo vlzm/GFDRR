@@ -74,8 +74,9 @@ projection of them. This is the anchor; read it first.
 bounce: the bike reaches the arc's full target, bounces (`redirected`, closing
 the current arc), then departs on a new arc — the **continuation leg**
 (`redirect_leg_events`) — to the station chosen for it. The leg takes the pair's
-travel time from the OD matrix; a leg that takes time docks in a later period,
-where it can bounce again. So a `departed` means one of two things:
+travel time from the OD matrix (for a pair with no OD entry, the great-circle
+distance over `trip_speed_km_per_period`); a leg that takes time docks in a
+later period, where it can bounce again. So a `departed` means one of two things:
 
 - `departed` with `move_id == 0` — a **real user departure** from a dock (`−1` to
   the source's inventory; it is the outflow and the trip the OD model learns from).
@@ -305,7 +306,8 @@ and its `resource_id` column are canonical and reserved.
 | `planned_end_period` | The period an arc was expected to dock (each redirect leg carries its own). |
 | `realized_end_period` | The period a flow actually docked (NA if lost). |
 | `duration` | Trip length in whole periods (`planned_end_period - start_period`), carried by the OD matrix. |
-| `leg_end_period` | Planning column of `plan_overflow_redirect`: the period a redirect's new leg will dock (the bounce period plus the pair's `duration`). Becomes the leg's `planned_end_period`. |
+| `leg_end_period` | Planning column of `plan_overflow_redirect`: the period a redirect's new leg will dock (the bounce period plus the leg's travel time). Becomes the leg's `planned_end_period`. |
+| `trip_speed_km_per_period` | Mean riding speed over the historical trips (total great-circle distance over total ride time, from the raw timestamps), in km per period. The travel-time fallback for a redirect pair with no OD entry: `round(haversine_km / trip_speed_km_per_period)`. |
 | `period_len` | Wall-clock length of one period (default one hour); `start_timestamp` / `end_timestamp` are the period's bounds. |
 
 ---

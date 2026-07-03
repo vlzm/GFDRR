@@ -21,6 +21,7 @@ functions of the journal and the current inventory, so historical and simulated
 runs share one definition for each of them.
 """
 
+import numpy as np
 import pandas as pd
 
 # ---------------------------------------------------------------------------
@@ -866,6 +867,25 @@ def flows_with_inventory(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -
     out["inventory_before"] = out["inventory_before"].astype("Int64")
     out["inventory_after"] = out["inventory_after"].astype("Int64")
     return out
+
+
+_EARTH_RADIUS_KM = 6371.0088
+
+
+def haversine_km(lat1: pd.Series, lng1: pd.Series, lat2: pd.Series, lng2: pd.Series) -> pd.Series:
+    """Great-circle distance in kilometres between two coordinate columns.
+
+    Vectorised over the rows. Any row with a missing coordinate yields ``NaN``.
+    It lives here in the model layer because both the loaders (trip distances,
+    the wide journal) and the simulator (a redirect leg's travel-time estimate)
+    need the same distance, and both may import from the model but never the
+    other way around.
+    """
+    lat1_r, lng1_r, lat2_r, lng2_r = (np.radians(x) for x in (lat1, lng1, lat2, lng2))
+    dlat = lat2_r - lat1_r
+    dlng = lng2_r - lng1_r
+    h = np.sin(dlat / 2) ** 2 + np.cos(lat1_r) * np.cos(lat2_r) * np.sin(dlng / 2) ** 2
+    return _EARTH_RADIUS_KM * 2 * np.arcsin(np.sqrt(h))
 
 
 def neighbor_distance_sq(

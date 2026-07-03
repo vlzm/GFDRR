@@ -114,6 +114,10 @@ def build_resolved(
     resolved.historical_flows_df = hist
     resolved.historical_demand_df = J.flows_to_departures(hist)
     resolved.historical_od_matrix_df = J.flows_to_od_matrix(hist)
+    # Travel-time fallback for a redirect pair with no OD entry. The synthetic
+    # stations above sit ~0.1 km apart, so at 15 km per period every fallback
+    # estimate rounds to zero periods and the scenarios keep their stories.
+    resolved.trip_speed_km_per_period = 15.0
     return resolved
 
 
