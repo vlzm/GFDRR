@@ -4,8 +4,9 @@ The period grid, the historical flow log, the graph entities/attributes, and
 the replay demand the engine consumes.
 
 ``ResolvedModelData`` is built once per scenario from a :class:`RawModelData`
-and exposes the graph tables. The :class:`~engine.Environment` reads a narrow
-subset of them: ``periods_df``, ``initial_inventory_df``, ``potential_trips_df``,
+and exposes the graph tables. The :class:`~engine.Environment` and its phases
+read a narrow subset of them: ``periods_df``, ``initial_inventory_df``,
+``historical_demand_df``, ``historical_od_matrix_df``,
 ``facilities_capacities_df`` and ``facilities_geo_df``.
 """
 
@@ -232,31 +233,6 @@ def empty_resources_obs_df() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Replay demand
-# ---------------------------------------------------------------------------
-def build_potential_trips(historical_flows_df: pd.DataFrame) -> pd.DataFrame:
-    """Replay demand: one concrete desired trip per historical departure.
-
-    Carries the real target and duration of every trip, which is what makes the
-    base run reproduce history exactly instead of resampling it. Only move-0
-    departures are real user departures; history never redirects, so all its
-    departures are already ``move_id == 0``, but the filter is kept defensively.
-    """
-    cols = [
-        "flow_id",
-        "source_id",
-        "planned_target_id",
-        "commodity_category",
-        "start_period",
-        "planned_end_period",
-    ]
-    departed = historical_flows_df[
-        (historical_flows_df["event_type"] == "departed") & (historical_flows_df["move_id"] == 0)
-    ]
-    return departed[cols].reset_index(drop=True)
-
-
-# ---------------------------------------------------------------------------
 # Self-consistent initial state for a clean replay (no stockout / dock-full)
 # ---------------------------------------------------------------------------
 def get_replay_initial_inventory_df(
@@ -408,9 +384,10 @@ class ResolvedModelData:
     """Graph data for one scenario, built from a :class:`RawModelData`.
 
     Exposes the rich graph tables (entities, attributes, historical
-    observations). The engine reads directly: ``periods_df``,
-    ``initial_inventory_df``, ``potential_trips_df``,
-    ``facilities_capacities_df`` and ``facilities_geo_df``.
+    observations). The engine and its phases read directly: ``periods_df``,
+    ``initial_inventory_df``, ``historical_demand_df``,
+    ``historical_od_matrix_df``, ``facilities_capacities_df`` and
+    ``facilities_geo_df``.
 
     ``initial_inventory_df`` and ``facilities_capacities_df`` are built for the
     base replay: the smallest state that runs the historical demand with no
@@ -455,8 +432,8 @@ class ResolvedModelData:
         self.t0 = raw.trips_df["started_at"].min().floor("h")
         self.periods_df = get_periods_df(raw.trips_df, self.t0, period_len)
 
-        # Historical observations: the marginals of the flow log, assembled by
-        # the shared ``observe`` bundle so they match the simulated set below.
+        # Historical observations: the marginals of the flow log, derived with
+        # the same read-model functions as the simulated set below.
         self.historical_flows_df = get_historical_flows_df(raw.trips_df, self.t0, period_len)
         self.historical_resources_df = empty_resources_obs_df()
 
@@ -467,12 +444,6 @@ class ResolvedModelData:
         # docstring for why the per-period low point is not enough).
         self.initial_inventory_df = get_replay_initial_inventory_df(
             self.historical_flows_df, self.facilities_df, self.commodities_categories_df
-        )
-        # Smallest per-facility capacity that holds every arrival, so the replay
-        # never hits a dock-full and never redirects. Exposed for inspection; the
-        # engine still reads facilities_capacities_df, which the caller controls.
-        self.facilities_required_capacities_df = get_replay_capacities_df(
-            self.historical_flows_df, self.initial_inventory_df, self.facilities_capacities_df
         )
         self.historical_inventory_df = get_inventory_df(
             self.historical_flows_df, self.initial_inventory_df
@@ -491,9 +462,6 @@ class ResolvedModelData:
         self.simulated_departures_df: pd.DataFrame | None = None
         self.simulated_arrivals_df: pd.DataFrame | None = None
         self.simulated_od_matrix_df: pd.DataFrame | None = None
-
-        # Replay demand: one concrete desired trip per historical departure
-        self.potential_trips_df = build_potential_trips(self.historical_flows_df)
 
         # Consistency check: the start-of-period stock at period 0 is, by
         # construction, the initial inventory. Verify the two agree per commodity

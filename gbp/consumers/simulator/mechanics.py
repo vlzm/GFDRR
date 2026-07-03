@@ -16,6 +16,8 @@ phases <- engine``.
 import numpy as np
 import pandas as pd
 
+from gbp.model import neighbor_distance_sq
+
 from .state import adjust_inventory, dock_deltas
 
 
@@ -50,18 +52,28 @@ def free_docks(inventory: pd.DataFrame, capacities: pd.DataFrame) -> pd.Series:
     return free.clip(lower=0).astype("int64")
 
 
-def dock_up_to_capacity(due: pd.DataFrame, free: pd.Series) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split docking flows at their planned target into ``(fits, overflow)``.
+def dock_up_to_capacity(
+    due: pd.DataFrame, free: pd.Series, target_col: str = "planned_target_id"
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split docking flows at their target into ``(fits, overflow)``.
 
-    Within each target the first ``free`` flows (in row order) dock; the rest are
-    overflow. Vectorized through a per-target cumulative count -- no Python loop.
+    The one docking rule: within each target the first ``free`` flows (in row
+    order) dock; the rest are overflow. Vectorized through a per-target
+    cumulative count -- no Python loop. ``target_col`` selects which station the
+    flows dock at (the same pattern :func:`state.dock_deltas` uses):
+    ``planned_target_id`` for flows docking at their planned station,
+    ``realized_target_id`` for a redirect round docking at the station chosen
+    for it.
 
     Parameters
     ----------
     due : pandas.DataFrame
-        In-transit flows docking this period (``planned_target_id`` per row).
+        Flows docking this period (one station id per row in ``target_col``).
     free : pandas.Series
         Free dock slots per facility, from :func:`free_docks`.
+    target_col : str, optional
+        The column naming the station each flow docks at. Defaults to
+        ``planned_target_id``.
 
     Returns
     -------
@@ -70,11 +82,11 @@ def dock_up_to_capacity(due: pd.DataFrame, free: pd.Series) -> tuple[pd.DataFram
     """
     if due.empty:
         return due, due
-    rank = due.groupby("planned_target_id").cumcount()
-    capacity_here = due["planned_target_id"].map(free).fillna(0)
+    rank = due.groupby(target_col).cumcount()
+    capacity_here = due[target_col].map(free).fillna(0)
     fits = rank < capacity_here
     # Tier-1 contract: no target docks more flows than it has free slots.
-    docked_n = due[fits].groupby("planned_target_id").size()
+    docked_n = due[fits].groupby(target_col).size()
     assert (docked_n <= free.reindex(docked_n.index).fillna(0)).all(), "docked over capacity"
     return due[fits], due[~fits]
 
@@ -82,8 +94,10 @@ def dock_up_to_capacity(due: pd.DataFrame, free: pd.Series) -> tuple[pd.DataFram
 def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame) -> pd.Series:
     """Nearest *other* station with a free dock for each station id in ``targets``.
 
-    Distance is squared Euclidean on (lat, lng) -- enough to rank neighbours at
-    this prototype stage. Returns a Series aligned to ``targets`` (NA if none).
+    Ranks candidates with :func:`gbp.model.neighbor_distance_sq` -- the one
+    metric shared with the explainer ``redirect_neighbor_table``, so what the
+    explainer shows is the order used here. Returns a Series aligned to
+    ``targets`` (NA if none).
 
     Parameters
     ----------
@@ -113,7 +127,9 @@ def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame
     )
     pairs = target_coords.merge(cand, how="cross")
     pairs = pairs[pairs["target"] != pairs["candidate"]]
-    pairs["dist2"] = (pairs["lat_x"] - pairs["lat_y"]) ** 2 + (pairs["lng_x"] - pairs["lng_y"]) ** 2
+    pairs["dist2"] = neighbor_distance_sq(
+        pairs["lat_x"], pairs["lng_x"], pairs["lat_y"], pairs["lng_y"]
+    )
     # Stable sort so equally distant candidates tie-break deterministically.
     nearest = (
         pairs.sort_values("dist2", kind="stable")
@@ -196,10 +212,11 @@ def plan_overflow_redirect(
 
         later = found[found["leg_end_period"] > period_id]
         now = found[found["leg_end_period"] == period_id]
-        fits = now.groupby("realized_target_id").cumcount() < now["realized_target_id"].map(free)
-        planned += [later, now[fits]]
-        running = adjust_inventory(running, dock_deltas(now[fits], "realized_target_id"))
-        remaining = now[~fits].drop(columns=["realized_target_id", "leg_end_period", "phase_round"])
+        # The same docking rule as the planned dockings, at the redirect's target.
+        docked_now, bounced = dock_up_to_capacity(now, free, "realized_target_id")
+        planned += [later, docked_now]
+        running = adjust_inventory(running, dock_deltas(docked_now, "realized_target_id"))
+        remaining = bounced.drop(columns=["realized_target_id", "leg_end_period", "phase_round"])
 
     if planned:
         redirects = pd.concat(planned, ignore_index=True)

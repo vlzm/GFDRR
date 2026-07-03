@@ -19,7 +19,7 @@ Each scenario is a known story:
 - ``single_trip``      -- the smallest non-empty run.
 
 Tests run the real :class:`Environment` on them and assert the journal is
-well-formed (:mod:`tests.invariants`) and the run invariants I1-I4 hold
+well-formed (:mod:`tests.invariants`) and the run invariants I1-I5 hold
 (:func:`gbp.consumers.simulator.validation.validate_run`).
 """
 
@@ -30,11 +30,9 @@ import pandas as pd
 from gbp.consumers.simulator import (
     DockArrivals,
     FormDeparturesPhase,
-    FormPotentialTripsPhase,
 )
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.engine import Environment
-from gbp.loaders.dataloader_graph import build_potential_trips
 from gbp.model import flows as J
 
 CLASSIC = "classic_bike"
@@ -96,6 +94,10 @@ def build_resolved(
     resolved = types.SimpleNamespace()
     resolved.periods_df = periods
     resolved.facilities_geo_df = geo
+    resolved.facilities_df = pd.DataFrame(
+        {"facility_id": facilities, "facility_category": "station"}
+    )
+    resolved.commodities_categories_df = pd.DataFrame({"commodity_category": [CLASSIC]})
     resolved.facilities_capacities_df = pd.DataFrame(
         [{"facility_id": f, "capacity": capacities.get(f, 10_000)} for f in facilities]
     )
@@ -112,28 +114,29 @@ def build_resolved(
     resolved.historical_flows_df = hist
     resolved.historical_demand_df = J.flows_to_departures(hist)
     resolved.historical_od_matrix_df = J.flows_to_od_matrix(hist)
-    resolved.potential_trips_df = build_potential_trips(hist)
     return resolved
+
+
+def canonical_phases() -> list:
+    """Build the canonical three-phase list every scenario (and the notebook) runs."""
+    return [
+        DockArrivals("previous"),
+        FormDeparturesPhase(),
+        DockArrivals("same"),
+    ]
 
 
 def run(
     resolved: types.SimpleNamespace, *, demand_scale_factor: float = 1.0
 ) -> tuple[pd.DataFrame, object]:
-    """Run the canonical four-phase loop on ``resolved``; return (journal, state).
+    """Run the canonical three-phase loop on ``resolved``; return (journal, state).
 
-    Invariant checking is left off here so the caller can assert on the
+    Invariant checking is switched off here so the caller can assert on the
     violation list directly (a clearer failure than a raised error); the tests
     call :func:`validate_run` themselves.
     """
-    phases = [
-        DockArrivals("previous"),
-        FormDeparturesPhase(),
-        FormPotentialTripsPhase(),
-        DockArrivals("same"),
-    ]
     config = EnvironmentConfig(
-        phases=phases,
-        seed=42,
+        phases=canonical_phases(),
         scenario_id="test",
         validate=False,
         demand_scale_factor=demand_scale_factor,

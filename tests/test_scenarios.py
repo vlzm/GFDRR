@@ -2,9 +2,9 @@
 
 Two layers:
 
-1. A universal sweep -- every scenario, run through the real four-phase
+1. A universal sweep -- every scenario, run through the real three-phase
    :class:`Environment`, must produce a structurally well-formed journal
-   (:mod:`tests.invariants`) and satisfy the run invariants I1-I4
+   (:mod:`tests.invariants`) and satisfy the run invariants I1-I5
    (:func:`gbp.consumers.simulator.validation.validate_run`). These hold by
    design on *any* run, so the same two assertions cover every scenario.
 
@@ -217,6 +217,42 @@ def test_open_step_gives_distinct_numbers_to_separate_opens():
     third, state = state.open_step()
     assert [first, second, third] == [0, 1, 2]
     assert state.next_step_id == 3
+
+
+def _empty_state() -> SimulationState:
+    return SimulationState(
+        state_period_id_obj=PeriodRow(0, None, None),
+        state_inventory_df=pd.DataFrame(),
+        state_flows_df=J.empty_flows_journal(),
+        state_resources_df=pd.DataFrame(),
+    )
+
+
+def test_apply_step_events_opens_one_step_per_round_and_stamps_all_three_columns():
+    # The single write path for a phase: one step per distinct phase_round (rows
+    # without a round are round 0), phase_rank on every row, and the rows appended
+    # to the journal.
+    events = pd.DataFrame(
+        {
+            "flow_id": ["f0", "f1", "f2"],
+            "event_id": [0, 0, 0],
+            "phase_round": [pd.NA, 1, 1],
+        }
+    )
+    new_state = _empty_state().apply_step_events(events, phase_rank=2)
+    written = new_state.state_flows_df
+    assert written["phase_rank"].tolist() == [2, 2, 2]
+    assert written["phase_round"].tolist() == [0, 1, 1]
+    assert written["step_id"].tolist() == [0, 1, 1]
+    assert new_state.next_step_id == 2
+
+
+def test_apply_step_events_with_no_events_opens_no_step():
+    # A step opened for nothing would leave a gap in the numbering.
+    state = _empty_state()
+    new_state = state.apply_step_events(state.state_flows_df.iloc[:0], phase_rank=1)
+    assert new_state.next_step_id == 0
+    assert new_state.state_flows_df.empty
 
 
 @pytest.mark.parametrize("name", list(scenarios.ALL_SCENARIOS))

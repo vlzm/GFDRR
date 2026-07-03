@@ -1,19 +1,19 @@
 """Historical-replay simulator: engine, per-period phases and state.
 
 The public surface is the ``Environment`` (with its ``EnvironmentConfig``) and
-the four canonical phases that split a period into: dock earlier arrivals ->
-form departures -> (sample extra trips) -> dock same-period arrivals.
+the three canonical phases that split a period into: dock earlier arrivals ->
+form departures (and build the trips) -> dock same-period arrivals.
 """
 
-from .engine import Environment, EnvironmentConfig
+from .config import EnvironmentConfig
+from .engine import Environment
 from .phases import (
     DockArrivals,
     FormDeparturesPhase,
-    FormPotentialTripsPhase,
     Phase,
 )
 from .sizing import size_state_for_demand
-from .state import PhaseResult, Schedule, SimulationState, SimulatorConfigError
+from .state import Schedule, SimulationState, SimulatorConfigError
 
 __all__ = [
     "Environment",
@@ -21,9 +21,7 @@ __all__ = [
     "Phase",
     "DockArrivals",
     "FormDeparturesPhase",
-    "FormPotentialTripsPhase",
     "SimulationState",
-    "PhaseResult",
     "Schedule",
     "SimulatorConfigError",
     "size_state_for_demand",

@@ -1,9 +1,9 @@
 """Run-level invariant checks (I1-I5) for a finished simulation.
 
 Tier-2 of the loss-logging design: properties of the whole journal at run end,
-too broad for a single phase's contract. ``validate_run`` runs once, behind
-``EnvironmentConfig.validate`` -- off the hot path, always available, exercised
-by the canonical notebook. I1/I2 are pure functions of the journal
+too broad for a single phase's contract. ``validate_run`` runs once at the end
+of ``Environment.run`` (on by default via ``EnvironmentConfig.validate``), so
+the canonical run is checked every time. I1/I2 are pure functions of the journal
 (:mod:`gbp.model.flows`); I3/I4/I5 also read the live final inventory, the
 in-transit set and the initial inventory, so they live here in the simulator layer.
 I5 is the step-contract guard: no inventory step takes a station below zero.
@@ -31,11 +31,16 @@ _KEYS = ["facility_id", "commodity_category"]
 
 
 class RunInvariantError(AssertionError):
-    """Raised when a finished run violates one or more run invariants (I1-I4)."""
+    """Raised when a finished run violates one or more run invariants (I1-I5)."""
 
 
-def validate_run(state: SimulationState, resolved: ResolvedModelData) -> list[str]:
-    """Check invariants I1-I4 on a finished run; return all violations.
+def validate_run(
+    state: SimulationState,
+    resolved: ResolvedModelData,
+    demand_scale_factor: float = 1.0,
+    number_of_periods: int | None = None,
+) -> list[str]:
+    """Check invariants I1-I5 on a finished run; return all violations.
 
     Parameters
     ----------
@@ -43,6 +48,16 @@ def validate_run(state: SimulationState, resolved: ResolvedModelData) -> list[st
         The final simulation state (live inventory and in-transit set).
     resolved : ResolvedModelData
         The scenario inputs (initial inventory and historical demand).
+    demand_scale_factor : float, optional
+        The run's demand scale (``EnvironmentConfig.demand_scale_factor``). The
+        demand-split check must compare the journal against the demand the run
+        actually faced, so the historical demand is scaled and rounded here the
+        same way ``FormDeparturesPhase`` scales it. Defaults to 1.0.
+    number_of_periods : int, optional
+        How many periods the run stepped (``EnvironmentConfig.number_of_periods``).
+        A run over the first N periods of a longer grid never saw the demand of
+        the later periods, so the demand-split check only covers periods
+        ``0 .. N-1``. Default: the whole demand table (a full-grid run).
 
     Returns
     -------
@@ -52,8 +67,15 @@ def validate_run(state: SimulationState, resolved: ResolvedModelData) -> list[st
     flows = finalize_flows(state.state_flows_df)
     initial = resolved.initial_inventory_df
 
+    demand = resolved.historical_demand_df
+    if number_of_periods is not None:
+        demand = demand[demand["period_id"] < number_of_periods]
+    if demand_scale_factor != 1.0:
+        demand = demand.copy()
+        demand["quantity"] = (demand["quantity"] * demand_scale_factor).round().astype("Int64")
+
     violations: list[str] = []
-    violations += check_demand_split(flows, resolved.historical_demand_df)  # I1
+    violations += check_demand_split(flows, demand)  # I1
     violations += check_flow_closure(flows)  # I2
     violations += _check_projection_consistency(state.state_inventory_df, flows, initial)  # I3
     violations += _check_conservation(state, flows, initial)  # I4

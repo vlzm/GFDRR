@@ -37,9 +37,9 @@ class Environment:
     """
 
     def __init__(self, resolved: ResolvedModelData, config: EnvironmentConfig) -> None:
-        if resolved.potential_trips_df.empty and resolved.initial_inventory_df.empty:
+        if resolved.historical_demand_df.empty and resolved.initial_inventory_df.empty:
             raise SimulatorConfigError(
-                "Environment requires potential_trips_df or initial_inventory_df."
+                "Environment requires historical_demand_df or initial_inventory_df."
             )
         self._resolved = resolved
         self._config = config
@@ -47,6 +47,14 @@ class Environment:
             PeriodRow(int(r.period_id), r.start_timestamp, r.end_timestamp)
             for r in resolved.periods_df.itertuples(index=False)
         ]
+        # Asking for more periods than the grid holds would silently run fewer
+        # (and the flow-closure invariant would measure a truncated horizon), so
+        # refuse it up front instead.
+        if config.number_of_periods > len(self._periods):
+            raise SimulatorConfigError(
+                f"number_of_periods={config.number_of_periods} exceeds the period grid "
+                f"({len(self._periods)} periods)"
+            )
         self._period_cursor: int = 0
         self._state = init_state(resolved, self._periods[0])
 
@@ -66,22 +74,35 @@ class Environment:
         return self._period_cursor >= len(self._periods[: self._config.number_of_periods])
 
     def run(self) -> SimulationState:
-        """Step every period to the end, optionally check invariants, return the state."""
+        """Step every period to the end, check the run invariants, return the state.
+
+        The invariant check (I1-I5) runs by default (``EnvironmentConfig.validate``);
+        it costs one extra ``finalize_flows`` plus one ``inventory_at_moments``
+        pass over the finished journal.
+        """
         while not self.is_done:
             self.step()
         if self._config.validate:
-            violations = validate_run(self._state, self._resolved)
+            violations = validate_run(
+                self._state,
+                self._resolved,
+                self._config.demand_scale_factor,
+                self._config.number_of_periods,
+            )
             if violations:
                 raise RunInvariantError("run invariants violated:\n" + "\n".join(violations))
         return self._state
 
     def step(self) -> SimulationState:
-        """Run one period: execute each scheduled phase, append its events, advance the clock."""
+        """Run one period: execute each scheduled phase, advance the clock.
+
+        Each phase writes its own events to the journal through
+        :meth:`SimulationState.apply_step_events` and returns the next state.
+        """
         period = self._periods[self._period_cursor]
         for phase in self._config.phases:
             if phase.should_run(period):
-                result = phase.execute(self._state, self._resolved, period, self._config)
-                self._state = result.state.append_flows(result.new_flows)
+                self._state = phase.execute(self._state, self._resolved, period, self._config)
 
         self._period_cursor += 1
         if not self.is_done:

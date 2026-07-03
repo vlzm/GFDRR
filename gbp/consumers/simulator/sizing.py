@@ -85,7 +85,11 @@ def size_state_for_demand(
         capacity=(n_commodities + 1) * SATURATION_QUANTITY
     )
 
-    sizing_config = dataclasses.replace(config, scenario_id=config.scenario_id + "_sizing")
+    # The sizing run's own guard is the no-lost/no-redirected assert below, so
+    # the run-level invariant pass is skipped here to keep the sizing run cheap.
+    sizing_config = dataclasses.replace(
+        config, scenario_id=config.scenario_id + "_sizing", validate=False
+    )
     env = Environment(saturated, sizing_config)
     env.run()
     flows = env.simulated_flows_df

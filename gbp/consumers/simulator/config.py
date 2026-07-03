@@ -13,13 +13,13 @@ if TYPE_CHECKING:
 class EnvironmentConfig:
     """Settings for one run.
 
-    The ordered phases to run, the seed, the scenario id, and whether to check
-    the run-level invariants at the end.
+    The ordered phases to run, the scenario id, whether to check the run-level
+    invariants at the end (on by default, so every plain run is checked), the
+    demand scale, and how many periods to step.
     """
 
     phases: list[Phase]
-    seed: int
     scenario_id: str
-    validate: bool = False
+    validate: bool = True
     demand_scale_factor: float = 1.0
     number_of_periods: int = 10

@@ -1,8 +1,10 @@
 """Simulation phases.
 
-Each phase reads the state and returns a new state plus the events it created.
-The four phases split one period into these steps: dock earlier arrivals -> form
-departures -> (build the trips) -> dock arrivals from this same period.
+Each phase reads the state, applies its inventory changes, writes its events to
+the journal through :meth:`SimulationState.apply_step_events`, and returns the
+new state. The three phases split one period into these steps: dock earlier
+arrivals -> form departures (and build the trips) -> dock arrivals from this
+same period.
 
 :class:`DockArrivals` parks the bikes that arrive this period. It fills the free
 dock slots first, then sends any extra bikes on a new leg to the nearest station
@@ -37,7 +39,6 @@ from .mechanics import (
 )
 from .state import (
     PeriodRow,
-    PhaseResult,
     Schedule,
     SimulationState,
     adjust_inventory,
@@ -64,8 +65,8 @@ class Phase:
         resolved: ResolvedModelData,
         period: PeriodRow,
         config: EnvironmentConfig,
-    ) -> PhaseResult:
-        """Apply the phase to the state; return the next state and emitted events."""
+    ) -> SimulationState:
+        """Apply the phase to the state; return the next state (events appended)."""
         raise NotImplementedError
 
 
@@ -106,12 +107,12 @@ class DockArrivals(Phase):
         resolved: ResolvedModelData,
         period: PeriodRow,
         config: EnvironmentConfig,
-    ) -> PhaseResult:
+    ) -> SimulationState:
         """Dock this period's due arrivals, redirect the overflow, lose what fits nowhere."""
         t = period.period_id
         due = self._due_arrivals(state.in_transit, t)
         if due.empty:
-            return PhaseResult.empty(state)
+            return state
         inventory = state.state_inventory_df
         inventory_before = int(inventory["quantity"].sum())
 
@@ -143,23 +144,17 @@ class DockArrivals(Phase):
             [arrived_events(docked, t), lost_dock_full, bounces, legs, arrivals_now],
             ignore_index=True,
         )
-        new_flows["phase_rank"] = DOCK_PREVIOUS_RANK if self.when == "previous" else DOCK_SAME_RANK
-        new_flows["phase_round"] = new_flows["phase_round"].fillna(0).astype("int64")
-
-        # One inventory step per batch, in apply order: the planned dockings
-        # (round 0), then each redirect round (Notations.md §0.1).
-        working = state
-        step_by_round: dict[int, int] = {}
-        for round_no in sorted(new_flows["phase_round"].unique()):
-            step_by_round[round_no], working = working.open_step()
-        new_flows["step_id"] = new_flows["phase_round"].map(step_by_round)
+        # One inventory step per phase_round, in apply order: the planned
+        # dockings (round 0), then each redirect round (Notations.md §0.1).
+        phase_rank = DOCK_PREVIOUS_RANK if self.when == "previous" else DOCK_SAME_RANK
+        new_state = state.apply_step_events(new_flows, phase_rank)
 
         # The due bikes leave the in-transit set; legs that take time join it.
         in_transit = pd.concat(
             [state.in_transit.drop(due.index), legs_later.drop(columns="phase_round")],
             ignore_index=True,
         )
-        new_state = working.with_inventory(inventory).with_in_transit(in_transit)
+        new_state = new_state.with_inventory(inventory).with_in_transit(in_transit)
 
         # Check -- each due bike docked, left on a new leg, or was lost, exactly
         # once; only the bikes that docked now moved inventory.
@@ -167,17 +162,27 @@ class DockArrivals(Phase):
         assert int(inventory["quantity"].sum()) - inventory_before == len(docked) + len(legs_now), (
             "docked count and inventory moved disagree"
         )
-        return PhaseResult(new_state, new_flows)
+        return new_state
 
 
 class FormDeparturesPhase(Phase):
-    """Decide how many bikes leave each (source, commodity), limited by inventory.
+    """Form this period's departures: the demand split and the trips, in one phase.
 
-    Counts only -- the real trips (their targets and durations) are built in
-    :class:`FormPotentialTripsPhase`. The counts are passed on through the
-    per-period ``intermediates``. The demand that did *not* fit the inventory
-    becomes ``lost`` events (``reason="stockout"``), so the journal keeps the full
-    split ``demand = departed + lost`` instead of quietly dropping the lost demand.
+    The period's own activity (:data:`PERIOD_OWN_RANK`), start to finish:
+
+    1. Decide how many bikes leave each ``(source, commodity)`` --
+       ``min(demand, inventory)`` -- and take them out of the inventory.
+    2. Book the demand that did *not* fit as ``lost`` events
+       (``reason="stockout"``), so the journal keeps the full split
+       ``demand = departed + lost`` instead of quietly dropping the lost demand.
+    3. Spread the departures over the destinations with the OD probabilities
+       ``P(target | source, commodity)``, set each trip's arrival period from
+       the mean historical duration of its pair, and emit one ``departed`` flow
+       per bike. In the simple case the OD matrix is the historical one, so a
+       base run repeats the historical demand pattern.
+
+    All of it is one inventory step: the ``departed`` flows and the stockout
+    ``lost`` events share one ``step_id`` (Notations.md §0.1).
     """
 
     name = "form_departures"
@@ -188,102 +193,52 @@ class FormDeparturesPhase(Phase):
         resolved: ResolvedModelData,
         period: PeriodRow,
         config: EnvironmentConfig,
-    ) -> PhaseResult:
-        """Split this period's demand into departures and stockout losses, bounded by inventory."""
+    ) -> SimulationState:
+        """Split this period's demand into departed flows and stockout losses."""
         t = period.period_id
         demand = resolved.historical_demand_df
         demand_now = demand[demand["period_id"] == t].copy()
-        demand_scale_factor = getattr(config, "demand_scale_factor", 1.0)
         demand_now.loc[:, "quantity"] = (
-            (demand_now["quantity"] * demand_scale_factor).round().astype("Int64")
+            (demand_now["quantity"] * config.demand_scale_factor).round().astype("Int64")
         )
         if demand_now.empty:
-            return PhaseResult.empty(state)
+            return state
         inventory_before = int(state.state_inventory_df["quantity"].sum())
 
+        # Mechanics -- bound the demand by the inventory, then spread each
+        # source's departures over the destinations with the OD matrix and split
+        # the totals into one departed flow per bike.
         departures = realize_departures(demand_now, state.state_inventory_df)
         inventory = adjust_inventory(
             state.state_inventory_df, departure_deltas_from_counts(departures)
         )
         lost_demand = departures[departures["lost"] > 0]
-
-        # Open the departures step. This one step spans two phases: the stockout
-        # ``lost`` events here and the ``departed`` events that
-        # :class:`FormPotentialTripsPhase` builds next both belong to it, so its
-        # number is opened once here and passed forward through ``intermediates``.
-        # Open only when the step will carry at least one event (a real departure
-        # or a stockout); a step opened for nothing would leave a gap in the
-        # numbering.
-        will_depart = int(departures["departed"].sum()) > 0
-        departures_step_id = None
-        working = state
-        if will_depart or not lost_demand.empty:
-            departures_step_id, working = working.open_step()
-
-        new_state = working.with_inventory(inventory).with_intermediates(
-            departures=departures, departures_step_id=departures_step_id
+        departed_counts = departures.rename(
+            columns={"facility_id": "source_id", "departed": "quantity"}
         )
-        new_flows = None
+        potential = form_potential_trips(departed_counts, resolved.historical_od_matrix_df, t)
+        trips_now = expand_potential_trips(potential, t)
+
+        # Events -- the departures and the stockout losses are one batch, so
+        # apply_step_events gives them one shared step_id.
+        new_departed = departed_events(trips_now)
+        batches = [] if new_departed.empty else [new_departed]
         if not lost_demand.empty:
             lost_demand = lost_demand.rename(
                 columns={"facility_id": "source_id", "lost": "quantity"}
             )
-            new_flows = lost_events(lost_demand, t, "stockout")
-            # A stockout loss is this period's own activity (the middle phase).
-            new_flows["phase_rank"] = PERIOD_OWN_RANK
-            new_flows["step_id"] = departures_step_id
+            batches.append(lost_events(lost_demand, t, "stockout"))
+        if not batches:
+            return state.with_inventory(inventory)
+        new_flows = pd.concat(batches, ignore_index=True)
+        new_state = state.apply_step_events(new_flows, PERIOD_OWN_RANK)
 
-        departed = inventory_before - int(inventory["quantity"].sum())
-        assert departed == int(departures["departed"].sum()), "stockout moves no inventory"
-        return PhaseResult(new_state, new_flows)
+        # Writes -- the new departed flows enter the in-transit working set.
+        if not new_departed.empty:
+            in_transit = pd.concat([state.in_transit, new_departed], ignore_index=True)
+            new_state = new_state.with_in_transit(in_transit)
+        new_state = new_state.with_inventory(inventory)
 
-
-class FormPotentialTripsPhase(Phase):
-    """Turn the departure counts into real trips, using the OD matrix.
-
-    For each source, it spreads the departures over the destinations with the OD
-    probabilities ``P(target | source, commodity)``, sets each trip's arrival
-    period from the average historical duration of that source-target pair, then
-    splits the totals into one ``departed`` flow per bike. In the simple case the
-    OD matrix is the historical one, so a base run repeats the historical demand
-    pattern.
-    """
-
-    name = "form_potential_trips"
-
-    def execute(
-        self,
-        state: SimulationState,
-        resolved: ResolvedModelData,
-        period: PeriodRow,
-        config: EnvironmentConfig,
-    ) -> PhaseResult:
-        """Turn this period's departure counts into departed flows via the OD matrix."""
-        # Reads -- the departure counts passed on by FormDeparturesPhase.
-        t = period.period_id
-        departures = state.intermediates.get("departures")
-        if departures is None or departures.empty:
-            return PhaseResult.empty(state)
-
-        # Mechanics -- spread each source's departures over the destinations with
-        # the OD matrix, then split the totals into one departed flow per bike.
-        # (No check: this phase only reshapes counts, it moves no inventory.)
-        departures = departures.rename(columns={"facility_id": "source_id", "departed": "quantity"})
-        potential = form_potential_trips(departures, resolved.historical_od_matrix_df, t)
-        trips_now = expand_potential_trips(potential, t)
-        if trips_now.empty:
-            return PhaseResult.empty(state)
-        new_flows = departed_events(trips_now)
-        # A real user departure is this period's own activity (the middle phase).
-        new_flows["phase_rank"] = PERIOD_OWN_RANK
-        # The departures step was opened by FormDeparturesPhase; reuse its number so
-        # the departures and any stockout losses share one step (Notations.md §0.1).
-        # A non-empty trips set means departures happened, so the step was opened.
-        departures_step_id = state.intermediates.get("departures_step_id")
-        assert departures_step_id is not None, "departures step was not opened"
-        new_flows["step_id"] = departures_step_id
-
-        # Writes -- add the new departed flows to the in-transit set.
-        in_transit = pd.concat([state.in_transit, new_flows], ignore_index=True)
-        new_state = state.with_in_transit(in_transit)
-        return PhaseResult(new_state, new_flows)
+        departed_total = inventory_before - int(inventory["quantity"].sum())
+        assert departed_total == int(departures["departed"].sum()), "stockout moves no inventory"
+        return new_state

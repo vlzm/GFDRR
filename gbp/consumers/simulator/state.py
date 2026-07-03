@@ -36,18 +36,6 @@ def adjust_inventory(inventory: pd.DataFrame, deltas: pd.DataFrame) -> pd.DataFr
     return out[["facility_id", "commodity_category", "quantity"]]
 
 
-def departure_deltas(trips: pd.DataFrame) -> pd.DataFrame:
-    """-1 per departing bike, grouped by (source, commodity)."""
-    deltas = (
-        trips.groupby(["source_id", "commodity_category"])
-        .size()
-        .reset_index(name="delta")
-        .rename(columns={"source_id": "facility_id"})
-    )
-    deltas["delta"] = -deltas["delta"]
-    return deltas
-
-
 def dock_deltas(docked: pd.DataFrame, target_col: str = "planned_target_id") -> pd.DataFrame:
     """+1 per docking bike, grouped by the station docked at and the commodity.
 
@@ -91,11 +79,6 @@ class Schedule:
     def every(cls) -> "Schedule":
         """Build a schedule that runs every period."""
         return cls(1)
-
-    @classmethod
-    def every_n_periods(cls, n: int) -> "Schedule":
-        """Build a schedule that runs once every ``n`` periods."""
-        return cls(n)
 
     def should_run(self, period: "PeriodRow") -> bool:
         """Report whether ``period`` falls on this schedule."""
@@ -141,14 +124,12 @@ class SimulationState:
         Resource (truck) observations; empty in the historical replay.
     in_transit : pandas.DataFrame
         Internal projection: ``departed`` flows not yet docked.
-    intermediates : dict
-        Transient per-period hand-offs between phases.
     next_step_id : int
         The next inventory-step number to hand out (Notations.md §0.1). A phase
-        calls :meth:`open_step` when it begins an ordered inventory change; the
-        counter only ever grows, so two ordered batches can never share a
-        ``step_id``. Threaded through the immutable state, so the run stays
-        deterministic.
+        writes its events through :meth:`apply_step_events`, which calls
+        :meth:`open_step` per ordered batch; the counter only ever grows, so two
+        ordered batches can never share a ``step_id``. Threaded through the
+        immutable state, so the run stays deterministic.
     """
 
     state_period_id_obj: PeriodRow
@@ -156,7 +137,6 @@ class SimulationState:
     state_flows_df: pd.DataFrame
     state_resources_df: pd.DataFrame
     in_transit: pd.DataFrame = dataclasses.field(default_factory=empty_in_transit)
-    intermediates: dict[str, Any] = dataclasses.field(default_factory=dict)
     next_step_id: int = 0
 
     # -- clock ---------------------------------------------------------------
@@ -206,52 +186,64 @@ class SimulationState:
         """Return a copy with the in-transit set replaced."""
         return dataclasses.replace(self, in_transit=new_in_transit)
 
-    def with_resources(self, new_resources: pd.DataFrame) -> "SimulationState":
-        """Return a copy with the resources replaced."""
-        return dataclasses.replace(self, state_resources_df=new_resources)
-
     def append_flows(self, new_flows: pd.DataFrame | None) -> "SimulationState":
-        """Append a phase's emitted flow events to ``flows`` (the journal, source of truth)."""
+        """Append flow events to ``flows`` (the journal, source of truth)."""
         if new_flows is None or not len(new_flows):
             return self
         flows = pd.concat([self.state_flows_df, new_flows], ignore_index=True)
         return dataclasses.replace(self, state_flows_df=flows)
 
-    def with_intermediates(self, **updates: Any) -> "SimulationState":
-        """Return a copy with the given per-period hand-offs merged in."""
-        return dataclasses.replace(self, intermediates={**self.intermediates, **updates})
-
     def open_step(self) -> tuple[int, "SimulationState"]:
         """Hand out the next inventory-step number and return the advanced state.
 
-        A phase calls this when it opens an ordered inventory change (a dock
-        batch, a period's departures, one redirect round); it stamps the returned
-        number on the events of that step. Because the number comes from this
-        counter and never from the event columns, two ordered batches always get
-        different ``step_id`` values, even if they share a ``(period_id,
-        phase_rank, phase_round)`` label (Notations.md §0.1).
+        Called per ordered inventory change (a dock batch, a period's
+        departures, one redirect round) -- normally by :meth:`apply_step_events`,
+        which stamps the returned number on the events of that step. Because the
+        number comes from this counter and never from the event columns, two
+        ordered batches always get different ``step_id`` values, even if they
+        share a ``(period_id, phase_rank, phase_round)`` label (Notations.md
+        §0.1).
         """
         return self.next_step_id, dataclasses.replace(self, next_step_id=self.next_step_id + 1)
 
+    def apply_step_events(self, new_flows: pd.DataFrame, phase_rank: int) -> "SimulationState":
+        """Write one phase's events to the journal as correctly numbered steps.
+
+        The single write path for a phase. The phase hands over the events it
+        built this period (``new_flows``, the builder output) and its rank;
+        behind this seam the state opens one inventory step per ordered batch,
+        stamps the three ordering columns on every row, and appends the rows to
+        ``state_flows_df``:
+
+        - ``phase_rank`` is set to ``phase_rank`` on every row;
+        - a per-row ``phase_round`` column marks the ordered batches of a phase
+          that applies several in a row (a redirect's rounds). Rows without one
+          (or with NA) are round 0;
+        - one step is opened per distinct round, in round order, and its number
+          is stamped as the rows' ``step_id``. Steps come from
+          :meth:`open_step`, so two separately ordered batches never share a
+          ``step_id`` (Notations.md §0.1).
+
+        Rows that share a round share one step even when only some of them move
+        inventory -- a step is the batch applied together, not only its ``+1`` /
+        ``-1`` rows. Empty ``new_flows`` opens nothing (a step opened for
+        nothing would leave a gap in the numbering).
+        """
+        if new_flows.empty:
+            return self
+        flows = new_flows.copy()
+        flows["phase_rank"] = phase_rank
+        if "phase_round" not in flows.columns:
+            flows["phase_round"] = 0
+        rounds = pd.to_numeric(flows["phase_round"], errors="coerce")
+        flows["phase_round"] = rounds.fillna(0).astype("int64")
+        working = self
+        step_by_round: dict[int, int] = {}
+        for round_no in sorted(flows["phase_round"].unique()):
+            step_by_round[round_no], working = working.open_step()
+        flows["step_id"] = flows["phase_round"].map(step_by_round)
+        return working.append_flows(flows)
+
     def advance_period(self, next_period_obj: PeriodRow) -> "SimulationState":
-        """Return a copy moved to ``next_period_obj``, clearing the intermediates."""
-        # Intermediates are transient per-period hand-offs between phases.
-        return dataclasses.replace(self, state_period_id_obj=next_period_obj, intermediates={})
-
-
-@dataclasses.dataclass
-class PhaseResult:
-    """What a phase returns: the next state plus any flow events it emitted.
-
-    ``new_flows`` is the batch of new flow-event rows the phase produced this
-    period -- the same row schema as ``flows``, not yet appended. The engine
-    appends it to the journal via :meth:`SimulationState.append_flows`.
-    """
-
-    state: SimulationState
-    new_flows: Any = None  # DataFrame of new flow-event rows, or None
-
-    @classmethod
-    def empty(cls, state: SimulationState) -> "PhaseResult":
-        """Build a result that changes nothing: the same state, no new flows."""
-        return cls(state=state, new_flows=None)
+        """Return a copy moved to ``next_period_obj``."""
+        return dataclasses.replace(self, state_period_id_obj=next_period_obj)

@@ -7,7 +7,7 @@ builders that *write* events (:func:`departed_events`, :func:`arrived_events`,
 :func:`redirected_events`, :func:`redirect_leg_events`,
 :func:`lost_events`) and the derivations that *read*
 the journal back into
-marginals (:func:`flows_to_departures` and friends, :func:`observe`). Write and
+marginals (:func:`flows_to_departures` and friends). Write and
 read live together on purpose: splitting them would leak the column layout
 across two modules.
 
@@ -20,8 +20,6 @@ marginal observations (departures, arrivals, demand, supply, OD matrix) are pure
 functions of the journal and the current inventory, so historical and simulated
 runs share one definition for each of them.
 """
-
-import dataclasses
 
 import pandas as pd
 
@@ -99,6 +97,33 @@ DOCKING_EVENT_TYPES = ["arrived"]
 
 
 # ---------------------------------------------------------------------------
+# The two event predicates every inventory reader shares
+# ---------------------------------------------------------------------------
+# These two masks are the single definition of "which events move inventory"
+# (Notations.md §0): a real user departure is the -1 side, a docking is the +1
+# side. Every read-model below filters through them, so a future event type
+# that moves inventory (rebalancing) is added here once, not in each reader.
+def is_user_departure(flows: pd.DataFrame) -> pd.Series:
+    """Mask of real user departures: ``departed`` with ``move_id == 0``.
+
+    A user departure takes a bike out of a dock (``-1`` at ``source_id``); it is
+    the outflow and the demand the OD model learns from. A redirect's
+    continuation leg is also a ``departed`` but with ``move_id >= 1`` -- pure
+    transport that moves no inventory -- so it is excluded.
+    """
+    return (flows["event_type"] == "departed") & (flows["move_id"] == 0)
+
+
+def is_docking(flows: pd.DataFrame) -> pd.Series:
+    """Mask of docking events: an ``arrived`` lands a bike at ``realized_target_id``.
+
+    The ``+1`` side of the inventory rule (see :data:`DOCKING_EVENT_TYPES`).
+    A ``redirected`` bounce and a ``lost`` dock nothing.
+    """
+    return flows["event_type"].isin(DOCKING_EVENT_TYPES)
+
+
+# ---------------------------------------------------------------------------
 # Flow-event builders
 # ---------------------------------------------------------------------------
 def _typed_events(events_df: pd.DataFrame) -> pd.DataFrame:
@@ -107,9 +132,9 @@ def _typed_events(events_df: pd.DataFrame) -> pd.DataFrame:
     The phase-ordering columns -- ``phase_rank``, ``phase_round`` and
     ``step_id`` -- are not set by the builders, so they are cast only when already
     present (an empty journal carries them; a freshly built event batch does not).
-    The emitting phase stamps ``phase_rank`` (and a redirect batch ``phase_round``)
-    onto the events after a builder makes them; ``step_id`` is the run-global
-    ordinal :func:`finalize_flows` assigns last.
+    In the simulator all three are stamped when a phase writes the events
+    (``SimulationState.apply_step_events``); the historical loader stamps
+    ``phase_rank`` by timing and :func:`finalize_flows` derives its ``step_id``.
     """
     for col, dtype in FLOW_EVENT_DTYPES.items():
         if col in events_df.columns:
@@ -418,7 +443,7 @@ def phase_rank_by_timing(flows: pd.DataFrame) -> pd.Series:
     ``test_step_id_is_a_pure_function_of_the_journal`` uses this function as the
     independent oracle that locks that agreement.
     """
-    is_departure = (flows["event_type"] == "departed") & (flows["move_id"] == 0)
+    is_departure = is_user_departure(flows)
     is_stockout = (flows["event_type"] == "lost") & (flows["reason"] == "stockout")
     is_period_own = is_departure | is_stockout
     rank = pd.Series(DOCK_PREVIOUS_RANK, index=flows.index, dtype="int64")
@@ -564,7 +589,7 @@ def flows_to_departures(flows: pd.DataFrame) -> pd.DataFrame:
     ``departed`` is a pure transport leg (the bike never occupied a dock at the
     full station it left), so it is not outflow and is filtered out.
     """
-    departed = flows[(flows["event_type"] == "departed") & (flows["move_id"] == 0)]
+    departed = flows[is_user_departure(flows)]
     return (
         departed.groupby(["period_id", "source_id", "commodity_category"], as_index=False)[
             "quantity"
@@ -584,7 +609,7 @@ def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
     facility. Grouped by ``(period_id, facility_id, commodity_category)`` where
     ``facility_id`` is that ``realized_target_id``.
     """
-    docked = flows[flows["event_type"].isin(DOCKING_EVENT_TYPES)]
+    docked = flows[is_docking(flows)]
     keys = ["period_id", "realized_target_id", "commodity_category"]
     return (
         docked.groupby(keys, as_index=False)["quantity"]
@@ -595,9 +620,9 @@ def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
 
 def flows_to_od_matrix(flows: pd.DataFrame) -> pd.DataFrame:
     """Build the OD demand model (probability and duration per source-target pair)."""
-    # Only move-0 departures are intended trips. A redirect's later-leg departure
+    # Only user departures are intended trips. A redirect's later-leg departure
     # is a forced transport leg and would pollute the demand model.
-    dep = flows[(flows["event_type"] == "departed") & (flows["move_id"] == 0)].copy()
+    dep = flows[is_user_departure(flows)].copy()
     dep["duration"] = dep["planned_end_period"] - dep["start_period"]
     od = dep.groupby(
         ["source_id", "planned_target_id", "period_id", "commodity_category"], as_index=False
@@ -627,7 +652,7 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     Parameters
     ----------
     flows : pandas.DataFrame
-        A flow-event log (historical or finalized simulated).
+        A finalized flow-event log (it must carry ``step_id``).
     initial_inventory : pandas.DataFrame
         Starting inventory with ``facility_id``, ``commodity_category``, ``quantity``.
 
@@ -653,24 +678,13 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
             }
         )
 
-    dep = (
-        flows[(flows["event_type"] == "departed") & (flows["move_id"] == 0)]
-        .groupby(["period_id", "source_id", "commodity_category"], as_index=False)["quantity"]
+    # The per-period deltas are the per-step deltas aggregated by period, so the
+    # coarse and the fine inventory views share one delta rule by construction.
+    deltas = (
+        _inventory_deltas(flows)
+        .groupby(["period_id", "facility_id", "commodity_category"], as_index=False)["delta"]
         .sum()
-        .rename(columns={"source_id": "facility_id", "quantity": "delta"})
     )
-    dep["delta"] = -dep["delta"]
-    dock_keys = ["period_id", "realized_target_id", "commodity_category"]
-    arr = (
-        flows[flows["event_type"].isin(DOCKING_EVENT_TYPES)]
-        .groupby(dock_keys, as_index=False)["quantity"]
-        .sum()
-        .rename(columns={"realized_target_id": "facility_id", "quantity": "delta"})
-    )
-    deltas = pd.concat([dep, arr], ignore_index=True)
-    deltas = deltas.groupby(["period_id", "facility_id", "commodity_category"], as_index=False)[
-        "delta"
-    ].sum()
 
     n_periods = int(flows["period_id"].max()) + 1
     net = deltas.pivot_table(
@@ -705,19 +719,21 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
 def _inventory_deltas(flows: pd.DataFrame) -> pd.DataFrame:
     """One signed ``delta`` per inventory-moving event, at the facility it touches.
 
-    The same rule the inventory derivations use: a docking ``arrived`` is ``+1``
-    at its ``realized_target_id`` and a real user ``departed`` (``move_id == 0``)
-    is ``-1`` at its ``source_id``; every other event moves no inventory and is
-    dropped. Each row keeps its ``step_id`` so the deltas can be cumulated in
-    inventory-step order (Notations.md §0.1).
+    The single inventory delta rule every read-model uses: a docking event
+    (:func:`is_docking`) is ``+quantity`` at its ``realized_target_id`` and a
+    user departure (:func:`is_user_departure`) is ``-quantity`` at its
+    ``source_id``; every other event moves no inventory and is dropped. Each row
+    keeps its ``step_id`` and ``period_id`` so the deltas can be cumulated on
+    either time axis: per step (:func:`inventory_at_moments`) or per period
+    (:func:`get_inventory_df`).
     """
     cols = ["step_id", "period_id", "facility_id", "commodity_category", "delta"]
-    dock = flows[flows["event_type"].isin(DOCKING_EVENT_TYPES)].copy()
+    dock = flows[is_docking(flows)].copy()
     dock["facility_id"] = dock["realized_target_id"]
-    dock["delta"] = 1
-    dep = flows[(flows["event_type"] == "departed") & (flows["move_id"] == 0)].copy()
+    dock["delta"] = dock["quantity"].astype("int64")
+    dep = flows[is_user_departure(flows)].copy()
     dep["facility_id"] = dep["source_id"]
-    dep["delta"] = -1
+    dep["delta"] = -dep["quantity"].astype("int64")
     return pd.concat([dock[cols], dep[cols]], ignore_index=True)
 
 
@@ -834,8 +850,8 @@ def flows_with_inventory(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -
     """
     moments = inventory_at_moments(flows, initial_inventory)
     out = flows.copy()
-    is_dock = out["event_type"].isin(DOCKING_EVENT_TYPES)
-    is_dep = (out["event_type"] == "departed") & (out["move_id"] == 0)
+    is_dock = is_docking(out)
+    is_dep = is_user_departure(out)
     out["facility_id"] = pd.Series(pd.NA, index=out.index, dtype="string")
     out.loc[is_dock, "facility_id"] = out.loc[is_dock, "realized_target_id"]
     out.loc[is_dep, "facility_id"] = out.loc[is_dep, "source_id"]
@@ -852,18 +868,38 @@ def flows_with_inventory(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -
     return out
 
 
-def _squared_distances(geo: pd.DataFrame, origin_id: str) -> pd.Series:
-    """Squared Euclidean distance on (lat, lng) from ``origin_id`` to every other facility.
+def neighbor_distance_sq(
+    lat: pd.Series,
+    lng: pd.Series,
+    other_lat: pd.Series,
+    other_lng: pd.Series,
+) -> pd.Series:
+    """Rank neighbours by the one metric: squared Euclidean distance on (lat, lng).
 
-    The same metric the redirect mechanics ranks neighbours by
-    (``_nearest_free_station``), so the order here matches the order a redirect
-    actually walks. The origin itself is dropped. Squared distance keeps the
-    ranking exact without a square root (the order is identical).
+    Any argument may also be a single float; pandas broadcasts it over the rows.
+
+    Both the redirect mechanics (``_nearest_free_station``, which *decides*
+    where a redirected bike goes) and the redirect explainer
+    (:func:`redirect_neighbor_table`, which *explains* that decision afterwards)
+    rank neighbour stations with this function, so the order the explainer shows
+    is always the order the simulator used. Squared distance keeps the ranking
+    exact without a square root. It lives here in the model layer because the
+    mechanics may import from the model but never the other way around.
+    """
+    return (lat - other_lat) ** 2 + (lng - other_lng) ** 2
+
+
+def _squared_distances(geo: pd.DataFrame, origin_id: str) -> pd.Series:
+    """Squared distance from ``origin_id`` to every other facility, nearest first.
+
+    Ranks with :func:`neighbor_distance_sq` -- the same metric and stable
+    tie-break the redirect mechanics use -- so the order here matches the order
+    a redirect actually walks. The origin itself is dropped.
     """
     coords = geo.set_index("facility_id")[["lat", "lng"]]
     o = coords.loc[origin_id]
-    d2 = (coords["lat"] - o["lat"]) ** 2 + (coords["lng"] - o["lng"]) ** 2
-    return d2.drop(index=origin_id).sort_values()
+    d2 = neighbor_distance_sq(coords["lat"], coords["lng"], o["lat"], o["lng"])
+    return d2.drop(index=origin_id).sort_values(kind="stable")
 
 
 def redirect_neighbor_table(
@@ -970,39 +1006,6 @@ def redirect_neighbor_table(
         out["free_before"] = (out["capacity"] - out["inventory_before"]).clip(lower=0)
         out["free_after"] = (out["capacity"] - out["inventory_after"]).clip(lower=0)
     return out
-
-
-@dataclasses.dataclass(frozen=True)
-class Observations:
-    """The full set of marginals derived from a flow journal.
-
-    Every field is a pure function of the journal (and, for ``inventory``, of the
-    initial inventory). Bundling them in one container means the historical and
-    simulated observation sets are produced by the same code path and therefore
-    coincide by construction: the base-replay invariant
-    ``simulated_departures == historical_departures`` rests on a single
-    definition rather than two hand-kept blocks.
-
-    Attributes
-    ----------
-    inventory : pandas.DataFrame
-        Per-period inventory; see :func:`get_inventory_df`.
-    departures : pandas.DataFrame
-        Outflow per period and source; see :func:`flows_to_departures`.
-    arrivals : pandas.DataFrame
-        Inflow per period and target; see :func:`flows_to_arrivals`.
-    demand : pandas.DataFrame
-        Realized user demand; equals ``departures`` in an exact replay (see
-        :func:`flows_to_departures` and the note on demand limiting).
-    od_matrix : pandas.DataFrame
-        Origin-destination demand model; see :func:`flows_to_od_matrix`.
-    """
-
-    inventory: pd.DataFrame
-    departures: pd.DataFrame
-    arrivals: pd.DataFrame
-    demand: pd.DataFrame
-    od_matrix: pd.DataFrame
 
 
 # ---------------------------------------------------------------------------
