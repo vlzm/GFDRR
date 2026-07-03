@@ -41,7 +41,9 @@
       "Bash(.venv/bin/jupyter nbconvert *)",
       "Bash(python3 -c ' *)",
       "Bash(python -m pytest tests/test_scenarios.py -q)",
-      "Bash(python -m pytest -q)"
+      "Bash(python -m pytest -q)",
+      "Skill(artifact-design)",
+      "Artifact"
     ]
   }
 }
