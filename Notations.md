@@ -364,6 +364,23 @@ that is the point of deriving both through the one `observe` function.
 
 ---
 
+## 11. Run kinds
+
+A scenario can be run for two different purposes. Keep the two apart by name.
+
+| Canonical | Meaning |
+|---|---|
+| `base replay` | A run with `demand_scale_factor = 1` whose departures equal the historical ones. The limits (stockout, dock-full) are in the pipeline but never take effect. |
+| `sizing run` | A run of the same scenario with **saturated** initial inventory and capacities, used only to measure what the scenario needs. Its journal shows what the demand *wants* to do when no limit takes effect; `size_state_for_demand` reads the required initial inventory and capacities from it. |
+| `saturated` | An initial inventory or a capacity table set far above any demand, so the limits never take effect (`get_saturated_inventory_df`). |
+
+The sizing run works because every phase is deterministic and departures depend on
+inventory only through `min(demand, inventory)`: a real run started from the
+measured state repeats the sizing run's journal exactly, with zero stockout and
+zero dock-full.
+
+---
+
 ## Known drift to fix
 
 The audit (`check-notations`) lists current offenders here so the file does not

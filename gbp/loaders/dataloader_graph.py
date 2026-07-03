@@ -320,12 +320,18 @@ def get_replay_capacities_df(
     commodities is the most docks ever needed at once. A capacity equal to that
     peak holds every arrival, so no flow is ever redirected.
 
+    The peak must include the *initial* occupancy (the moment before the first
+    step), not only the after-step values. A station whose inventory only drains
+    early on has its all-time high at the start; taking the peak over after-step
+    values alone would set its capacity below the bikes it already holds, so its
+    free docks would read as zero and every arrival there would redirect.
+
     Parameters
     ----------
     historical_flows_df : pandas.DataFrame
-        The historical flow log.
+        The flow log to size against (historical, or a sizing run's journal).
     initial_inventory_df : pandas.DataFrame
-        The start stock to size against (use the output of
+        The start inventory to size against (use the output of
         :func:`get_replay_initial_inventory_df`).
     facilities_capacities_df : pandas.DataFrame
         The capacity table whose ``facility_id`` set defines the output rows.
@@ -343,10 +349,24 @@ def get_replay_capacities_df(
     facility_total = moments.groupby(["step_id", "facility_id"], as_index=False)[
         "inventory_after"
     ].sum()
-    peak = facility_total.groupby("facility_id", as_index=False)["inventory_after"].max()
+    step_peak = facility_total.groupby("facility_id")["inventory_after"].max()
+    # The initial occupancy is the moment before the first step; a facility whose
+    # inventory only drains has its all-time high here, not at any after-step value.
+    initial_total = initial_inventory_df.groupby("facility_id")["quantity"].sum()
+    idx = step_peak.index.union(initial_total.index)
+    peak = (
+        pd.concat(
+            [step_peak.reindex(idx, fill_value=0), initial_total.reindex(idx, fill_value=0)],
+            axis=1,
+        )
+        .max(axis=1)
+        .rename("peak_occupancy")
+        .rename_axis("facility_id")
+        .reset_index()
+    )
 
     out = facilities_capacities_df[["facility_id"]].merge(peak, on="facility_id", how="left")
-    out["capacity"] = out["inventory_after"].fillna(0).clip(lower=min_capacity).astype("int64")*2
+    out["capacity"] = out["peak_occupancy"].fillna(0).clip(lower=min_capacity).astype("int64")
     return out[["facility_id", "capacity"]]
 
 
@@ -392,29 +412,24 @@ class ResolvedModelData:
     ``initial_inventory_df``, ``potential_trips_df``,
     ``facilities_capacities_df`` and ``facilities_geo_df``.
 
+    ``initial_inventory_df`` and ``facilities_capacities_df`` are built for the
+    base replay: the smallest state that runs the historical demand with no
+    stockout and no dock-full. To run a *scaled* demand, replace both with the
+    output of :func:`gbp.consumers.simulator.size_state_for_demand`, which sizes
+    them against the scaled scenario's own journal.
+
     Parameters
     ----------
     raw : RawModelData
         The loaded raw entity tables.
     period_len : pandas.Timedelta, optional
         Length of a single simulation period. Defaults to one hour.
-    saturate_stock : bool, optional
-        If True, replace the GBFS initial inventory and the dock capacities with
-        artificial saturated ones (every station holding far above demand, every
-        facility with effectively unbounded docks). This is the base-replay setup:
-        demand limiting and overflow redirect stay in the pipeline but never take effect,
-        so the run reproduces the historical departures exactly. Defaults to False.
-    saturation_quantity : int, optional
-        The per-station inventory and per-facility capacity used when
-        ``saturate_stock`` is True. Defaults to one million.
     """
 
     def __init__(
         self,
         raw: RawModelData,
         period_len: pd.Timedelta = DEFAULT_PERIOD_LEN,
-        scale_capacity_factor: int = 1,
-        scale_init_inventory_factor: int = 1,
     ) -> None:
         # Entities
         self.facilities_df = get_facilities_df(raw.stations_df, raw.depots_df)
@@ -425,13 +440,6 @@ class ResolvedModelData:
         self.facilities_geo_df = get_facilities_geo_df(raw.stations_df, raw.depots_df)
         self.facilities_capacities_df = get_facilities_capacities_df(
             raw.stations_capacities_df, raw.depot_capacities_df
-        )
-        self.facilities_capacities_df["capacity"] = (
-            self.facilities_capacities_df["capacity"] * scale_capacity_factor
-        )
-        # if capacity < 10 then capacity = 10
-        self.facilities_capacities_df["capacity"] = self.facilities_capacities_df["capacity"].apply(
-            lambda x: max(x, 10)
         )
         self.resources_capacities_df = get_resources_capacities_df(raw.trucks_capacities_df)
         self.facilities_costs_df = get_facilities_costs_df(
@@ -460,7 +468,6 @@ class ResolvedModelData:
         self.initial_inventory_df = get_replay_initial_inventory_df(
             self.historical_flows_df, self.facilities_df, self.commodities_categories_df
         )
-        self.initial_inventory_df['quantity'] = (self.initial_inventory_df['quantity']*scale_init_inventory_factor).astype('int64')
         # Smallest per-facility capacity that holds every arrival, so the replay
         # never hits a dock-full and never redirects. Exposed for inspection; the
         # engine still reads facilities_capacities_df, which the caller controls.
@@ -505,6 +512,7 @@ class ResolvedModelData:
             f"per commodity category:\ninitial_inventory:\n{init_by_cat}\n"
             f"historical_inventory quantity_sop@period 0:\n{sop0_by_cat}"
         )
+
 
 # ---------------------------------------------------------------------------
 # Wiring a finished run back into the resolved container

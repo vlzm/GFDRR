@@ -12,6 +12,7 @@ from .phases import (
     FormPotentialTripsPhase,
     Phase,
 )
+from .sizing import size_state_for_demand
 from .state import PhaseResult, Schedule, SimulationState, SimulatorConfigError
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "PhaseResult",
     "Schedule",
     "SimulatorConfigError",
+    "size_state_for_demand",
 ]
