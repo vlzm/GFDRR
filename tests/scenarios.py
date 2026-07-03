@@ -9,11 +9,14 @@ so every scenario is deterministic and runs in milliseconds.
 
 Each scenario is a known story:
 
-- ``canonical``    -- saturated inventory and capacity; no constraint binds.
-- ``overflow``     -- a full dock forces a redirect to a free station.
-- ``stockout``     -- demand outruns the inventory at a source.
-- ``network_full`` -- every dock is full, so a bike fits nowhere and is lost.
-- ``single_trip``  -- the smallest non-empty run.
+- ``canonical``        -- saturated inventory and capacity; no constraint binds.
+- ``overflow``         -- a full dock forces a redirect to a free station.
+- ``overflow_delayed`` -- the redirect's new leg takes time and docks periods later.
+- ``redirect_chain``   -- the leg arrives at a station that filled up meanwhile
+  and bounces again (a second redirect).
+- ``stockout``         -- demand outruns the inventory at a source.
+- ``network_full``     -- every dock is full, so a bike fits nowhere and is lost.
+- ``single_trip``      -- the smallest non-empty run.
 
 Tests run the real :class:`Environment` on them and assert the journal is
 well-formed (:mod:`tests.invariants`) and the run invariants I1-I4 hold
@@ -164,6 +167,32 @@ def overflow() -> types.SimpleNamespace:
     )
 
 
+def overflow_delayed() -> types.SimpleNamespace:
+    """Bounce a bike onto a leg that takes two periods (scenario 5 of the step-id doc).
+
+    Two same-period trips aim at s3, whose single dock holds one -- the other
+    bounces to the nearest free station s2. The historical s3 -> s2 trip
+    teaches the OD matrix that the pair takes two periods, so the leg docks at
+    s2 two periods after the bounce, with that period's normal dock batch.
+    """
+    trips = [("s1", "s3", 0, 0), ("s1", "s3", 0, 0), ("s3", "s2", 0, 2)]
+    return build_resolved(trips, capacities={"s3": 1}, initial_inventory={"s1": 2, "s3": 1})
+
+
+def redirect_chain() -> types.SimpleNamespace:
+    """Bounce a delayed leg a second time: it arrives at a station that filled up meanwhile.
+
+    The bike bounces off the full s4 and rides toward s3 for two periods (the
+    historical s4 -> s3 trip sets that travel time). That same historical trip
+    docks at s3 first and fills its single dock, so on arrival the bike bounces
+    again and docks at s1 -- the only station left with a free dock.
+    """
+    trips = [("s1", "s4", 0, 1), ("s4", "s3", 0, 2)]
+    return build_resolved(
+        trips, capacities={"s3": 1, "s4": 0}, initial_inventory={"s1": 1, "s4": 1}
+    )
+
+
 def stockout() -> types.SimpleNamespace:
     """Five want to leave s1, which holds two -- three are lost to a stockout."""
     trips = [("s1", "s2", 0, 1)] * 5
@@ -187,6 +216,8 @@ def single_trip() -> types.SimpleNamespace:
 ALL_SCENARIOS = {
     "canonical": canonical,
     "overflow": overflow,
+    "overflow_delayed": overflow_delayed,
+    "redirect_chain": redirect_chain,
     "stockout": stockout,
     "network_full": network_full,
     "single_trip": single_trip,

@@ -114,25 +114,49 @@ def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame
     pairs = target_coords.merge(cand, how="cross")
     pairs = pairs[pairs["target"] != pairs["candidate"]]
     pairs["dist2"] = (pairs["lat_x"] - pairs["lat_y"]) ** 2 + (pairs["lng_x"] - pairs["lng_y"]) ** 2
-    nearest = pairs.sort_values("dist2").drop_duplicates("target").set_index("target")["candidate"]
+    # Stable sort so equally distant candidates tie-break deterministically.
+    nearest = (
+        pairs.sort_values("dist2", kind="stable")
+        .drop_duplicates("target")
+        .set_index("target")["candidate"]
+    )
     return targets.map(nearest)
+
+
+def _leg_durations(od_matrix: pd.DataFrame, source: pd.Series, target: pd.Series) -> pd.Series:
+    """Travel time in periods for each (source, target) pair, aligned to ``source``.
+
+    The pair's mean historical ``duration`` from the OD matrix, over all periods
+    and commodities; 0 for a pair no historical trip ever rode.
+    """
+    pair_duration = od_matrix.groupby(["source_id", "planned_target_id"])["duration"].mean()
+    pairs = pd.MultiIndex.from_arrays([source, target])
+    values = pair_duration.reindex(pairs).fillna(0).round().astype("int64")
+    return pd.Series(values.to_numpy(), index=source.index)
 
 
 def plan_overflow_redirect(
     inventory: pd.DataFrame,
     capacities: pd.DataFrame,
     geo: pd.DataFrame,
+    od_matrix: pd.DataFrame,
     overflow: pd.DataFrame,
+    period_id: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Plan where each overflow flow docks: the nearest station with a free dock.
+    """Plan a new leg for each overflow flow: to the nearest station with a free dock.
 
-    A decision, not a state change: this returns *where each flow goes* and leaves
-    applying it (inventory, events) to the phase. Rounds, not per-row loops: each
-    round maps every still-unplaced flow to its nearest free station, docks up to
-    capacity there, and repeats with the leftovers until none remain or no dock is
-    free anywhere. A running copy of inventory tracks the docks each round fills,
-    so the within-batch capacity coupling is honoured exactly; that copy is local
-    and never leaves the function.
+    A decision, not a state change: applying it (inventory, events) is the
+    phase's job. Each planned leg gets three columns: ``realized_target_id``
+    (the station it heads to), ``leg_end_period`` (``period_id`` plus the
+    pair's travel time from the OD matrix, see :func:`_leg_durations`) and
+    ``phase_round`` (the round that planned it, 1-based).
+
+    Legs that dock in this same period (zero travel time) fill docks in rounds:
+    each round docks up to the free capacity, and the next round sees those
+    docks taken -- a running local copy of inventory tracks them. A leg that
+    takes time holds no dock now: whether it fits is decided when it arrives,
+    so it may bounce again there. A flow is lost only when no station in the
+    network has a free dock.
 
     Parameters
     ----------
@@ -142,50 +166,52 @@ def plan_overflow_redirect(
         Dock capacities: ``facility_id``, ``capacity``.
     geo : pandas.DataFrame
         Facility geography: ``facility_id``, ``lat``, ``lng``.
+    od_matrix : pandas.DataFrame
+        OD demand model; the source of the per-pair travel times.
     overflow : pandas.DataFrame
-        The flows that found no free dock at their planned target.
+        The flows that found no free dock at their arc's target.
+    period_id : int
+        The period the overflow happened in.
 
     Returns
     -------
     tuple of (pandas.DataFrame, pandas.DataFrame)
-        ``redirected`` -- the overflow flows that docked, each with a
-        ``realized_target_id`` column naming the station it docked at -- and the
-        flows that found no free dock anywhere (lost).
+        ``redirects`` -- the overflow flows with the three planning columns --
+        and the flows that found no free dock anywhere (lost).
     """
-    redirected_batches = []
+    planned = []
     remaining = overflow
     running = inventory
-    # Each round is its own inventory step: it docks bikes (filling some docks)
-    # before the next round sees the docks it left. ``phase_round`` records
-    # which round a flow docked in (1-based; round 0 is the dock batch that runs
-    # before any redirect), so finalize_flows can order the rounds as steps and a
-    # neighbour's inventory at one flow's redirect reflects the earlier rounds.
-    phase_round = 0
+    round_no = 0
     while not remaining.empty:
-        phase_round += 1
+        round_no += 1
         free = free_docks(running, capacities)
-        if not (free > 0).any():
-            break
-        target = _nearest_free_station(remaining["planned_target_id"], free, geo)
-        candidate = remaining.assign(realized_target_id=target)
-        candidate = candidate[candidate["realized_target_id"].notna()]
-        if candidate.empty:
-            break
-        rank = candidate.groupby("realized_target_id").cumcount()
-        fits = rank < candidate["realized_target_id"].map(free)
-        docked = candidate[fits].assign(phase_round=phase_round)
-        redirected_batches.append(docked)
-        running = adjust_inventory(running, dock_deltas(docked, "realized_target_id"))
-        remaining = candidate[~fits].drop(columns="realized_target_id")
-    if redirected_batches:
-        redirected = pd.concat(redirected_batches, ignore_index=True)
+        nearest = _nearest_free_station(remaining["planned_target_id"], free, geo)
+        found = remaining.assign(realized_target_id=nearest)
+        found = found[found["realized_target_id"].notna()]
+        if found.empty:
+            break  # no station anywhere has a free dock: the rest is lost
+        travel = _leg_durations(od_matrix, found["planned_target_id"], found["realized_target_id"])
+        found = found.assign(leg_end_period=period_id + travel, phase_round=round_no)
+
+        later = found[found["leg_end_period"] > period_id]
+        now = found[found["leg_end_period"] == period_id]
+        fits = now.groupby("realized_target_id").cumcount() < now["realized_target_id"].map(free)
+        planned += [later, now[fits]]
+        running = adjust_inventory(running, dock_deltas(now[fits], "realized_target_id"))
+        remaining = now[~fits].drop(columns=["realized_target_id", "leg_end_period", "phase_round"])
+
+    if planned:
+        redirects = pd.concat(planned, ignore_index=True)
     else:
-        redirected = overflow.iloc[:0].assign(
-            realized_target_id=overflow["planned_target_id"].iloc[:0]
+        redirects = overflow.iloc[:0].assign(
+            realized_target_id=pd.Series(dtype="string"),
+            leg_end_period=pd.Series(dtype="int64"),
+            phase_round=pd.Series(dtype="int64"),
         )
-    # Tier-1 contract: every overflow flow either docks or is lost, never both.
-    assert len(redirected) + len(remaining) == len(overflow), "overflow flows not conserved"
-    return redirected, remaining
+    # Tier-1 contract: every overflow flow either gets a leg or is lost, never both.
+    assert len(redirects) + len(remaining) == len(overflow), "overflow flows not conserved"
+    return redirects, remaining
 
 
 # ---------------------------------------------------------------------------

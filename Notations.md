@@ -50,8 +50,8 @@ projection of them. This is the anchor; read it first.
 | Column | What it holds |
 |---|---|
 | `flow_id` | Id of the flow this event belongs to (§3). |
-| `move_id` | Arc index inside the trip, `0..m`. One physical edge of the trip; a redirect adds a second arc (`move_id = 1`). Set by the builders. |
-| `event_id` | Event ordinal inside the trip, `0..n`, set by the builders at emit time. Row uniqueness is the pair `(flow_id, event_id)`. |
+| `move_id` | Arc index inside the trip, `0..m`. One physical edge of the trip; each redirect bounce adds one more arc (`move_id = 1, 2, …`). Set by the builders. |
+| `event_id` | Event ordinal inside the trip, `0..n`, set by the builders at emit time. Arc `m` opens with `departed` at event `2m` and ends at event `2m + 1`. Row uniqueness is the pair `(flow_id, event_id)`. |
 | `period_id` | The period the event happened in (§8). |
 | `flow_type` | The kind of flow. Only value today: `user_trip`. |
 | `event_type` | One of the four outcomes: `departed`, `arrived`, `redirected`, `lost` (§1). |
@@ -69,11 +69,13 @@ projection of them. This is the anchor; read it first.
 | `phase_round` | The round inside a single phase, for a phase that applies several ordered inventory batches in a row: `0` when the phase applies one batch, `1..` for each later round. Today only the redirect mechanics use it (a redirect's rounds); a later phase that iterates (such as a rebalancer's rounds) reuses the same column. `0` on every other row. A **label** that says which round; the historical loader's step-ordering input (§0.1). |
 | `step_id` | Run-global ordinal of the inventory step the event belongs to; the inventory time axis below the period (§0.1). In the simulator it is **opened at apply time** -- a phase takes the next number from a run-global counter when it begins an ordered change and writes it onto that step's events. The historical loader stamps no number, so `finalize_flows` **derives** it from the `(period_id, phase_rank, phase_round)` label instead. |
 
-**Two arcs and the two roles of `departed`.** A normal trip is one arc
-(`move_id = 0`): a `departed` then an `arrived`. A redirect is **two** arcs: the
-bike reaches its full planned target, bounces (`redirected`, still `move_id = 0`),
-then departs again on a second arc (`move_id = 1`) to the free station it docks at.
-So a `departed` means one of two things:
+**Arcs and the two roles of `departed`.** A normal trip is one arc
+(`move_id = 0`): a `departed` then an `arrived`. A redirect adds an arc per
+bounce: the bike reaches the arc's full target, bounces (`redirected`, closing
+the current arc), then departs on a new arc — the **continuation leg**
+(`redirect_leg_events`) — to the station chosen for it. The leg takes the pair's
+travel time from the OD matrix; a leg that takes time docks in a later period,
+where it can bounce again. So a `departed` means one of two things:
 
 - `departed` with `move_id == 0` — a **real user departure** from a dock (`−1` to
   the source's inventory; it is the outflow and the trip the OD model learns from).
@@ -83,8 +85,8 @@ So a `departed` means one of two things:
 
 Every reader that means "a user departure" filters `move_id == 0`
 (`flows_to_departures`, `flows_to_od_matrix`, the `−1` in `get_inventory_df`).
-`lost` always has `move_id = 0`: a stockout has no arc, a dock-full loss has the
-single arc of an ordinary trip.
+A stockout `lost` has `move_id = 0` (it has no arc); a dock-full `lost` closes
+the flow's current arc, so it carries that arc's `move_id`.
 
 ### 0.1. Moment and step (the inventory time axis)
 
@@ -149,9 +151,9 @@ outcomes — the `event_type` values, the most important words here.
 
 | Canonical | Meaning | Builder | Avoid |
 |---|---|---|---|
-| `departed` | A bike left its source. Opens the flow. | `departed_events` | `dispatched`, `released` |
-| `arrived` | A bike docked at its planned target. | `arrived_events` | — |
-| `redirected` | A bike *bounced* off its full planned target; it docks at a different station on its second arc (`move_id = 1`). The bounce itself docks nowhere. | `redirected_events` | `placed`, `rerouted` |
+| `departed` | A bike left its source. Opens the flow (move 0); a redirect's continuation leg is also a `departed` (move ≥ 1, built by `redirect_leg_events`). | `departed_events` / `redirect_leg_events` | `dispatched`, `released` |
+| `arrived` | A bike docked at the current arc's target (a plain trip's planned target, or the station a redirect leg headed to). | `arrived_events` | — |
+| `redirected` | A bike *bounced* off the full target of its current arc; it rides on on a new leg (`move_id + 1`). The bounce itself docks nowhere. | `redirected_events` | `placed`, `rerouted` |
 | `lost` | A trip that did not happen / a bike that left the system. | `lost_events` | `shortfall`, `missing`, `dropped`, `failed` |
 
 *Dock* is the verb for landing a bike. Only `arrived` docks a bike: it ends a
@@ -170,10 +172,10 @@ why. There are exactly two values, and they are **tags on a `lost` (or
   the outcome is `redirected`; if none did, it is `lost`.
 
 So demand splits exactly into `departed + lost(stockout)`, and every departed
-flow's first arc ends as `arrived`, `redirected`, or `lost(dock_full)`. A
-`redirected` flow is not yet finished — it docks on a second arc (`move_id = 1`)
-that ends in `arrived` — so every departed flow ultimately closes with one
-terminal: `arrived` or `lost(dock_full)`.
+flow's arc ends as `arrived`, `redirected`, or `lost(dock_full)`. A
+`redirected` flow is not yet finished — each bounce opens a new leg, which can
+bounce again where it arrives — so every departed flow ultimately closes with
+one terminal: `arrived` or `lost(dock_full)`.
 
 **`stockout` is a `reason` value only — never a data name.** A frame or variable
 holding demand lost to a stockout is `lost_demand` (§7). A bike that left and
@@ -294,10 +296,11 @@ and its `resource_id` column are canonical and reserved.
 | Canonical | Meaning |
 |---|---|
 | `period` / `period_id` | One step of the simulation clock. |
-| `start_period` | The period a flow departed. |
-| `planned_end_period` | The period a flow was expected to dock. |
+| `start_period` | The period a flow departed. The same on every row of the flow, redirect legs included — it records when the *flow* departed, not when an arc started. |
+| `planned_end_period` | The period an arc was expected to dock (each redirect leg carries its own). |
 | `realized_end_period` | The period a flow actually docked (NA if lost). |
 | `duration` | Trip length in whole periods (`planned_end_period - start_period`), carried by the OD matrix. |
+| `leg_end_period` | Planning column of `plan_overflow_redirect`: the period a redirect's new leg will dock (the bounce period plus the pair's `duration`). Becomes the leg's `planned_end_period`. |
 | `period_len` | Wall-clock length of one period (default one hour); `start_timestamp` / `end_timestamp` are the period's bounds. |
 
 ---

@@ -5,11 +5,11 @@ The four phases split one period into these steps: dock earlier arrivals -> form
 departures -> (build the trips) -> dock arrivals from this same period.
 
 :class:`DockArrivals` parks the bikes that arrive this period. It fills the free
-dock slots first, and sends any extra bikes to the nearest station that still has
-a free dock. Docking and redirect happen together, in one step. When we replay
-the real history the docks are never full, so the capacity limit and the redirect
-do nothing. They only start to matter when traffic goes above the historical
-level.
+dock slots first, then sends any extra bikes on a new leg to the nearest station
+that still has a free dock; a leg that takes time docks in a later period. When
+we replay the real history the docks are never full, so the capacity limit and
+the redirect do nothing. They only start to matter when traffic goes above the
+historical level.
 """
 
 import pandas as pd
@@ -22,7 +22,7 @@ from gbp.model import (
     arrived_events,
     departed_events,
     lost_events,
-    redirect_continuation_events,
+    redirect_leg_events,
     redirected_events,
 )
 
@@ -70,22 +70,20 @@ class Phase:
 
 
 class DockArrivals(Phase):
-    """Dock the bikes that arrive this period, and redirect any that do not fit.
+    """Dock the bikes that arrive this period; redirect what does not fit.
 
-    This is one step: park the arriving bikes in the free dock slots, then send
-    any bikes that did not fit to the nearest station with a free dock. The list
-    of extra bikes stays inside this method -- it never leaves the phase.
-    ``when`` chooses which arrivals this phase handles, because the two run at
-    different moments of the period:
+    Arrivals dock at their planned station while it has free docks. Each bike
+    that does not fit bounces and gets a new leg to the nearest station with a
+    free dock. A zero-duration leg docks within this same phase; a leg that
+    takes time (the pair's travel time from the OD matrix) re-enters
+    ``in_transit`` and docks -- or bounces again -- when it arrives. A bike is
+    lost only when no station in the network has a free dock. In an exact
+    replay of history the docks are never full, so none of this fires.
 
-    - ``"previous"`` -- bikes that left in an earlier period and arrive now
-      (docked before the departures are formed), and
-    - ``"same"`` -- bikes that left and arrive inside this same period
-      (docked after the departures are formed).
-
-    When we replay the real history the docks are never full, so the capacity
-    limit and the redirect do nothing. They only start to matter when traffic
-    goes above the historical level.
+    ``when`` picks which arrivals this phase handles, because the two run at
+    different moments of the period: ``"previous"`` docks bikes that departed
+    in an earlier period (before this period's departures are formed), and
+    ``"same"`` docks bikes that departed within this period (after them).
     """
 
     def __init__(self, when: str, schedule: Schedule | None = None) -> None:
@@ -95,6 +93,13 @@ class DockArrivals(Phase):
         self.when = when
         self.name = f"dock_arrivals_{when}"
 
+    def _due_arrivals(self, in_transit: pd.DataFrame, t: int) -> pd.DataFrame:
+        """Select the in-transit flows this phase docks at period ``t`` (picked by ``when``)."""
+        due_now = in_transit["planned_end_period"] == t
+        if self.when == "previous":
+            return in_transit[due_now & (in_transit["start_period"] < t)]
+        return in_transit[due_now & (in_transit["start_period"] == t)]
+
     def execute(
         self,
         state: SimulationState,
@@ -102,101 +107,65 @@ class DockArrivals(Phase):
         period: PeriodRow,
         config: EnvironmentConfig,
     ) -> PhaseResult:
-        """Dock this period's arriving bikes, redirect the overflow, lose what fits nowhere."""
-        # Reads -- the in-transit bikes that should dock this period, the dock
-        # capacities, and the starting inventory the check below uses.
+        """Dock this period's due arrivals, redirect the overflow, lose what fits nowhere."""
         t = period.period_id
-        it = state.in_transit
-        arrived_now = it["planned_end_period"] == t
-        if self.when == "previous":
-            due = it[arrived_now & (it["start_period"] < t)]
-        else:
-            due = it[arrived_now & (it["start_period"] == t)]
+        due = self._due_arrivals(state.in_transit, t)
         if due.empty:
             return PhaseResult.empty(state)
-        capacities = resolved.facilities_capacities_df
         inventory = state.state_inventory_df
         inventory_before = int(inventory["quantity"].sum())
 
-        # Mechanics -- dock the bikes at their planned station while free slots
-        # last, then send the rest to the nearest station with a free dock. Any
-        # bike that finds no free dock anywhere is lost: the whole network is full.
-        free = free_docks(inventory, capacities)
-        docked, overflow = dock_up_to_capacity(due, free)
-        new_flows = arrived_events(docked, t)
+        # Dock at the planned station while free docks last.
+        docked, overflow = dock_up_to_capacity(
+            due, free_docks(inventory, resolved.facilities_capacities_df)
+        )
         inventory = adjust_inventory(inventory, dock_deltas(docked))
-        n_redirected = n_lost = 0
-        if not overflow.empty:
-            redirected, lost = plan_overflow_redirect(
-                inventory, capacities, resolved.facilities_geo_df, overflow
-            )
-            n_redirected, n_lost = len(redirected), len(lost)
-            if not redirected.empty:
-                # A redirect is two arcs: the bounce off the full station B (the
-                # ``redirected`` event, no docking) and the continuation B->C (a
-                # move-1 ``departed`` + ``arrived``). The continuation docks the
-                # bike at C in this same phase, so its move-1 ``departed`` never
-                # joins ``in_transit`` -- it is journalled here and closed at once.
-                # Carry each flow's ``phase_round`` (from plan_overflow_redirect)
-                # onto its events so finalize_flows orders the rounds as steps.
-                round_by_flow = redirected.set_index("flow_id")["phase_round"]
-                bounce = redirected_events(redirected, t)
-                bounce["phase_round"] = bounce["flow_id"].map(round_by_flow)
-                continuation = redirect_continuation_events(redirected, t)
-                continuation["phase_round"] = continuation["flow_id"].map(round_by_flow)
-                new_flows = pd.concat(
-                    [new_flows, bounce, continuation],
-                    ignore_index=True,
-                )
-                inventory = adjust_inventory(
-                    inventory, dock_deltas(redirected, "realized_target_id")
-                )
-            if not lost.empty:
-                # No free dock anywhere, so the bike leaves the system for good.
-                # The event ends this bike's trip; the inventory does not change,
-                # because the bike already left its start station at ``departed``
-                # and now docks nowhere.
-                new_flows = pd.concat(
-                    [new_flows, lost_events(lost, t, "dock_full")],
-                    ignore_index=True,
-                )
 
-        # Stamp the phase that applied these changes: every event this phase emits
-        # (arrived, the redirect bounce and its continuation, a dock-full lost)
-        # belongs to one docking phase, fixed by ``when`` -- "previous" docks bikes
-        # from an earlier period, "same" docks bikes that left this period.
+        # Plan a new leg for each bike that did not fit. Legs with zero travel
+        # time dock right now; the others dock when they arrive.
+        redirects, lost = plan_overflow_redirect(
+            inventory,
+            resolved.facilities_capacities_df,
+            resolved.facilities_geo_df,
+            resolved.historical_od_matrix_df,
+            overflow,
+            t,
+        )
+        bounces = redirected_events(redirects, t).assign(phase_round=redirects["phase_round"])
+        legs = redirect_leg_events(redirects, t).assign(phase_round=redirects["phase_round"])
+        legs_now = legs[legs["planned_end_period"] == t]
+        legs_later = legs[legs["planned_end_period"] > t]
+        arrivals_now = arrived_events(legs_now, t).assign(phase_round=legs_now["phase_round"])
+        inventory = adjust_inventory(inventory, dock_deltas(legs_now))
+
+        lost_dock_full = lost_events(lost, t, "dock_full")
+        new_flows = pd.concat(
+            [arrived_events(docked, t), lost_dock_full, bounces, legs, arrivals_now],
+            ignore_index=True,
+        )
         new_flows["phase_rank"] = DOCK_PREVIOUS_RANK if self.when == "previous" else DOCK_SAME_RANK
+        new_flows["phase_round"] = new_flows["phase_round"].fillna(0).astype("int64")
 
-        # Stamp step_id: this phase opens one step per redirect round. ``phase_round``
-        # is 0 for the planned dock (and the dock-full lost, which docks nowhere) and
-        # 1.. for each redirect round; opening a fresh step for each distinct round in
-        # ascending order gives the rounds the order steps must sort in. The number
-        # comes from the run-global counter, not from the columns, so the rounds can
-        # never collapse into one step (Notations.md §0.1).
-        if "phase_round" in new_flows.columns:
-            rounds = new_flows["phase_round"].fillna(0).astype("int64")
-        else:
-            rounds = pd.Series(0, index=new_flows.index, dtype="int64")
-        new_flows = new_flows.copy()
-        new_flows["phase_round"] = rounds
+        # One inventory step per batch, in apply order: the planned dockings
+        # (round 0), then each redirect round (Notations.md §0.1).
         working = state
-        step_ids = pd.Series(0, index=new_flows.index, dtype="int64")
-        for r in sorted(rounds.unique()):
-            sid, working = working.open_step()
-            step_ids[rounds == r] = sid
-        new_flows["step_id"] = step_ids
+        step_by_round: dict[int, int] = {}
+        for round_no in sorted(new_flows["phase_round"].unique()):
+            step_by_round[round_no], working = working.open_step()
+        new_flows["step_id"] = new_flows["phase_round"].map(step_by_round)
 
-        # Writes -- remove the docked bikes from the in-transit set and save the
-        # inventory. ``working`` carries the advanced step counter forward.
-        in_transit = state.in_transit.drop(due.index)
+        # The due bikes leave the in-transit set; legs that take time join it.
+        in_transit = pd.concat(
+            [state.in_transit.drop(due.index), legs_later.drop(columns="phase_round")],
+            ignore_index=True,
+        )
         new_state = working.with_inventory(inventory).with_in_transit(in_transit)
 
-        # Check -- each arriving bike docks, is redirected, or is lost exactly
-        # once. A lost bike docks nowhere, so the inventory grows only by the bikes
-        # that really docked (docked + redirected), never by the lost ones.
-        assert len(docked) + n_redirected + n_lost == len(due), "due flows not conserved"
-        assert int(inventory["quantity"].sum()) - inventory_before == len(docked) + n_redirected, (
-            "lost or redirected count moved inventory incorrectly"
+        # Check -- each due bike docked, left on a new leg, or was lost, exactly
+        # once; only the bikes that docked now moved inventory.
+        assert len(docked) + len(redirects) + len(lost) == len(due), "due flows not conserved"
+        assert int(inventory["quantity"].sum()) - inventory_before == len(docked) + len(legs_now), (
+            "docked count and inventory moved disagree"
         )
         return PhaseResult(new_state, new_flows)
 

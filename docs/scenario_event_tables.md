@@ -21,13 +21,15 @@ journal (`gbp/model/flows.py`). The schema is `FLOW_EVENT_COLUMNS` (Notations.md
 
 ## How the two ids place an event (Notations.md §0)
 
-- `move_id` — arc index. A plain trip is one arc (`move_id = 0`). A redirect adds
-  a second arc (`move_id = 1`): the continuation leg from the full `B` to `C`.
+- `move_id` — arc index. A plain trip is one arc (`move_id = 0`). Each redirect
+  bounce adds one more arc (`move_id = 1, 2, …`): the continuation leg from the
+  full station to the one chosen for the bike. Arc `m` opens at event `2m` and
+  ends at event `2m + 1`.
 - `event_id` — event ordinal inside the trip. Row uniqueness is
   `(flow_id, event_id)`.
 - A `departed` with `move_id == 0` is a **real user departure** (it is the `-1`
   to source inventory and the trip the OD model learns from). A `departed` with
-  `move_id == 1` is a **redirect continuation leg** — pure transport, not demand,
+  `move_id >= 1` is a **redirect continuation leg** — pure transport, not demand,
   not outflow.
 
 ## The detailed `event_type` values
@@ -41,7 +43,7 @@ The canonical schema has four outcomes (`departed`, `arrived`, `redirected`,
   - `_prev_periods` — the event happens in a **period after `t`**; from the event's
     standpoint the source departure was in previous periods.
 - **Redirect marker:** the infix `redirected` marks an event on a redirect's
-  **second arc** (`move_id == 1`). The bounce itself keeps the stem `redirect`.
+  **continuation arc** (`move_id >= 1`). The bounce itself keeps the stem `redirect`.
 
 | Detailed `event_type` | Base | move_id | Docks? | reason | Meaning |
 |---|---|---|---|---|---|
@@ -143,9 +145,9 @@ continuation departure are `*_cur_period`, but the final docking lands after `t`
 | F1 | 1 | 3 | t+k | user_trip | arrived_redirected_prev_periods | classic_bike | B | C | C | t | t+k | t+k | NA | 1 | NA |
 
 **Notes.** The move-1 `departed_redirected_*` (event 2) has `realized_end_period =
-NA` (it has not docked yet). This multi-period second arc goes **beyond** today's
-`redirect_continuation_events`, which stamps both continuation rows into the bounce
-period.
+NA` (it has not docked yet). The leg's `planned_end_period` is the bounce period
+plus the pair's travel time from the OD matrix; the bike is back in transit until
+then and docks with the arrival period's normal dock batch.
 
 ---
 
@@ -159,13 +161,15 @@ every event recorded in `t+k` is a `*_prev_periods`.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | F1 | 0 | 0 | t | user_trip | departed_cur_period | classic_bike | S | B | NA | t | t+k | NA | NA | 1 | NA |
 | F1 | 0 | 1 | t+k | user_trip | redirect_prev_periods | classic_bike | S | B | NA | t | t+k | t+k | NA | 1 | dock_full |
-| F1 | 1 | 2 | t+k | user_trip | departed_redirected_prev_periods | classic_bike | B | C | NA | t+k | t+k | NA | NA | 1 | NA |
-| F1 | 1 | 3 | t+k | user_trip | arrived_redirected_prev_periods | classic_bike | B | C | C | t+k | t+k | t+k | NA | 1 | NA |
+| F1 | 1 | 2 | t+k | user_trip | departed_redirected_prev_periods | classic_bike | B | C | NA | t | t+k | NA | NA | 1 | NA |
+| F1 | 1 | 3 | t+k | user_trip | arrived_redirected_prev_periods | classic_bike | B | C | C | t | t+k | t+k | NA | 1 | NA |
 
 **Notes.** The user departure (event 0) still happens in `t`, so it stays
 `departed_cur_period`. Everything from the bounce onward is in `t+k`, a period
-after the opening, hence `*_prev_periods`. The continuation arc starts and ends in
-`t+k`, so this scenario is producible by the current builders as written.
+after the opening, hence `*_prev_periods`. `start_period` stays `t` on every row
+of the flow — it records when the *flow* departed, not when the arc started. The
+continuation arc is instant here because the `B -> C` pair has no historical
+travel time.
 
 ---
 
@@ -179,12 +183,14 @@ departure is in `t`; everything else is `*_prev_periods`.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | F1 | 0 | 0 | t | user_trip | departed_cur_period | classic_bike | S | B | NA | t | t+k | NA | NA | 1 | NA |
 | F1 | 0 | 1 | t+k | user_trip | redirect_prev_periods | classic_bike | S | B | NA | t | t+k | t+k | NA | 1 | dock_full |
-| F1 | 1 | 2 | t+k | user_trip | departed_redirected_prev_periods | classic_bike | B | C | NA | t+k | t+k+m | NA | NA | 1 | NA |
-| F1 | 1 | 3 | t+k+m | user_trip | arrived_redirected_prev_periods | classic_bike | B | C | C | t+k | t+k+m | t+k+m | NA | 1 | NA |
+| F1 | 1 | 2 | t+k | user_trip | departed_redirected_prev_periods | classic_bike | B | C | NA | t | t+k+m | NA | NA | 1 | NA |
+| F1 | 1 | 3 | t+k+m | user_trip | arrived_redirected_prev_periods | classic_bike | B | C | C | t | t+k+m | t+k+m | NA | 1 | NA |
 
 **Notes.** The most general redirect: first arc takes `k` periods, continuation arc
-takes `m` periods. Like Scenario 5, the multi-period continuation arc goes beyond
-the current same-period `redirect_continuation_events`.
+takes `m` periods. While the bike rides those `m` periods the inventory at `C`
+keeps changing; if `C` is full on arrival the bike bounces again and gets a third
+arc (`move_id = 2`, events 4-5), and so on — each bounce adds one
+(`redirected`, `departed`) pair before the single terminal `arrived` or `lost`.
 
 ---
 
@@ -206,9 +212,11 @@ departure from `S`): equal → `cur_period`, later → `prev_periods`. The user
 departure is always `cur_period` by definition; only later events can be
 `prev_periods`.
 
-**Implementation note.** Scenarios 5 and 7 (a continuation leg that spans more than
-one period) are not producible by today's `redirect_continuation_events`, which
-forces the whole second arc into the bounce period. They are included because the
-scenario list explores that timing; supporting them would mean letting the
-continuation arc carry its own `start_period` / `planned_end_period` /
-`realized_end_period` instead of collapsing them to `period_id`.
+**Implementation note.** All seven scenarios are produced by the current code. A
+continuation leg (`redirect_leg_events`) gets its own `planned_end_period`: the
+bounce period plus the pair's travel time from the OD matrix (0 for a pair with
+no history — then the leg docks within the bounce period, as in scenarios 4
+and 6). A leg that takes time re-enters the in-transit set and docks with the
+arrival period's normal dock batch; if its station is full by then, the bike
+bounces again (a new arc per bounce). `start_period` is never per-arc: it stays
+the flow's opening period on every row.

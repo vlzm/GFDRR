@@ -1,8 +1,8 @@
 """Structural well-formedness of a flow journal (a test-side invariant).
 
 These checks are about the *shape* of the event log, independent of any
-scenario: the schema is exact, ids are unique, each flow's events follow one of
-the four legal sequences, ``move_id`` agrees with ``event_id``, and time never
+scenario: the schema is exact, ids are unique, each flow's events follow the
+legal sequence, ``move_id`` agrees with ``event_id``, and time never
 runs backwards inside a flow. They complement the run-level invariants I1-I4
 (:func:`gbp.consumers.simulator.validation.validate_run`), which are about
 *quantities* (the demand split, conservation). Both follow the same contract:
@@ -13,19 +13,17 @@ tests, not part of the runtime contract. (If the schema contract ever needs
 enforcing in production, promote it next to the other journal invariants.)
 """
 
+import re
+
 import pandas as pd
 
 from gbp.model.flows import FLOW_EVENT_COLUMNS
 
-#: The only event-type sequences a single flow may show, read in ``event_id``
-#: order. A lone ``departed`` is a flow still in transit when the run window
-#: ended; the four-event form is a redirect (bounce, then a second arc).
-LEGAL_FLOW_SHAPES = {
-    ("departed",),
-    ("departed", "arrived"),  # normal trip
-    ("departed", "lost"),  # dock-full loss
-    ("departed", "redirected", "departed", "arrived"),  # redirect: two arcs
-}
+#: A flow's event types, read in ``event_id`` order, must be: a ``departed``,
+#: then zero or more bounce-and-new-leg pairs (``redirected``, ``departed``),
+#: then at most one terminal (``arrived`` or ``lost``). No terminal means the
+#: flow was still in transit when the run window ended.
+LEGAL_FLOW_SHAPE = re.compile(r"departed(,redirected,departed)*(,(arrived|lost))?")
 
 
 def check_journal_well_formed(flows: pd.DataFrame) -> list[str]:
@@ -55,12 +53,10 @@ def check_journal_well_formed(flows: pd.DataFrame) -> list[str]:
     unknown = set(flows["event_type"].dropna().unique()) - legal_types
     if unknown:
         v.append(f"event_type: unknown values {unknown}")
-    if not flows["move_id"].dropna().astype("int64").isin([0, 1]).all():
-        v.append("move_id: values outside {0, 1}")
-    # move_id is fixed by event_id: events 0-1 are arc 0, events 2-3 are arc 1.
-    expected_move = (flows["event_id"].astype("int64") > 1).astype("int64")
+    # move_id is fixed by event_id: arc m opens at event 2m and ends at event 2m+1.
+    expected_move = flows["event_id"].astype("int64") // 2
     if not (flows["move_id"].astype("int64") == expected_move).all():
-        v.append("move_id: disagrees with event_id (events 0-1 -> arc 0, 2-3 -> arc 1)")
+        v.append("move_id: disagrees with event_id (arc m spans events 2m and 2m+1)")
 
     # -- realized_target_id is set only for a docking ``arrived`` ------------
     is_arrived = flows["event_type"] == "arrived"
@@ -88,7 +84,7 @@ def check_journal_well_formed(flows: pd.DataFrame) -> list[str]:
         if ids != list(range(len(ids))):
             v.append(f"flow {flow_id}: event_id {ids} is not a contiguous 0..n")
         shape = tuple(group["event_type"].tolist())
-        if shape not in LEGAL_FLOW_SHAPES:
+        if not LEGAL_FLOW_SHAPE.fullmatch(",".join(shape)):
             v.append(f"flow {flow_id}: illegal event sequence {shape}")
         periods = group["period_id"].astype("int64").tolist()
         if any(earlier > later for earlier, later in zip(periods, periods[1:], strict=False)):

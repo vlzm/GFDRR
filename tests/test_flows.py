@@ -2,7 +2,7 @@
 
 These work directly on hand-built event frames -- no simulation run -- so they
 pin down the *shape* of each event in isolation: the ``(move_id, event_id)`` an
-event carries, and the four legal flow sequences. The second half deliberately
+event carries, and the legal flow sequence. The second half deliberately
 feeds the checker broken journals to prove it actually catches the mistakes it
 claims to (a checker that never fails is worthless).
 """
@@ -55,17 +55,24 @@ def test_redirected_is_a_bounce_not_a_docking():
     assert "redirected" not in J.DOCKING_EVENT_TYPES
 
 
-def test_redirect_continuation_is_the_second_arc():
-    redirected = _trip_frame().assign(realized_target_id="C")
-    cont = J.redirect_continuation_events(redirected, 7).sort_values("event_id")
-    dep, arr = cont.iloc[0], cont.iloc[1]
-    # Second-arc departure: B -> C, move 1, event 2, not a user departure.
-    assert (dep["move_id"], dep["event_id"], dep["event_type"]) == (1, 2, "departed")
-    assert dep["source_id"] == "B" and dep["planned_target_id"] == "C"
-    assert pd.isna(dep["realized_target_id"])
-    # Second-arc arrival: docks at C, move 1, event 3.
+def test_redirect_leg_opens_the_next_arc():
+    redirects = _trip_frame().assign(move_id=0, realized_target_id="C", leg_end_period=9)
+    leg = J.redirect_leg_events(redirects, 7).iloc[0]
+    # The new leg: B -> C, move 1, event 2, not a user departure, due at 9.
+    assert (leg["move_id"], leg["event_id"], leg["event_type"]) == (1, 2, "departed")
+    assert leg["source_id"] == "B" and leg["planned_target_id"] == "C"
+    assert (leg["period_id"], leg["planned_end_period"]) == (7, 9)
+    assert pd.isna(leg["realized_target_id"])
+
+
+def test_arrived_ends_the_arc_its_leg_opened():
+    redirects = _trip_frame().assign(move_id=0, realized_target_id="C", leg_end_period=9)
+    legs = J.redirect_leg_events(redirects, 7)
+    arr = J.arrived_events(legs, 9).iloc[0]
+    # The leg's arrival: docks at C, move 1, event 3.
     assert (arr["move_id"], arr["event_id"], arr["event_type"]) == (1, 3, "arrived")
     assert arr["realized_target_id"] == "C"
+    assert arr["realized_end_period"] == 9
 
 
 @pytest.mark.parametrize("reason, expected_event_id", [("stockout", 0), ("dock_full", 1)])
@@ -84,21 +91,48 @@ def test_lost_event_id_follows_reason(reason, expected_event_id):
 
 
 # ---------------------------------------------------------------------------
-# A full redirect journal is well-formed; the four shapes are accepted
+# A full redirect journal is well-formed; the legal shapes are accepted
 # ---------------------------------------------------------------------------
 def test_full_redirect_journal_is_well_formed():
     trip = _trip_frame()
-    redirected = trip.assign(realized_target_id="C")
+    redirects = trip.assign(move_id=0, realized_target_id="C", leg_end_period=7)
+    legs = J.redirect_leg_events(redirects, 7)
     journal = J.finalize_flows(
         pd.concat(
             [
                 J.departed_events(trip),  # (0, 0)
-                J.redirected_events(redirected, 7),  # (0, 1) bounce
-                J.redirect_continuation_events(redirected, 7),  # (1, 2) + (1, 3)
+                J.redirected_events(redirects, 7),  # (0, 1) bounce
+                legs,  # (1, 2)
+                J.arrived_events(legs, 7),  # (1, 3)
             ],
             ignore_index=True,
         )
     )
+    assert check_journal_well_formed(journal) == []
+
+
+def test_chained_redirect_journal_is_well_formed():
+    # A bike can bounce more than once: each bounce opens one more arc.
+    trip = _trip_frame()
+    first = trip.assign(move_id=0, realized_target_id="C", leg_end_period=9)
+    leg1 = J.redirect_leg_events(first, 7)  # (1, 2): B -> C, arrives at 9
+    second = leg1.assign(realized_target_id="D", leg_end_period=9)
+    leg2 = J.redirect_leg_events(second, 9)  # (2, 4): C -> D, same period
+    journal = J.finalize_flows(
+        pd.concat(
+            [
+                J.departed_events(trip),  # (0, 0)
+                J.redirected_events(first, 7),  # (0, 1) bounce off B
+                leg1,
+                J.redirected_events(second, 9),  # (1, 3) bounce off C
+                leg2,
+                J.arrived_events(leg2, 9),  # (2, 5) docks at D
+            ],
+            ignore_index=True,
+        )
+    )
+    assert journal["move_id"].tolist() == [0, 0, 1, 1, 2, 2]
+    assert journal["event_id"].tolist() == list(range(6))
     assert check_journal_well_formed(journal) == []
 
 

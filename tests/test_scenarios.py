@@ -83,6 +83,56 @@ def test_overflow_produces_the_four_event_redirect(run_scenario):
     assert (second_arc_arrivals["realized_target_id"] != "s3").all()
 
 
+def test_delayed_redirect_docks_in_a_later_period(run_scenario):
+    # Scenario 5 of docs/scenario_step_id_tables_ru.md: the bounce happens in the
+    # flow's opening period, the new leg takes two periods (the OD travel time of
+    # the s3 -> s2 pair), and the bike docks at s2 with the normal dock batch of
+    # the arrival period.
+    _resolved, journal, _state = run_scenario("overflow_delayed")
+    flow_id = journal.loc[journal["event_type"] == "redirected", "flow_id"].iloc[0]
+    flow = journal[journal["flow_id"] == flow_id]
+    assert flow["event_type"].tolist() == ["departed", "redirected", "departed", "arrived"]
+    assert flow["period_id"].tolist() == [0, 0, 0, 2]
+    assert flow["phase_rank"].tolist() == [1, 2, 2, 0]
+    assert flow["phase_round"].tolist() == [0, 1, 1, 0]
+    # The bounce and the leg's departure share one step; the delayed docking is
+    # a later one, shared with the arrival period's dock batch (the s3 -> s2 trip).
+    steps = flow["step_id"].tolist()
+    assert steps[1] == steps[2] and steps[0] < steps[1] < steps[3]
+    arrival = flow.iloc[3]
+    assert arrival["realized_target_id"] == "s2"
+    batch_mates = journal[
+        (journal["event_type"] == "arrived")
+        & (journal["move_id"] == 0)
+        & (journal["period_id"] == 2)
+    ]
+    assert int(arrival["step_id"]) == int(batch_mates["step_id"].iloc[0])
+
+
+def test_redirect_chain_bounces_again_on_arrival(run_scenario):
+    # Scenario 7 timing plus a second redirect: the first leg is due at t+1, the
+    # bounce leg rides two more periods, and the station it heads to fills up
+    # meanwhile -- so the bike bounces a second time and docks at s1.
+    _resolved, journal, _state = run_scenario("redirect_chain")
+    bounces = journal[journal["event_type"] == "redirected"]
+    flow_id = bounces["flow_id"].iloc[0]
+    assert len(bounces) == 2 and (bounces["flow_id"] == flow_id).all()
+    flow = journal[journal["flow_id"] == flow_id]
+    assert flow["event_type"].tolist() == [
+        "departed",
+        "redirected",
+        "departed",
+        "redirected",
+        "departed",
+        "arrived",
+    ]
+    assert flow["move_id"].tolist() == [0, 0, 1, 1, 2, 2]
+    assert flow["event_id"].tolist() == list(range(6))
+    assert flow["period_id"].tolist() == [0, 1, 1, 3, 3, 3]
+    assert bounces["planned_target_id"].tolist() == ["s4", "s3"]
+    assert flow.iloc[-1]["realized_target_id"] == "s1"
+
+
 def test_stockout_logs_the_lost_demand(run_scenario):
     _resolved, journal, _state = run_scenario("stockout")
     stockout = journal[(journal["event_type"] == "lost") & (journal["reason"] == "stockout")]
@@ -110,11 +160,19 @@ def test_single_trip_is_one_departed_then_one_arrived(run_scenario):
 # Moment-level inventory (step_id): the fine view agrees with the coarse one
 # ---------------------------------------------------------------------------
 def _period_end_inventory_from_moments(journal, initial):
-    """Inventory at each period's last step -- should match get_inventory_df."""
+    """Inventory at each period's last step -- should match get_inventory_df.
+
+    A period with no step (nothing moved; e.g. every bike is riding) keeps the
+    previous period's value, so the values are carried forward over the full
+    period range before comparing.
+    """
     moments = J.inventory_at_moments(journal, initial)
     last = moments.groupby("period_id")["step_id"].transform("max") == moments["step_id"]
     end = moments[last][["period_id", "facility_id", "commodity_category", "inventory_after"]]
-    return end.rename(columns={"inventory_after": "quantity_eop"})
+    wide = end.pivot_table(
+        index=["facility_id", "commodity_category"], columns="period_id", values="inventory_after"
+    ).reindex(columns=range(int(journal["period_id"].max()) + 1))
+    return wide.ffill(axis=1).stack().rename("quantity_eop").reset_index()
 
 
 @pytest.mark.parametrize("name", list(scenarios.ALL_SCENARIOS))

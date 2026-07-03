@@ -9,7 +9,7 @@ it depends on neither.
 
 The public surface is the journal vocabulary: event constructors
 (``departed_events``, ``arrived_events``, ``redirected_events``,
-``redirect_continuation_events``, ``lost_events``),
+``redirect_leg_events``, ``lost_events``),
 empty-state factories, ``finalize_flows``, the ``flows_to_*`` projections,
 and the journal-level run invariants (``check_demand_split``, ``check_flow_closure``).
 """
@@ -33,7 +33,7 @@ from .flows import (
     inventory_at_moments,
     lost_events,
     phase_rank_by_timing,
-    redirect_continuation_events,
+    redirect_leg_events,
     redirect_neighbor_table,
     redirected_events,
 )
@@ -57,7 +57,7 @@ __all__ = [
     "inventory_at_moments",
     "lost_events",
     "phase_rank_by_timing",
-    "redirect_continuation_events",
+    "redirect_leg_events",
     "redirect_neighbor_table",
     "redirected_events",
 ]

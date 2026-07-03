@@ -4,7 +4,7 @@ Its read-models are the marginal observations. The flow journal is the single
 source of truth for what happened in a run. This
 module owns one secret -- the shape of a flow event -- on both sides: the
 builders that *write* events (:func:`departed_events`, :func:`arrived_events`,
-:func:`redirected_events`, :func:`redirect_continuation_events`,
+:func:`redirected_events`, :func:`redirect_leg_events`,
 :func:`lost_events`) and the derivations that *read*
 the journal back into
 marginals (:func:`flows_to_departures` and friends, :func:`observe`). Write and
@@ -29,10 +29,11 @@ import pandas as pd
 # Flow-event schema
 # ---------------------------------------------------------------------------
 # Two ids place each event inside its trip (Notations.md §0): ``move_id`` is the
-# arc index (0..m -- one physical edge; a redirect adds a second arc) and
-# ``event_id`` is the event ordinal (0..n). Both are set by the builders at emit
-# time, so the live and finalized journals carry them alike. Row uniqueness is
-# the pair ``(flow_id, event_id)``.
+# arc index (0..m -- one physical edge; each redirect bounce adds one more arc)
+# and ``event_id`` is the event ordinal (0..n). Arc ``m`` opens with ``departed``
+# at event ``2m`` and ends at event ``2m + 1`` (``arrived``, ``redirected`` or
+# ``lost``). Both ids are set by the builders at emit time, so the live and
+# finalized journals carry them alike. Row uniqueness is ``(flow_id, event_id)``.
 FLOW_EVENT_COLUMNS = [
     "flow_id",
     "move_id",
@@ -88,11 +89,11 @@ DOCK_PREVIOUS_RANK = 0  # dock bikes that left in an earlier period
 PERIOD_OWN_RANK = 1  # this period's own departures and stockout losses
 DOCK_SAME_RANK = 2  # dock bikes that left and arrive within this same period
 
-# Event types that dock a bike (+1 at ``realized_target_id``). Only a normal
-# ``arrived`` lands a bike now -- including the ``arrived`` that ends a redirect's
-# second arc, whose ``realized_target_id`` is the station the bike finally
-# reached. ``redirected`` is the intermediate *bounce* off a full station and no
-# longer docks (see :func:`redirected_events`); ``lost`` docks nowhere and a
+# Event types that dock a bike (+1 at ``realized_target_id``). Only an
+# ``arrived`` lands a bike -- including the ``arrived`` that ends a redirect's
+# last arc, whose ``realized_target_id`` is the station the bike finally
+# reached. ``redirected`` is the intermediate *bounce* off a full station and
+# docks nothing (see :func:`redirected_events`); ``lost`` docks nowhere and a
 # ``departed`` undocks (-1 at ``source_id``), so neither belongs here.
 DOCKING_EVENT_TYPES = ["arrived"]
 
@@ -120,9 +121,9 @@ def departed_events(trips: pd.DataFrame) -> pd.DataFrame:
     """One ``departed`` event row per trip leaving this period (move 0, event 0).
 
     This is the trip's opening event: a real user departure from a dock. The
-    redirect's second-arc departure is built by
-    :func:`redirect_continuation_events` instead and carries ``move_id == 1``, so
-    readers that count user departures filter on ``move_id == 0``.
+    departure of a redirect's later leg is built by :func:`redirect_leg_events`
+    instead and carries ``move_id >= 1``, so readers that count user departures
+    filter on ``move_id == 0``.
     """
     return _typed_events(
         pd.DataFrame(
@@ -149,22 +150,24 @@ def departed_events(trips: pd.DataFrame) -> pd.DataFrame:
 
 
 def arrived_events(in_transit_due: pd.DataFrame, period_id: int | pd.Series) -> pd.DataFrame:
-    """One ``arrived`` event row per in-transit flow docking at ``period_id`` (move 0, event 1).
+    """One ``arrived`` event row per in-transit flow docking at ``period_id``.
 
-    The normal-trip arrival: a bike docked at its planned target. (The arrival
-    that ends a redirect's second arc is built by
-    :func:`redirect_continuation_events`, with ``move_id == 1``.)
+    Ends the flow's current arc: for arc ``m`` (the rows' ``move_id``; 0 when
+    the column is absent) the arrival is event ``2m + 1``. Arc 0 is a normal
+    trip docking at its planned target; a higher arc is a redirect leg docking
+    at the station the redirect chose.
 
     ``period_id`` is the docking period: a single int when a whole batch docks
     in the same period (the simulator), or a per-row Series of end periods when
     each flow docks at its own time (the historical log).
     """
+    move = in_transit_due["move_id"] if "move_id" in in_transit_due.columns else 0
     return _typed_events(
         pd.DataFrame(
             {
                 "flow_id": in_transit_due["flow_id"],
-                "move_id": 0,
-                "event_id": 1,
+                "move_id": move,
+                "event_id": 2 * move + 1,
                 "period_id": period_id,
                 "flow_type": "user_trip",
                 "event_type": "arrived",
@@ -184,34 +187,35 @@ def arrived_events(in_transit_due: pd.DataFrame, period_id: int | pd.Series) -> 
 
 
 def redirected_events(flows: pd.DataFrame, period_id: int) -> pd.DataFrame:
-    """One ``redirected`` *bounce* event per overflow flow (move 0, event 1).
+    """One ``redirected`` *bounce* event per overflow flow (arc ``m``, event ``2m + 1``).
 
-    This closes the trip's first arc: the bike reached its planned target but the
-    docks were full, so it bounced and did *not* dock there. It is therefore no
-    longer a docking event -- ``realized_target_id`` is NA and the bike's real
-    docking is the ``arrived`` that ends its second arc (see
-    :func:`redirect_continuation_events`). ``reason`` records why it bounced.
+    Closes the flow's current arc: the bike reached the arc's target but the
+    docks were full, so it bounced and did *not* dock there
+    (``realized_target_id`` is NA). The bike rides on: :func:`redirect_leg_events`
+    opens the next arc to the station chosen for it.
 
     Parameters
     ----------
     flows : pandas.DataFrame
         The overflow flows that were redirected, carrying ``source_id``,
-        ``planned_target_id``, ``commodity_category``, ``start_period`` and
-        ``planned_end_period``.
+        ``planned_target_id``, ``commodity_category``, ``start_period``,
+        ``planned_end_period`` and the current arc's ``move_id`` (0 when the
+        column is absent).
     period_id : int
-        The period the bounce happened in (the first arc ends here).
+        The period the bounce happened in (the current arc ends here).
 
     Returns
     -------
     pandas.DataFrame
         One ``redirected`` flow-event row per flow.
     """
+    move = flows["move_id"] if "move_id" in flows.columns else 0
     return _typed_events(
         pd.DataFrame(
             {
                 "flow_id": flows["flow_id"],
-                "move_id": 0,
-                "event_id": 1,
+                "move_id": move,
+                "event_id": 2 * move + 1,
                 "period_id": period_id,
                 "flow_type": "user_trip",
                 "event_type": "redirected",
@@ -230,79 +234,57 @@ def redirected_events(flows: pd.DataFrame, period_id: int) -> pd.DataFrame:
     )
 
 
-def redirect_continuation_events(redirected: pd.DataFrame, period_id: int) -> pd.DataFrame:
-    """Two move-1 rows per redirected flow: the redirect's second arc (``departed`` + ``arrived``).
+def redirect_leg_events(redirects: pd.DataFrame, period_id: int) -> pd.DataFrame:
+    """One ``departed`` row per redirected flow: the new leg after a bounce.
 
-    After a bike bounces off its full planned target B (the ``redirected`` event,
-    move 0), it travels on to the free station C found for it. That second leg is
-    a real arc, so it gets its own ``departed`` (move 1, event 2) and ``arrived``
-    (move 1, event 3), both in this same period. The leg is pure transport: the
-    bike never occupied a dock at B (B was full), so its move-1 ``departed`` is
-    *not* a user departure and must be ignored by every reader that counts one
-    (they filter ``move_id == 0``). The move-1 ``arrived`` docks the bike at C,
-    the single ``+1`` of the whole redirect.
+    After the arc-``m`` bounce (:func:`redirected_events`) the bike rides a new
+    arc ``m + 1`` (event ``2m + 2``) from the full station it bounced off to the
+    station chosen for it, due to dock at ``leg_end_period``. The leg is pure
+    transport: the bike never held a dock at the full station, so this
+    ``departed`` moves no inventory and is not a user departure (readers filter
+    ``move_id == 0``). ``start_period`` stays the flow's opening period on every
+    row. The rows also serve as the in-transit entries for legs that take time;
+    their arrival is built by :func:`arrived_events` when they dock.
 
     Parameters
     ----------
-    redirected : pandas.DataFrame
-        The overflow flows that were redirected, carrying ``flow_id``,
-        ``commodity_category``, ``planned_target_id`` (B, the full station),
-        ``realized_target_id`` (C, the station found for them) and ``start_period``
-        (the flow's opening period, copied onto the continuation rows).
+    redirects : pandas.DataFrame
+        Overflow flows with a planned leg, carrying ``flow_id``, ``move_id``
+        (the arc that just bounced), ``commodity_category``,
+        ``planned_target_id`` (the full station the leg departs),
+        ``realized_target_id`` (the station it heads to), ``start_period`` and
+        ``leg_end_period`` (the period it will dock).
     period_id : int
-        The period the redirect happens in (departure from B and docking at C
-        both fall here).
+        The bounce period; the leg departs here.
 
     Returns
     -------
     pandas.DataFrame
-        Two rows per redirected flow: a move-1 ``departed`` then a move-1
-        ``arrived``, ready to append to the journal.
+        One ``departed`` flow-event row per redirected flow.
     """
-    full_station = redirected["planned_target_id"]  # B: source of the second leg
-    docked_at = redirected["realized_target_id"]  # C: where the bike docks
-    # ``start_period`` is the flow's opening period on every row of the flow, the
-    # move-1 continuation included -- it is when the *flow* departed, not when the
-    # second arc starts. The second arc's own timing (its bounce and docking) is
-    # ``period_id`` here, both this period. (If a second arc ever needs its own
-    # start, add an ``arc_start_period`` column rather than overloading this one.)
-    common = {
-        "flow_id": redirected["flow_id"],
-        "period_id": period_id,
-        "flow_type": "user_trip",
-        "commodity_category": redirected["commodity_category"],
-        "source_id": full_station,
-        "planned_target_id": docked_at,
-        "start_period": redirected["start_period"],
-        "planned_end_period": period_id,
-        "realized_end_period": period_id,
-        "resource_id": pd.NA,
-        "quantity": 1,
-        "reason": pd.NA,
-    }
-    departed = _typed_events(
+    move = redirects["move_id"] + 1
+    return _typed_events(
         pd.DataFrame(
             {
-                **common,
-                "move_id": 1,
-                "event_id": 2,
+                "flow_id": redirects["flow_id"],
+                "move_id": move,
+                "event_id": 2 * move,
+                "period_id": period_id,
+                "flow_type": "user_trip",
                 "event_type": "departed",
+                "commodity_category": redirects["commodity_category"],
+                "source_id": redirects["planned_target_id"],
+                "planned_target_id": redirects["realized_target_id"],
                 "realized_target_id": pd.NA,
+                "start_period": redirects["start_period"],
+                "planned_end_period": redirects["leg_end_period"],
+                "realized_end_period": pd.NA,
+                "resource_id": pd.NA,
+                "quantity": 1,
+                "reason": pd.NA,
             }
         )
     )
-    arrived = _typed_events(
-        pd.DataFrame(
-            {
-                **common,
-                "move_id": 1,
-                "event_id": 3,
-                "event_type": "arrived",
-                "realized_target_id": docked_at,
-            }
-        )
-    )
-    return pd.concat([departed, arrived], ignore_index=True)
 
 
 def lost_events(losses: pd.DataFrame, period_id: int, reason: str) -> pd.DataFrame:
@@ -343,16 +325,20 @@ def lost_events(losses: pd.DataFrame, period_id: int, reason: str) -> pd.DataFra
     """
     # The reason fixes the event's place in its trip (Notations.md §0): a stockout
     # is the trip's first and only event (move 0, event 0 -- no departure preceded
-    # it), a dock-full loss closes a flow that already departed (move 0, event 1).
-    # ``move_id`` is 0 either way: a stockout has no arc and a dock-full loss has
-    # the single arc of an ordinary trip.
-    event_id = 0 if reason == "stockout" else 1
+    # it); a dock-full loss closes the flow's current arc ``m`` (event ``2m + 1``,
+    # where ``m`` is the losses' ``move_id`` -- 0 for a plain trip, higher for a
+    # redirect leg that found no dock anywhere).
+    if reason == "stockout":
+        move: int | pd.Series = 0
+    else:
+        move = losses["move_id"] if "move_id" in losses.columns else 0
+    event_id = 0 if reason == "stockout" else 2 * move + 1
     na = pd.Series([pd.NA] * len(losses), index=losses.index)
     return _typed_events(
         pd.DataFrame(
             {
                 "flow_id": losses.get("flow_id", na),
-                "move_id": 0,
+                "move_id": move,
                 "event_id": event_id,
                 "period_id": period_id,
                 "flow_type": "user_trip",
@@ -608,8 +594,9 @@ def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
 
 
 def flows_to_od_matrix(flows: pd.DataFrame) -> pd.DataFrame:
-    # Only move-0 departures are intended trips. A redirect's move-1 departure is
-    # a forced transport leg (duration 0) and would pollute the demand model.
+    """Build the OD demand model (probability and duration per source-target pair)."""
+    # Only move-0 departures are intended trips. A redirect's later-leg departure
+    # is a forced transport leg and would pollute the demand model.
     dep = flows[(flows["event_type"] == "departed") & (flows["move_id"] == 0)].copy()
     dep["duration"] = dep["planned_end_period"] - dep["start_period"]
     od = dep.groupby(
@@ -890,9 +877,10 @@ def redirect_neighbor_table(
 ) -> pd.DataFrame:
     """Explain one redirect: its full station's neighbours, in distance order, at the moment.
 
-    A redirected bike bounced off its full planned station ``B`` and docked at a
-    farther station ``C``. To check that landing was right, you want to see, *at
-    the redirect's moment*, every station between ``B`` and ``C`` in distance
+    A redirected bike bounced off its full planned station ``B`` and was sent to
+    a farther station ``C`` (a flow that bounced more than once is explained at
+    its first bounce). To check that choice was right, you want to see, *at the
+    redirect's moment*, every station between ``B`` and ``C`` in distance
     order: the nearer ones should have been full (no free dock), and ``C`` the
     first with room. This returns exactly that table -- ``B``'s neighbours ranked
     by distance out to ``C`` (inclusive), each with its dock occupancy just before
@@ -930,16 +918,17 @@ def redirect_neighbor_table(
         when ``capacities`` is given).
     """
     one = flows[flows["flow_id"] == flow_id]
-    bounce = one[one["event_type"] == "redirected"]
-    if bounce.empty:
+    bounces = one[one["event_type"] == "redirected"]
+    if bounces.empty:
         raise ValueError(f"flow {flow_id!r} has no redirect (no 'redirected' event)")
-    bounce = bounce.iloc[0]
+    bounce = bounces.iloc[0]  # a flow that bounced more than once: explain its first bounce
     full_station = bounce["planned_target_id"]  # B: the full station it bounced off
     step_id = int(bounce["step_id"])
     period_id = int(bounce["period_id"])
     commodity = bounce["commodity_category"]
-    docked = one[(one["event_type"] == "arrived") & (one["move_id"] == 1)]
-    realized = docked["realized_target_id"].iloc[0] if not docked.empty else pd.NA  # C
+    # C: the station this bounce's new leg heads to (the leg's planned target).
+    leg = one[(one["event_type"] == "departed") & (one["move_id"] == bounce["move_id"] + 1)]
+    realized = leg["planned_target_id"].iloc[0] if not leg.empty else pd.NA
 
     # Neighbours of B by distance, cut at C (inclusive) or the first n_neighbors.
     distances = _squared_distances(geo, full_station)
@@ -1064,29 +1053,26 @@ def check_flow_closure(flows: pd.DataFrame) -> list[str]:
     """I2 -- every flow due by the horizon closes with exactly one terminal event.
 
     A flow's lifecycle opens with its move-0 ``departed`` and closes with exactly
-    one terminal: an ``arrived`` (the bike docked, possibly after a redirect) or a
+    one terminal: an ``arrived`` (the bike docked, possibly after redirects) or a
     ``lost`` with ``reason == "dock_full"`` (it found no free dock anywhere). A
-    ``redirected`` is no longer terminal -- it is the intermediate bounce off a
-    full station, and the flow goes on to a second arc that ends in ``arrived``. A
-    flow whose ``planned_end_period`` falls past the last period of the run is
-    legitimately still in transit -- the run window ended mid-trip -- so only
-    flows due by the horizon are required to have closed. More than one terminal
-    is always a double close. Stockout losses carry no ``flow_id`` and have no
-    lifecycle of their own, so they are excluded.
-
-    The count is per ``flow_id``: a redirect flow has two ``departed`` rows (move
-    0 and move 1), so the lifecycle is opened by the move-0 ``departed`` only and
-    closed once (the move-1 ``arrived``).
+    ``redirected`` is not terminal -- it is the intermediate bounce off a full
+    station, and the flow rides on on a new leg. A flow whose latest leg is due
+    past the last period of the run is legitimately still in transit -- the run
+    window ended mid-trip -- so only flows due by the horizon are required to
+    have closed. More than one terminal is always a double close. Stockout
+    losses carry no ``flow_id`` and have no lifecycle of their own, so they are
+    excluded.
     """
     if flows.empty:
         return []
     last_period = int(flows["period_id"].max())
-    # One row per flow: the move-0 departure opens the lifecycle, and its
-    # planned_end_period is when the whole trip was first due to dock.
-    opened = flows.loc[
-        (flows["event_type"] == "departed") & (flows["move_id"] == 0),
-        ["flow_id", "planned_end_period"],
-    ]
+    # One row per flow. Each bounce opens a new leg with its own due period, so
+    # a flow is due to close at its *latest* ``departed`` row's planned end.
+    opened = (
+        flows[flows["event_type"] == "departed"]
+        .groupby("flow_id", as_index=False)["planned_end_period"]
+        .max()
+    )
     is_terminal = (flows["event_type"] == "arrived") | (
         (flows["event_type"] == "lost") & (flows["reason"] == "dock_full")
     )
