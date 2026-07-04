@@ -399,6 +399,31 @@ zero dock-full.
 
 ---
 
+## 12. Run artifacts (the files the UI reads)
+
+A finished run is saved to disk once, and the UI only reads those files. This
+keeps the UI a pure reader: no simulation and no journal-level computation
+happens while a page renders. One saved run is a **run artifact**: a folder
+`data/runs/<run_name>/` built by `app/artifacts.py` (the folder name is the
+`run_name`). Its files:
+
+| Canonical | Meaning |
+|---|---|
+| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). |
+| `flows.parquet` | The finalized journal of the run, widened by `flows_with_costs` (`rate`, `elapsed_periods`, `cost`). |
+| `panel.parquet` | The **facility period panel**: one row per `(period_id, facility_id, commodity_category)` with that period's values side by side — `quantity_sop`, `quantity_eop` (§9 inventory), `demand`, `departed`, `arrived`, `redirected` (bounces at this facility as the full planned target), `lost_demand`, `lost_dock_full`. Every map view and hover box is a slice of this one table. |
+| `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, and `distance_km` (great-circle, `haversine_km`). The trips map draws these. |
+| `flow_totals.parquet` | One row per `flow_id` with the flow's whole-trip values: origin `source_id`, `planned_target_id`, `realized_target_id`, `start_period`, `end_period`, terminal `event_type`, `reason`, `duration_periods`, `distance_km` (sum over its arcs), `cost` (value on the terminal event). The cost and distance/duration charts group this table. Not here: a stockout loss (it has no flow — `flow_id` is NA; it lives in the panel as `lost_demand`) and a flow still riding when the run ends (no terminal event yet). |
+| `facilities.parquet` | Facility attributes for the maps: `facility_id`, `facility_category`, `lat`, `lng`, `capacity`. |
+
+Chart attribution rule: a flow's `cost`, `distance_km` and `duration_periods`
+belong to its **origin facility** (`source_id`) and its **`start_period`** — the
+place and period the demand occurred. `distance_km` is a new column name: the
+great-circle length of an arc in kilometres; a flow's `distance_km` is the sum
+over its arcs.
+
+---
+
 ## Known drift to fix
 
 The audit (`check-notations`) lists current offenders here so the file does not
