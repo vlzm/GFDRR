@@ -165,6 +165,8 @@ def run_scenario(
         "sizing_scale_factor": sizing_scale_factor,
         "number_of_periods": number_of_periods,
         "period_len_hours": graph_data.period_len / pd.Timedelta(hours=1),
+        # Wall-clock start of period 0; the UI turns period ids into times with it.
+        "t0": graph_data.t0.isoformat(),
         "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "violations": violations,
         "totals": artifacts.build_totals(tables["panel"], tables["flow_totals"]),

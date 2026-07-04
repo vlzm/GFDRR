@@ -48,7 +48,8 @@
       "Bash(python /tmp/claude-1000/-mnt-outer-Documents-vlzm-GFDRR-ubuntu-GFDRR/50390f7f-8d2b-45d5-93ea-773db316220e/scratchpad/check_speed.py)",
       "Bash(git -C /mnt/outer/Documents/vlzm/GFDRR_ubuntu/GFDRR diff --stat)",
       "Bash(jupyter nbconvert *)",
-      "Bash(grep -vE \"^#|^$\")"
+      "Bash(grep -vE \"^#|^$\")",
+      "Bash(python /tmp/claude-1000/-mnt-outer-Documents-vlzm-GFDRR-ubuntu-GFDRR/83af7072-46cc-4630-a828-9e6fc16f18f6/scratchpad/smoke_time_axis.py)"
     ]
   }
 }

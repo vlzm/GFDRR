@@ -310,6 +310,7 @@ and its `resource_id` column are canonical and reserved.
 | `leg_end_period` | Planning column of `plan_overflow_redirect`: the period a redirect's new leg will dock (the bounce period plus the leg's travel time). Becomes the leg's `planned_end_period`. |
 | `trip_speed_km_per_period` | Mean riding speed over the historical trips (total great-circle distance over total ride time, from the raw timestamps), in km per period. The travel-time fallback for a redirect pair with no OD entry: `round(haversine_km / trip_speed_km_per_period)`. |
 | `period_len` | Wall-clock length of one period (default one hour); `start_timestamp` / `end_timestamp` are the period's bounds. |
+| `t0` | Wall-clock start of period 0: the earliest historical trip start, floored to the hour. Period `k` starts at `t0 + k * period_len` (the `periods_df` grid). Saved in `meta.json`, so the UI can show times instead of period ids. |
 
 ### 6.1. Rate and cost (money)
 
@@ -409,7 +410,7 @@ happens while a page renders. One saved run is a **run artifact**: a folder
 
 | Canonical | Meaning |
 |---|---|
-| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). |
+| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). |
 | `flows.parquet` | The finalized journal of the run, widened by `flows_with_costs` (`rate`, `elapsed_periods`, `cost`). |
 | `panel.parquet` | The **facility period panel**: one row per `(period_id, facility_id, commodity_category)` with that period's values side by side — `quantity_sop`, `quantity_eop` (§9 inventory), `demand`, `departed`, `arrived`, `redirected` (bounces at this facility as the full planned target), `lost_demand`, `lost_dock_full`. Every map view and hover box is a slice of this one table. |
 | `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, and `distance_km` (great-circle, `haversine_km`). The trips map draws these. |

@@ -36,6 +36,7 @@ if run_b:
     view = right.radio("View", [VIEW_A, VIEW_B, VIEW_DIFF], horizontal=True)
 
 period = st.slider("Period (period_id)", 0, ui_shared.slider_max_period(meta_a, meta_b), 0)
+ui_shared.slider_time_caption(period, meta_a, meta_b)
 show_depots = st.toggle("Show depots", value=False)
 
 # --- Data: one row per facility with A (and B) metric columns ---------------

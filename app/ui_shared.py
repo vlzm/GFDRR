@@ -127,6 +127,38 @@ def slider_max_period(meta_a: dict, meta_b: dict | None) -> int:
     return max(last, 0)
 
 
+# --- Period ids to wall-clock time -------------------------------------------
+def period_start_time(meta: dict, periods):
+    """Wall-clock start of a period (or a Series of periods): ``t0 + period * period_len``.
+
+    Returns ``None`` for artifacts saved before ``t0`` was written to
+    ``meta.json``; the caller then keeps plain period ids.
+    """
+    if "t0" not in meta:
+        return None
+    return pd.Timestamp(meta["t0"]) + periods * pd.Timedelta(hours=meta["period_len_hours"])
+
+
+def slider_time_caption(period: int, meta_a: dict, meta_b: dict | None = None) -> None:
+    """Show under the period slider when the chosen period starts on the clock."""
+    starts = []
+    for tag, meta in (("A", meta_a), ("B", meta_b)):
+        if meta is None:
+            continue
+        start = period_start_time(meta, period)
+        if start is not None:
+            starts.append((tag, start))
+    if not starts:
+        return
+    if len(starts) == 2 and starts[0][1] == starts[1][1]:
+        starts = starts[:1]
+    if len(starts) == 1:
+        st.caption(f"Period {period} starts {starts[0][1]:%Y-%m-%d %H:%M}.")
+    else:
+        shown = "; ".join(f"{tag}: {start:%Y-%m-%d %H:%M}" for tag, start in starts)
+        st.caption(f"Period {period} starts — {shown}.")
+
+
 # --- KPI row and validation badge -------------------------------------------
 def fmt_int(value: float) -> str:
     """Format a count with thin-space thousands separators."""
@@ -272,7 +304,9 @@ def aggregate_flow_totals(
     Returns
     -------
     pandas.DataFrame
-        Tidy rows: ``scenario``, the level's keys, and ``value``.
+        Tidy rows: ``scenario``, the level's keys, and ``value``. When every
+        scenario's ``meta.json`` carries ``t0``, per-period rows also get
+        ``start_time`` — the wall-clock start of ``start_period``.
     """
     keys: list[str] = []
     if level != LEVEL_GLOBAL:
@@ -281,6 +315,9 @@ def aggregate_flow_totals(
         keys.append("commodity_category")
     if level == LEVEL_FACILITY:
         keys.append("source_id")
+
+    metas = {run_name: load_meta(run_name) for run_name in frames}
+    with_time = "start_period" in keys and all("t0" in meta for meta in metas.values())
 
     parts = []
     for run_name, flow_totals in frames.items():
@@ -291,6 +328,8 @@ def aggregate_flow_totals(
             grouped = rows.groupby(keys, as_index=False)[value].agg(agg)
         else:
             grouped = pd.DataFrame({value: [rows[value].agg(agg)]})
+        if with_time:
+            grouped["start_time"] = period_start_time(metas[run_name], grouped["start_period"])
         grouped["scenario"] = run_name
         parts.append(grouped)
     return pd.concat(parts, ignore_index=True)
@@ -305,24 +344,30 @@ def level_line_chart(
     """Line chart over periods for an :func:`aggregate_flow_totals` frame.
 
     Scenario carries the color; commodity (when present) carries the line
-    dash; facilities (when present) become small multiples.
+    dash; facilities (when present) become small multiples. The x axis is the
+    period's wall-clock start when the frame carries ``start_time``, and the
+    plain period id otherwise (old artifacts without ``t0``).
     """
+    x = "start_time" if "start_time" in data.columns else "start_period"
+    x_title = "Period start time" if x == "start_time" else "Period (period_id)"
     kwargs: dict = {}
+    if x == "start_time":
+        kwargs["hover_data"] = ["start_period"]
     if "commodity_category" in data.columns:
         kwargs["line_dash"] = "commodity_category"
     if "source_id" in data.columns:
         kwargs["facet_col"] = "source_id"
         kwargs["facet_col_wrap"] = 3
     fig = px.line(
-        data.sort_values("start_period"),
-        x="start_period",
+        data.sort_values(x),
+        x=x,
         y=value,
         color="scenario",
         color_discrete_map=color_map,
         **kwargs,
     )
     fig.update_traces(line_width=2)
-    fig.update_xaxes(title="Period (period_id)")
+    fig.update_xaxes(title=x_title)
     fig.update_yaxes(title=y_title)
     if "source_id" in data.columns:
         n_rows = -(-data["source_id"].nunique() // 3)

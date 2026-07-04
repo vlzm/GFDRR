@@ -35,6 +35,7 @@ outcomes = right.multiselect(
     format_func=OUTCOME_LABELS.get,
 )
 period = st.slider("Period (period_id)", 0, ui_shared.slider_max_period(meta_a, meta_b), 0)
+ui_shared.slider_time_caption(period, meta_a, meta_b)
 
 _geo = facilities.set_index("facility_id")
 
