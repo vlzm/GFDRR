@@ -307,6 +307,7 @@ and its `resource_id` column are canonical and reserved.
 | `realized_end_period` | The period a flow actually docked (NA if lost). |
 | `duration` | Trip length in whole periods (`planned_end_period - start_period`), carried by the OD matrix. |
 | `elapsed_periods` | How many periods a flow has been riding at the moment of an event: `period_id - start_period`. Because `start_period` is the flow's opening period on every row, the value is cumulative over redirect legs: 0 on the opening `departed`, the first leg's length on a `redirected` bounce, the sum of all legs on the final `arrived`. Read-model `flows_with_costs`. |
+| `duration_periods` | A length in whole periods — the one name for a trip's or a pair's duration. On `flow_totals.parquet` it is the trip's realized length (the terminal event's `elapsed_periods`). In the wide journal the §5 prefixes pick the view: `planned_duration_periods` (`planned_end_period - start_period`) and `realized_duration_periods` (`realized_end_period - start_period`, NA if lost). Per facility pair it is `routes.duration_periods` (§13). The old names `planned_duration` / `realized_duration` are retired. |
 | `leg_end_period` | Planning column of `plan_overflow_redirect`: the period a redirect's new leg will dock (the bounce period plus the leg's travel time). Becomes the leg's `planned_end_period`. |
 | `trip_speed_km_per_period` | Mean riding speed over the historical trips (total great-circle distance over total ride time, from the raw timestamps), in km per period. `routes` (§13) turns a straight-line distance into a travel time with it. |
 | `period_len` | Wall-clock length of one period (default one hour); `start_timestamp` / `end_timestamp` are the period's bounds. |
@@ -318,6 +319,7 @@ and its `resource_id` column are canonical and reserved.
 |---|---|
 | `rate` | Price per hour of use, in dollars. Per `commodity_category` for bikes (`commodities_categories_rates_df` — what a user pays to ride); per `resource_id` for trucks (`resources_rates_df`). |
 | `cost` | Dollars a flow has accrued at the moment of an event: `rate * elapsed_periods * hours per period` (`period_len`). Cumulative like `elapsed_periods` (§6); a trip's total cost is the value on its final `arrived`. Read-model `flows_with_costs`. |
+| `measures` | The money, time and length columns an event row can be widened with: `rate`, `elapsed_periods`, `cost`, `planned_duration_periods`, `realized_duration_periods` (§6), `planned_distance_km`, `realized_distance_km` (§13). One read-model, `flows_with_measures`, adds them all; the wide journal (`get_flows_wide`) and the artifact builder call it. |
 
 ---
 
@@ -358,6 +360,8 @@ used for the historical, simulated, and live-state views alike (§10).
 | `departures` | Outflow per period and source (§7). |
 | `arrivals` | Inflow per period and target (docking events: `arrived` only — a redirected bike's inflow is the `arrived` that ends its second arc). |
 | `demand` | Realized user demand (= `departures` in an exact replay). |
+| `redirects` | Bounces per period and facility: `redirected` events counted at the full `planned_target_id` the bike bounced off. Read-model `flows_to_redirects`. |
+| `losses` | Lost bikes per period and facility, per loss reason. The reason decides where the loss lands: a `stockout` loss at the trip's `source_id`, a `dock_full` loss at its `planned_target_id`. Read-model `flows_to_losses(flows, reason)`. |
 | `od_matrix` | Origin–destination demand model: per `(source, target, commodity)` a `count`, a `probability` `P(target | source, commodity)`, and a mean `duration`. |
 
 ---
@@ -370,7 +374,7 @@ new stems for the views.
 
 | Prefix | Meaning | Example |
 |---|---|---|
-| `raw_` / `*_raw_df` | Untouched source data, before the canonical schema. | `trips_raw_df`, `gbfs_raw_df` |
+| `raw_` / `*_raw_df` | Untouched source data, before the canonical schema. | `trips_raw_df` |
 | `historical_` | Ground truth derived from real history. | `historical_inventory_df`, `historical_demand_df` |
 | `simulated_` | Derived from a finished run's journal. | `simulated_inventory_df`, `simulated_flows_df` |
 | `state_` | The live value during a run (in `SimulationState`). | `state_inventory_df`, `state_flows_df` |
@@ -392,6 +396,8 @@ A scenario can be run for two different purposes. Keep the two apart by name.
 | `base replay` | A run with `demand_scale_factor = 1` whose departures equal the historical ones. The limits (stockout, dock-full) are in the pipeline but never take effect. |
 | `sizing run` | A run of the same scenario with **saturated** initial inventory and capacities, used only to measure what the scenario needs. Its journal shows what the demand *wants* to do when no limit takes effect; `size_state_for_demand` reads the required initial inventory and capacities from it. |
 | `saturated` | An initial inventory or a capacity table set far above any demand, so the limits never take effect (`get_saturated_inventory_df`). |
+| `canonical phases` | The three-phase list every run of the scenario uses: dock earlier arrivals, form departures, dock same-period arrivals. Built by `canonical_phases()` in the simulator layer; the runner, the tests and the notebook all take the list from there. |
+| `sized run` | A run whose state was sized first: measure the initial inventory and capacities against `sizing_scale_factor` with a sizing run, then run the demand at `demand_scale_factor` against that state, then check the run invariants. `run_sized_scenario` owns this order and returns a `ScenarioRun`: the journal, the final state, the sized state tables, and the invariant violations. Equal scale factors give a base replay; a larger run scale makes the limits take effect. |
 
 The sizing run works because every phase is deterministic and departures depend on
 inventory only through `min(demand, inventory)`: a real run started from the
@@ -411,9 +417,9 @@ happens while a page renders. One saved run is a **run artifact**: a folder
 | Canonical | Meaning |
 |---|---|
 | `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6, `routing_mode` — see §13), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). |
-| `flows.parquet` | The finalized journal of the run, widened by `flows_with_costs` (`rate`, `elapsed_periods`, `cost`). |
+| `flows.parquet` | The finalized journal of the run, widened by `flows_with_measures` with the measures (§6.1): `rate`, `elapsed_periods`, `cost`, the planned/realized `duration_periods` and `distance_km` pairs. |
 | `panel.parquet` | The **facility period panel**: one row per `(period_id, facility_id, commodity_category)` with that period's values side by side — `quantity_sop`, `quantity_eop` (§9 inventory), `demand`, `departed`, `arrived`, `redirected` (bounces at this facility as the full planned target), `lost_demand`, `lost_dock_full`. Every map view and hover box is a slice of this one table. |
-| `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, and `distance_km` (measured by the run's `routing_mode` — §13). The trips map draws these. |
+| `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, `distance_km` (measured by the run's `routing_mode` — §13), and the endpoint coordinates (`source_lat`, `source_lng`, `target_lat`, `target_lng`), so the trips map draws arcs without joining another table. |
 | `flow_totals.parquet` | One row per `flow_id` with the flow's whole-trip values: origin `source_id`, `planned_target_id`, `realized_target_id`, `start_period`, `end_period`, terminal `event_type`, `reason`, `duration_periods`, `distance_km` (sum over its arcs), `cost` (value on the terminal event). The cost and distance/duration charts group this table. Not here: a stockout loss (it has no flow — `flow_id` is NA; it lives in the panel as `lost_demand`) and a flow still riding when the run ends (no terminal event yet). |
 | `facilities.parquet` | Facility attributes for the maps: `facility_id`, `facility_category`, `lat`, `lng`, `capacity`. |
 
@@ -422,6 +428,13 @@ belong to its **origin facility** (`source_id`) and its **`start_period`** — t
 place and period the demand occurred. `distance_km` is a new column name: the
 length of an arc in kilometres, measured by the run's `routing_mode` (§13);
 a flow's `distance_km` is the sum over its arcs.
+
+A **metric** is one value the UI can show: a value column of the panel
+(`quantity_sop` … `lost_dock_full`) or a whole-run number (`cost`,
+`distance_km`). The `METRICS` table in `app/artifacts.py` describes each metric
+once — column name, full label, short label, whether it enters the KPI row and
+the `totals` of `meta.json`. `PANEL_VALUES`, the UI label dictionaries and the
+KPI row are all built from this one table.
 
 ---
 

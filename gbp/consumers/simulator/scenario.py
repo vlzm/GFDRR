@@ -1,0 +1,126 @@
+"""The canonical scenario: its phase list and the size-then-run entry point.
+
+Running a scenario correctly takes several steps in a fixed order: measure the
+initial inventory and dock capacities with :func:`size_state_for_demand`, put
+the measured state in place, run the real demand against it, and check the run
+invariants. Doing these steps by hand in every caller invites mistakes:
+building the :class:`Environment` before the sizing result is in place gives a
+plausible-looking but wrong run. :func:`run_sized_scenario` is the one place
+that owns this order; the terminal runner (``app/runner.py``) and the notebook
+both call it.
+
+The input ``resolved`` is never modified: the run happens on a shallow copy
+that carries the sized tables, and the sized tables come back on the
+:class:`ScenarioRun` result.
+"""
+
+import copy
+import dataclasses
+
+import pandas as pd
+
+from gbp.loaders.dataloader_graph import ResolvedModelData
+
+from .config import EnvironmentConfig
+from .engine import Environment
+from .phases import DockArrivals, FormDeparturesPhase, Phase
+from .sizing import size_state_for_demand
+from .state import SimulationState
+from .validation import RunInvariantError, validate_run
+
+
+def canonical_phases() -> list[Phase]:
+    """Build the canonical three-phase list every run of the scenario uses."""
+    return [DockArrivals("previous"), FormDeparturesPhase(), DockArrivals("same")]
+
+
+@dataclasses.dataclass(frozen=True)
+class ScenarioRun:
+    """Everything a finished sized run hands back to its caller (Notations.md §11).
+
+    The finalized journal, the final simulation state, the sized state tables
+    the run started from, and the invariant violations (empty = valid).
+    """
+
+    simulated_flows_df: pd.DataFrame
+    state: SimulationState
+    initial_inventory_df: pd.DataFrame
+    facilities_capacities_df: pd.DataFrame
+    violations: list[str]
+
+
+def run_sized_scenario(
+    resolved: ResolvedModelData,
+    *,
+    scenario_id: str,
+    demand_scale_factor: float = 1.0,
+    sizing_scale_factor: float = 1.0,
+    number_of_periods: int,
+    validate: bool = True,
+) -> ScenarioRun:
+    """Size the state, run the scenario against it, check the run invariants.
+
+    The state (initial inventory and dock capacities) is sized against
+    ``sizing_scale_factor``; the run itself faces ``demand_scale_factor``.
+    Equal values give a clean, no-loss run; a larger run scale makes the
+    limits take effect (stockout and dock-full events appear).
+
+    Parameters
+    ----------
+    resolved : ResolvedModelData
+        The resolved scenario data. Not modified: the run works on a shallow
+        copy that carries the sized tables.
+    scenario_id : str
+        Scenario id stamped on the sizing and run configs.
+    demand_scale_factor : float, optional
+        Demand multiplier the run faces.
+    sizing_scale_factor : float, optional
+        Demand multiplier the state is sized to survive with no loss.
+    number_of_periods : int
+        How many periods to step.
+    validate : bool, optional
+        When True (default), raise :class:`RunInvariantError` if the finished
+        run violates the run invariants I1-I5. When False, the violations are
+        only recorded on the result (the runner stores them in ``meta.json``).
+
+    Returns
+    -------
+    ScenarioRun
+        The finalized journal, the final state, the sized state tables, and
+        the invariant violations (empty = valid).
+    """
+    sizing_config = EnvironmentConfig(
+        phases=canonical_phases(),
+        scenario_id=scenario_id,
+        demand_scale_factor=sizing_scale_factor,
+        number_of_periods=number_of_periods,
+    )
+    initial_inventory_df, facilities_capacities_df = size_state_for_demand(resolved, sizing_config)
+
+    sized = copy.copy(resolved)
+    sized.initial_inventory_df = initial_inventory_df
+    sized.facilities_capacities_df = facilities_capacities_df
+
+    # validate_run is called by hand below, so the caller gets the violation
+    # list either way; the engine's own end-of-run check is off to avoid
+    # computing the invariants twice.
+    run_config = EnvironmentConfig(
+        phases=canonical_phases(),
+        scenario_id=scenario_id,
+        validate=False,
+        demand_scale_factor=demand_scale_factor,
+        number_of_periods=number_of_periods,
+    )
+    env = Environment(sized, run_config)
+    state = env.run()
+    violations = validate_run(state, sized, demand_scale_factor, number_of_periods)
+    if validate and violations:
+        raise RunInvariantError("run invariants violated:\n" + "\n".join(violations))
+
+    return ScenarioRun(
+        simulated_flows_df=env.simulated_flows_df,
+        state=state,
+        initial_inventory_df=initial_inventory_df,
+        facilities_capacities_df=facilities_capacities_df,
+        violations=violations,
+    )

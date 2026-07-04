@@ -15,9 +15,9 @@ st.caption(
 
 
 @st.cache_resource(show_spinner=False)
-def _graph_data_cached(trips_path: str, gbfs_base: str):
-    """Load the raw data once per source pair; later runs reuse the tables."""
-    return runner.build_graph_data(trips_path, gbfs_base)
+def _graph_data_cached(trips_path: str):
+    """Load the raw data once per source; later runs reuse the tables."""
+    return runner.build_graph_data(trips_path)
 
 
 with st.form("run_form"):
@@ -46,7 +46,6 @@ with st.form("run_form"):
     )
     with st.expander("Data sources"):
         trips_path = st.text_input("Trips CSV", value=runner.DEFAULT_TRIPS_PATH)
-        gbfs_base = st.text_input("GBFS (station feed base URL)", value=runner.DEFAULT_GBFS_BASE)
     submitted = st.form_submit_button("Run", type="primary")
 
 if submitted:
@@ -58,7 +57,7 @@ if submitted:
         st.warning(f"Run “{name}” already exists — it will be overwritten.")
     with st.status("Running…", expanded=True) as status:
         st.write("Loading data (a few minutes the first time; cached afterwards)…")
-        graph_data = _graph_data_cached(trips_path, gbfs_base)
+        graph_data = _graph_data_cached(trips_path)
         folder = runner.run_scenario(
             graph_data,
             run_name=name,

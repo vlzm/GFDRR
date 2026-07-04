@@ -1,7 +1,7 @@
 """Synthetic, offline simulation scenarios for the test suite.
 
-The real pipeline reads a trip CSV and a live GBFS feed, neither of which a unit
-test should depend on. These builders construct the small slice of
+The real pipeline reads a trip CSV, which a unit test should not depend on.
+These builders construct the small slice of
 ``ResolvedModelData`` that the engine and phases actually read -- the period
 grid, initial inventory, dock capacities, geography, and the historical
 marginals (demand and OD matrix) derived from a handful of hand-written trips --
@@ -27,10 +27,7 @@ import types
 
 import pandas as pd
 
-from gbp.consumers.simulator import (
-    DockArrivals,
-    FormDeparturesPhase,
-)
+from gbp.consumers.simulator import canonical_phases
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.engine import Environment
 from gbp.model import flows as J
@@ -126,15 +123,6 @@ def build_resolved(
         period_len=pd.Timedelta(hours=1),
     )
     return resolved
-
-
-def canonical_phases() -> list:
-    """Build the canonical three-phase list every scenario (and the notebook) runs."""
-    return [
-        DockArrivals("previous"),
-        FormDeparturesPhase(),
-        DockArrivals("same"),
-    ]
 
 
 def run(

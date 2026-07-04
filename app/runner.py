@@ -13,17 +13,13 @@ Terminal use::
 from __future__ import annotations
 
 import argparse
-import datetime
 import pathlib
 from collections.abc import Callable
 
 import artifacts
 import pandas as pd
 
-from gbp.consumers.simulator import DockArrivals, FormDeparturesPhase, size_state_for_demand
-from gbp.consumers.simulator.config import EnvironmentConfig
-from gbp.consumers.simulator.engine import Environment
-from gbp.consumers.simulator.validation import validate_run
+from gbp.consumers.simulator import run_sized_scenario
 from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.loaders.dataloader_raw import RawModelData
 from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
@@ -31,18 +27,11 @@ from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 DEFAULT_TRIPS_PATH = str(_REPO_ROOT / "data" / "raw" / "202602-citibike-tripdata_1.csv")
-DEFAULT_GBFS_BASE = "https://gbfs.citibikenyc.com/gbfs/en"
 DEFAULT_NUMBER_OF_PERIODS = 50
-
-
-def canonical_phases() -> list:
-    """Build the canonical three-phase list every run uses (same as the notebook)."""
-    return [DockArrivals("previous"), FormDeparturesPhase(), DockArrivals("same")]
 
 
 def build_graph_data(
     trips_path: str = DEFAULT_TRIPS_PATH,
-    gbfs_base: str = DEFAULT_GBFS_BASE,
     period_len_hours: float = 1.0,
     routing_mode: str = "haversine",
     osrm_url: str = DEFAULT_OSRM_URL,
@@ -53,8 +42,6 @@ def build_graph_data(
     ----------
     trips_path : str, optional
         Path to the raw Citi Bike trip CSV.
-    gbfs_base : str, optional
-        Base URL of the GBFS station feed.
     period_len_hours : float, optional
         Wall-clock length of one period, in hours.
     routing_mode : {"haversine", "osrm"}, optional
@@ -69,7 +56,6 @@ def build_graph_data(
         The resolved scenario data, ready for :func:`run_scenario`.
     """
     raw = RawModelData(
-        gbfs_base=gbfs_base,
         trips_path=trips_path,
         seed=42,
         n_depots=10,
@@ -108,8 +94,9 @@ def run_scenario(
     Parameters
     ----------
     graph_data : ResolvedModelData
-        The resolved scenario data. Its ``initial_inventory_df`` and
-        ``facilities_capacities_df`` are replaced by the sizing result.
+        The resolved scenario data. Not modified: the sized state stays inside
+        :func:`run_sized_scenario` and is saved into the artifact. The Run page
+        shares one cached ``graph_data`` across runs, so this must hold.
     run_name : str
         Name of the artifact folder (and of the run in the UI).
     demand_scale_factor : float
@@ -133,59 +120,40 @@ def run_scenario(
         if on_progress is not None:
             on_progress(message)
 
-    progress("Sizing the initial inventory and dock capacities")
-    sizing_config = EnvironmentConfig(
-        phases=canonical_phases(),
+    progress("Sizing the state, running the simulation, checking the invariants I1-I5")
+    result = run_sized_scenario(
+        graph_data,
         scenario_id=run_name,
-        demand_scale_factor=sizing_scale_factor,
-        number_of_periods=number_of_periods,
-    )
-    graph_data.initial_inventory_df, graph_data.facilities_capacities_df = size_state_for_demand(
-        graph_data, sizing_config
-    )
-
-    progress("Running the simulation")
-    run_config = EnvironmentConfig(
-        phases=canonical_phases(),
-        scenario_id=run_name,
-        # validate_run is called by hand below: the UI records the violation
-        # list in meta.json instead of failing on a raised error.
-        validate=False,
         demand_scale_factor=demand_scale_factor,
+        sizing_scale_factor=sizing_scale_factor,
         number_of_periods=number_of_periods,
+        # The UI records the violation list in meta.json instead of failing
+        # on a raised error.
+        validate=False,
     )
-    env = Environment(graph_data, run_config)
-    state = env.run()
-    journal = env.simulated_flows_df
-
-    progress("Checking the run invariants I1-I5")
-    violations = validate_run(state, graph_data, demand_scale_factor, number_of_periods)
 
     progress("Building and saving the run artifact")
     tables = artifacts.build_run_tables(
-        journal,
-        initial_inventory=graph_data.initial_inventory_df,
+        result.simulated_flows_df,
+        initial_inventory=result.initial_inventory_df,
         facilities=graph_data.facilities_df,
         facilities_geo=graph_data.facilities_geo_df,
-        facilities_capacities=graph_data.facilities_capacities_df,
+        facilities_capacities=result.facilities_capacities_df,
         rates=graph_data.commodities_categories_rates_df,
         period_len=graph_data.period_len,
         routes=graph_data.routes,
     )
-    meta = {
-        "run_name": run_name,
-        "scenario_id": run_name,
-        "demand_scale_factor": demand_scale_factor,
-        "sizing_scale_factor": sizing_scale_factor,
-        "number_of_periods": number_of_periods,
-        "period_len_hours": graph_data.period_len / pd.Timedelta(hours=1),
-        "routing_mode": graph_data.routing_mode,
-        # Wall-clock start of period 0; the UI turns period ids into times with it.
-        "t0": graph_data.t0.isoformat(),
-        "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
-        "violations": violations,
-        "totals": artifacts.build_totals(tables["panel"], tables["flow_totals"]),
-    }
+    meta = artifacts.build_meta(
+        tables,
+        run_name=run_name,
+        demand_scale_factor=demand_scale_factor,
+        sizing_scale_factor=sizing_scale_factor,
+        number_of_periods=number_of_periods,
+        period_len_hours=graph_data.period_len / pd.Timedelta(hours=1),
+        routing_mode=graph_data.routing_mode,
+        t0=graph_data.t0,
+        violations=result.violations,
+    )
     return artifacts.save_run(run_name, tables, meta, root)
 
 
@@ -201,7 +169,6 @@ def main() -> None:
         "--periods", type=int, default=DEFAULT_NUMBER_OF_PERIODS, help="periods to step"
     )
     parser.add_argument("--trips-path", default=DEFAULT_TRIPS_PATH, help="raw trip CSV path")
-    parser.add_argument("--gbfs-base", default=DEFAULT_GBFS_BASE, help="GBFS feed base URL")
     parser.add_argument(
         "--routing",
         choices=ROUTING_MODES,
@@ -215,7 +182,7 @@ def main() -> None:
 
     print("Loading raw data and resolving the graph tables ...")
     graph_data = build_graph_data(
-        args.trips_path, args.gbfs_base, routing_mode=args.routing, osrm_url=args.osrm_url
+        args.trips_path, routing_mode=args.routing, osrm_url=args.osrm_url
     )
     folder = run_scenario(
         graph_data,

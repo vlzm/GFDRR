@@ -20,7 +20,7 @@ from gbp.model import (
     flows_to_arrivals,
     flows_to_departures,
     flows_to_od_matrix,
-    flows_with_costs,
+    flows_with_measures,
     get_inventory_df,
     haversine_km,
     inventory_at_moments,
@@ -406,8 +406,9 @@ def get_saturated_inventory_df(
     """Build artificial initial inventory holding ``quantity`` bikes per station.
 
     Every station holds ``quantity`` bikes of each commodity.
-    Used by the base scenario instead of the GBFS snapshot. The snapshot is a
-    *current* observation, unrelated to the historical start state, so limiting
+    Used by the base scenario instead of a snapshot of today's real station
+    stock. Such a snapshot is a *current* observation, unrelated to the
+    historical start state, so limiting
     demand against it starves the replay (most departures lose to a stockout that
     never happened historically). With inventory far above any period's demand the
     limit never takes effect, every historical departure departs, and the run reproduces
@@ -698,15 +699,14 @@ def get_flows_wide(
         - ``{role}_lat``, ``{role}_lng``
         - ``{role}_inventory_before``, ``{role}_inventory_after``
 
-        and, for the trip itself (``planned_`` / ``realized_`` pairs):
+        and the measures added by :func:`gbp.model.flows_with_measures`
+        (Notations.md §6.1):
 
-        - ``planned_duration`` (``planned_end_period - start_period``),
-          ``realized_duration`` (``realized_end_period - start_period``)
-        - ``planned_distance_km`` (source to planned target),
-          ``realized_distance_km`` (source to realized target) — measured by
+        - ``planned_duration_periods``, ``realized_duration_periods``
+        - ``planned_distance_km``, ``realized_distance_km`` — measured by
           the scenario's routing mode (``graph_data.routes``)
         - ``rate``, ``elapsed_periods``, ``cost`` -- the event's riding time so
-          far and the money it accrued (see :func:`gbp.model.flows_with_costs`)
+          far and the money it accrued
     """
     if flows_df is None:
         flows_df = graph_data.simulated_flows_df
@@ -734,56 +734,10 @@ def get_flows_wide(
         wide = _join_geo(wide, graph_data.facilities_geo_df, role)
         wide = _join_inventory(wide, inventory, role)
 
-    wide["planned_duration"] = wide["planned_end_period"] - wide["start_period"]
-    wide["realized_duration"] = wide["realized_end_period"] - wide["start_period"]
-    wide["planned_distance_km"] = graph_data.routes.distance_km(
-        wide["source_id"], wide["planned_target_id"]
+    wide = flows_with_measures(
+        wide,
+        routes=graph_data.routes,
+        rates=graph_data.commodities_categories_rates_df,
+        period_len=graph_data.period_len,
     )
-    wide["realized_distance_km"] = graph_data.routes.distance_km(
-        wide["source_id"], wide["realized_target_id"]
-    )
-    wide = flows_with_costs(wide, graph_data.commodities_categories_rates_df, graph_data.period_len)
     return wide
-
-
-def slice_flows_wide(
-    wide: pd.DataFrame,
-    role: str,
-    facility_id: str,
-    period_id: int,
-    window: int,
-) -> pd.DataFrame:
-    """Slice the wide flow journal around one facility and one period.
-
-    Keeps the rows where the chosen facility role equals ``facility_id`` and the
-    event period is within ``window`` periods of ``period_id`` (both ends
-    included: ``period_id - window <= row.period_id <= period_id + window``).
-    The ``role`` picks which of the three facility roles to filter on, so the one
-    function covers all three modes.
-
-    Parameters
-    ----------
-    wide : pandas.DataFrame
-        The wide flow journal from :func:`get_flows_wide`.
-    role : {"source", "planned_target", "realized_target"}
-        Which facility role to filter on. Selects the ``{role}_id`` column.
-    facility_id : str
-        The facility id to keep.
-    period_id : int
-        Centre of the period window.
-    window : int
-        Half-width of the period window, in periods. ``0`` keeps only
-        ``period_id`` itself.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The matching rows, in their original order.
-    """
-    if role not in _FLOW_FACILITY_ROLES:
-        raise ValueError(f"role must be one of {_FLOW_FACILITY_ROLES}, got {role!r}")
-
-    id_col = f"{role}_id"
-    low, high = period_id - window, period_id + window
-    mask = (wide[id_col] == facility_id) & (wide["period_id"] >= low) & (wide["period_id"] <= high)
-    return wide[mask]

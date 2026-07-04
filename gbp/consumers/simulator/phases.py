@@ -39,7 +39,6 @@ from .mechanics import (
 )
 from .state import (
     PeriodRow,
-    Schedule,
     SimulationState,
     adjust_inventory,
     departure_deltas_from_counts,
@@ -48,16 +47,9 @@ from .state import (
 
 
 class Phase:
-    """Base class for one phase: a single step of a period, run on a schedule."""
+    """Base class for one phase: a single step of a period, run every period."""
 
     name = "phase"
-
-    def __init__(self, schedule: Schedule | None = None) -> None:
-        self._schedule = schedule or Schedule.every()
-
-    def should_run(self, period: PeriodRow) -> bool:
-        """Report whether this phase runs in ``period`` (per its schedule)."""
-        return self._schedule.should_run(period)
 
     def execute(
         self,
@@ -87,8 +79,7 @@ class DockArrivals(Phase):
     ``"same"`` docks bikes that departed within this period (after them).
     """
 
-    def __init__(self, when: str, schedule: Schedule | None = None) -> None:
-        super().__init__(schedule)
+    def __init__(self, when: str) -> None:
         if when not in ("previous", "same"):
             raise ValueError(f"when must be 'previous' or 'same', got {when!r}")
         self.when = when

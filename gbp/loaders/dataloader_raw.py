@@ -1,14 +1,13 @@
 """Raw Citi Bike loaders and the ``RawModelData`` container.
 
-Reads the raw trip CSV and the live GBFS station feed, then derives the raw
-entity tables (stations, depots, trucks, bikes) with their capacities, costs
-and rates. ``RawModelData`` runs all of this once and exposes the results as
-attributes; ``ResolvedModelData`` (in :mod:`dataloader_graph`) consumes it.
+Reads the raw trip CSV, then derives the raw entity tables (stations, depots,
+trucks, bikes) with their capacities, costs and rates. ``RawModelData`` runs
+all of this once and exposes the results as attributes; ``ResolvedModelData``
+(in :mod:`dataloader_graph`) consumes it.
 """
 
 import numpy as np
 import pandas as pd
-import requests
 
 
 # ---------------------------------------------------------------------------
@@ -50,16 +49,6 @@ def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
     return trips_df
 
 
-def load_gbfs_raw_df(gbfs_base: str) -> pd.DataFrame:
-    """Fetch the GBFS station feed and merge station information with status."""
-    station_info = requests.get(f"{gbfs_base}/station_information.json").json()
-    station_status = requests.get(f"{gbfs_base}/station_status.json").json()
-    info_df = pd.DataFrame(station_info["data"]["stations"])
-    status_df = pd.DataFrame(station_status["data"]["stations"])
-    stations = info_df.merge(status_df, on="station_id")
-    return stations
-
-
 def get_stations(trips: pd.DataFrame) -> pd.DataFrame:
     """Build the unique station table from trip start and end points."""
     parts = []
@@ -71,17 +60,6 @@ def get_stations(trips: pd.DataFrame) -> pd.DataFrame:
         pd.concat(parts)
         .dropna(subset=["station_id"])
         .drop_duplicates("station_id")
-        .reset_index(drop=True)
-    )
-
-
-def get_stations_capacities(gbfs: pd.DataFrame, stations_df: pd.DataFrame) -> pd.DataFrame:
-    """Return the dock capacity of each installed station seen in the trips."""
-    return (
-        gbfs.query("is_installed == 1")[["short_name", "capacity"]]
-        .drop_duplicates("short_name")
-        .rename(columns={"short_name": "station_id"})
-        .query("station_id in @stations_df.station_id")
         .reset_index(drop=True)
     )
 
@@ -118,43 +96,6 @@ def get_depots_costs(rng: np.random.Generator, depots_df: pd.DataFrame) -> pd.Da
     return depots_df[["depot_id"]].assign(
         fixed_cost_depot=np.round(rng.uniform(80.0, 200.0, size=len(depots_df)), 2)
     )
-
-
-def get_initial_inventory_df(gbfs_raw: pd.DataFrame, stations_df: pd.DataFrame) -> pd.DataFrame:
-    """Split the initial inventory by commodity (classic vs electric).
-
-    GBFS ``num_bikes_available`` is the total available count; ``num_ebikes_available``
-    is the electric subset, so ``classic = total - ebikes``. If the electric
-    field is absent, everything is booked as classic (and you should then keep
-    user flows to classic-only, or electric trips will depart from zero inventory).
-    Verify the field semantics against the actual payload columns.
-    """
-    g = (
-        gbfs_raw.query("is_installed == 1")
-        .rename(columns={"short_name": "facility_id"})
-        .query("facility_id in @stations_df.station_id")
-    )
-    ebikes = g["num_ebikes_available"] if "num_ebikes_available" in g.columns else 0
-    classic = g["num_bikes_available"] - ebikes
-    return pd.concat(
-        [
-            pd.DataFrame(
-                {
-                    "facility_id": g["facility_id"],
-                    "commodity_category": "classic_bike",
-                    "quantity": classic,
-                }
-            ),
-            pd.DataFrame(
-                {
-                    "facility_id": g["facility_id"],
-                    "commodity_category": "electric_bike",
-                    "quantity": ebikes,
-                }
-            ),
-        ],
-        ignore_index=True,
-    ).reset_index(drop=True)
 
 
 def get_trips_df(trips_raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -206,8 +147,6 @@ class RawModelData:
 
     Parameters
     ----------
-    gbfs_base : str
-        Base URL of the GBFS feed (``station_information``/``station_status``).
     trips_path : str
         Path to the raw Citi Bike trip CSV.
     seed : int
@@ -220,7 +159,6 @@ class RawModelData:
 
     def __init__(
         self,
-        gbfs_base: str,
         trips_path: str,
         seed: int,
         n_depots: int,
@@ -235,13 +173,10 @@ class RawModelData:
 
         # Raw sources
         self.trips_raw_df = load_trips_raw_df(trips_path)
-        self.gbfs_raw_df = load_gbfs_raw_df(gbfs_base)
 
-        # Stations
+        # Stations. Real dock capacities are not loaded; every station gets the
+        # constant capacity 100 (the sizing run replaces it anyway).
         self.stations_df = get_stations(self.trips_raw_df)
-        # The GBFS capacity loader is intentionally not used for now; every
-        # station gets the constant capacity 100 instead.
-        # self.stations_capacities_df = get_stations_capacities(self.gbfs_raw_df, self.stations_df)
         self.stations_capacities_df = self.stations_df[["station_id"]].assign(capacity=100)
         self.stations_costs_df = get_stations_costs(self.stations_df)
 

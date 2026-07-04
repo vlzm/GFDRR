@@ -1,6 +1,6 @@
 """Data loaders: raw Citi Bike entities and the resolved graph model.
 
-``RawModelData`` reads the trip CSV and GBFS feed into raw entity tables;
+``RawModelData`` reads the trip CSV into raw entity tables;
 ``ResolvedModelData`` builds the period grid, historical flow log and replay
 demand the simulator consumes.
 """

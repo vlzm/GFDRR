@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from artifacts import PANEL_VALUES
+from artifacts import METRICS, PANEL_VALUES
 
 # --- Palette (validated with the data-viz checks) --------------------------
 SCENARIO_A_COLOR = "#2a78d6"
@@ -25,28 +25,10 @@ DIVERGING_POS = "#d03b3b"  # value went up
 GRID_COLOR = "#e1e0d9"
 INK_SECONDARY = "#52514e"
 
-#: Display label for every panel value column (canonical name kept in braces).
-METRIC_LABELS = {
-    "quantity_sop": "Inventory at period start (quantity_sop)",
-    "quantity_eop": "Inventory at period end (quantity_eop)",
-    "demand": "Demand (demand)",
-    "departed": "Departed (departed)",
-    "arrived": "Arrived (arrived)",
-    "redirected": "Redirected (redirected)",
-    "lost_demand": "Lost demand (lost_demand)",
-    "lost_dock_full": "Lost at full docks (lost_dock_full)",
-}
-#: Short labels for the map hover box.
-METRIC_SHORT = {
-    "quantity_sop": "Inventory, start",
-    "quantity_eop": "Inventory, end",
-    "demand": "Demand",
-    "departed": "Departed",
-    "arrived": "Arrived",
-    "redirected": "Redirected",
-    "lost_demand": "Lost (stockout)",
-    "lost_dock_full": "Lost (dock_full)",
-}
+#: Display label for every panel value column (from the one METRICS table).
+METRIC_LABELS = {metric.name: metric.label for metric in METRICS if metric.panel_value}
+#: Short labels for the map hover box (from the one METRICS table).
+METRIC_SHORT = {metric.name: metric.short for metric in METRICS if metric.panel_value}
 COMMODITY_ALL = "All types"
 
 # --- Aggregation levels for the cost / distance / duration charts ----------
@@ -131,25 +113,18 @@ def slider_max_period(meta_a: dict, meta_b: dict | None) -> int:
 def period_start_time(meta: dict, periods):
     """Wall-clock start of a period (or a Series of periods): ``t0 + period * period_len``.
 
-    Returns ``None`` for artifacts saved before ``t0`` was written to
-    ``meta.json``; the caller then keeps plain period ids.
+    Every ``meta.json`` carries ``t0`` (see ``artifacts.build_meta``).
     """
-    if "t0" not in meta:
-        return None
     return pd.Timestamp(meta["t0"]) + periods * pd.Timedelta(hours=meta["period_len_hours"])
 
 
 def slider_time_caption(period: int, meta_a: dict, meta_b: dict | None = None) -> None:
     """Show under the period slider when the chosen period starts on the clock."""
-    starts = []
-    for tag, meta in (("A", meta_a), ("B", meta_b)):
-        if meta is None:
-            continue
-        start = period_start_time(meta, period)
-        if start is not None:
-            starts.append((tag, start))
-    if not starts:
-        return
+    starts = [
+        (tag, period_start_time(meta, period))
+        for tag, meta in (("A", meta_a), ("B", meta_b))
+        if meta is not None
+    ]
     if len(starts) == 2 and starts[0][1] == starts[1][1]:
         starts = starts[:1]
     if len(starts) == 1:
@@ -165,34 +140,38 @@ def fmt_int(value: float) -> str:
     return f"{value:,.0f}".replace(",", " ")
 
 
-#: KPI entries: label, totals key, formatter, delta color rule.
-#: ``inverse`` marks "more is worse" numbers (losses, redirects, cost).
-_KPI_ITEMS = [
-    ("Demand", "demand", fmt_int, "off"),
-    ("Departed", "departed", fmt_int, "off"),
-    ("Arrived", "arrived", fmt_int, "off"),
-    ("Redirected", "redirected", fmt_int, "inverse"),
-    ("Lost demand", "lost_demand", fmt_int, "inverse"),
-    ("Lost at full docks", "lost_dock_full", fmt_int, "inverse"),
-    ("Cost, $", "cost", lambda v: f"${fmt_int(v)}", "inverse"),
-    ("Distance, km", "distance_km", lambda v: f"{fmt_int(v)} km", "off"),
-]
+#: KPI value formatter per metric unit.
+_KPI_FORMATS = {
+    "count": fmt_int,
+    "dollars": lambda v: f"${fmt_int(v)}",
+    "km": lambda v: f"{fmt_int(v)} km",
+}
 
 
 def kpi_row(meta_a: dict, meta_b: dict | None = None) -> None:
-    """Whole-run totals as metric tiles; with B chosen, the delta is B − A."""
+    """Whole-run totals as metric tiles; with B chosen, the delta is B − A.
+
+    The tiles come from the one METRICS table (``kpi=True`` entries); the tile
+    label is the metric's full label without the braces part.
+    """
     totals_a = meta_a["totals"]
     totals_b = meta_b["totals"] if meta_b else None
-    columns = st.columns(4) + st.columns(4)
-    for column, (label, key, fmt, delta_color) in zip(columns, _KPI_ITEMS, strict=True):
+    items = [metric for metric in METRICS if metric.kpi]
+    columns = []
+    for _ in range((len(items) + 3) // 4):
+        columns.extend(st.columns(4))
+    for column, metric in zip(columns, items, strict=False):
+        fmt = _KPI_FORMATS[metric.unit]
         delta = None
         color = "off"
         if totals_b is not None:
-            diff = totals_b[key] - totals_a[key]
+            diff = totals_b[metric.name] - totals_a[metric.name]
             # ASCII sign: st.metric reads the arrow direction from a leading "-".
             delta = f"{'+' if diff >= 0 else '-'}{fmt(abs(diff))} (B − A)"
-            color = delta_color if diff != 0 else "off"
-        column.metric(label, fmt(totals_a[key]), delta=delta, delta_color=color)
+            # ``inverse`` marks "more is worse" numbers (losses, redirects, cost).
+            color = ("inverse" if metric.more_is_worse else "off") if diff != 0 else "off"
+        label = metric.label.split(" (")[0]
+        column.metric(label, fmt(totals_a[metric.name]), delta=delta, delta_color=color)
 
 
 def validation_badge(meta: dict, label: str) -> None:
@@ -208,12 +187,24 @@ def validation_badge(meta: dict, label: str) -> None:
 
 
 # --- Panel helpers -----------------------------------------------------------
-def panel_slice(panel: pd.DataFrame, period: int, commodity: str | None) -> pd.DataFrame:
-    """One row per facility at one period; sums over commodities unless one is chosen."""
-    rows = panel[panel["period_id"] == period]
+def panel_commodity_slice(
+    rows: pd.DataFrame, commodity: str | None, keys: list[str]
+) -> pd.DataFrame:
+    """Panel rows for one bike type, or the "All types" sum, per ``keys``.
+
+    This is the one place that defines the "All types" pick: ``commodity=None``
+    sums the panel value columns over the bike types within each ``keys``
+    group; a chosen commodity keeps only its rows. With ``commodity_category``
+    in ``keys`` the rows stay as they are (the raw per-type view).
+    """
     if commodity is not None:
         rows = rows[rows["commodity_category"] == commodity]
-    return rows.groupby("facility_id", as_index=False)[PANEL_VALUES].sum()
+    return rows.groupby(keys, as_index=False)[PANEL_VALUES].sum()
+
+
+def panel_slice(panel: pd.DataFrame, period: int, commodity: str | None) -> pd.DataFrame:
+    """One row per facility at one period; sums over commodities unless one is chosen."""
+    return panel_commodity_slice(panel[panel["period_id"] == period], commodity, ["facility_id"])
 
 
 def commodity_options(panel: pd.DataFrame) -> list[str]:
@@ -304,9 +295,9 @@ def aggregate_flow_totals(
     Returns
     -------
     pandas.DataFrame
-        Tidy rows: ``scenario``, the level's keys, and ``value``. When every
-        scenario's ``meta.json`` carries ``t0``, per-period rows also get
-        ``start_time`` — the wall-clock start of ``start_period``.
+        Tidy rows: ``scenario``, the level's keys, and ``value``. Per-period
+        rows also get ``start_time`` — the wall-clock start of
+        ``start_period``.
     """
     keys: list[str] = []
     if level != LEVEL_GLOBAL:
@@ -317,7 +308,7 @@ def aggregate_flow_totals(
         keys.append("source_id")
 
     metas = {run_name: load_meta(run_name) for run_name in frames}
-    with_time = "start_period" in keys and all("t0" in meta for meta in metas.values())
+    with_time = "start_period" in keys
 
     parts = []
     for run_name, flow_totals in frames.items():
@@ -345,14 +336,11 @@ def level_line_chart(
 
     Scenario carries the color; commodity (when present) carries the line
     dash; facilities (when present) become small multiples. The x axis is the
-    period's wall-clock start when the frame carries ``start_time``, and the
-    plain period id otherwise (old artifacts without ``t0``).
+    period's wall-clock start (``start_time``).
     """
-    x = "start_time" if "start_time" in data.columns else "start_period"
-    x_title = "Period start time" if x == "start_time" else "Period (period_id)"
-    kwargs: dict = {}
-    if x == "start_time":
-        kwargs["hover_data"] = ["start_period"]
+    x = "start_time"
+    x_title = "Period start time"
+    kwargs: dict = {"hover_data": ["start_period"]}
     if "commodity_category" in data.columns:
         kwargs["line_dash"] = "commodity_category"
     if "source_id" in data.columns:

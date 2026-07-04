@@ -16,10 +16,11 @@ if run_b:
     frames[run_b] = ui_shared.load_table(run_b, "flow_totals")
 
 if level == ui_shared.LEVEL_GLOBAL:
+    # The whole-run sum is precomputed once (build_totals) and read from meta.
     columns = st.columns(len(frames) + 1)
     values = {}
-    for column, (run_name, flow_totals) in zip(columns, frames.items(), strict=False):
-        values[run_name] = float(flow_totals["cost"].sum())
+    for column, run_name in zip(columns, frames, strict=False):
+        values[run_name] = float(ui_shared.load_meta(run_name)["totals"]["cost"])
         column.metric(f"Cost, $ — {run_name}", f"${ui_shared.fmt_int(values[run_name])}")
     if run_b:
         diff = values[run_b] - values[run_a]

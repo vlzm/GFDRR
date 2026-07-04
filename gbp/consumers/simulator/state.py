@@ -1,9 +1,9 @@
 """Simulator state: the network's facts at the current period.
 
 This module owns the live state of one run -- the inventory, the in-transit
-working set, the period clock and the run-config primitives (:class:`Schedule`,
-:class:`PeriodRow`) -- plus the inventory arithmetic that maintains it
-(:func:`adjust_inventory` and the per-event delta builders).
+working set and the period clock (:class:`PeriodRow`) -- plus the inventory
+arithmetic that maintains it (:func:`adjust_inventory` and the per-event delta
+builders).
 
 The flow journal that backs the state lives in :mod:`flows` (the single source
 of truth); the rules that mutate the state in a period live in :mod:`mechanics`.
@@ -63,26 +63,10 @@ def departure_deltas_from_counts(departures: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Run config + scheduling
+# Run config
 # ---------------------------------------------------------------------------
 class SimulatorConfigError(Exception):
     """Raised when an environment is built with insufficient inputs."""
-
-
-@dataclasses.dataclass(frozen=True)
-class Schedule:
-    """When a phase runs: every ``every_n`` periods (1 = every period)."""
-
-    every_n: int = 1
-
-    @classmethod
-    def every(cls) -> "Schedule":
-        """Build a schedule that runs every period."""
-        return cls(1)
-
-    def should_run(self, period: "PeriodRow") -> bool:
-        """Report whether ``period`` falls on this schedule."""
-        return period.period_id % self.every_n == 0
 
 
 @dataclasses.dataclass(frozen=True)

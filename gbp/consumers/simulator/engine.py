@@ -94,15 +94,14 @@ class Environment:
         return self._state
 
     def step(self) -> SimulationState:
-        """Run one period: execute each scheduled phase, advance the clock.
+        """Run one period: execute each phase in order, advance the clock.
 
         Each phase writes its own events to the journal through
         :meth:`SimulationState.apply_step_events` and returns the next state.
         """
         period = self._periods[self._period_cursor]
         for phase in self._config.phases:
-            if phase.should_run(period):
-                self._state = phase.execute(self._state, self._resolved, period, self._config)
+            self._state = phase.execute(self._state, self._resolved, period, self._config)
 
         self._period_cursor += 1
         if not self.is_done:

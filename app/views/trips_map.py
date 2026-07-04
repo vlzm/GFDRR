@@ -37,8 +37,6 @@ outcomes = right.multiselect(
 period = st.slider("Period (period_id)", 0, ui_shared.slider_max_period(meta_a, meta_b), 0)
 ui_shared.slider_time_caption(period, meta_a, meta_b)
 
-_geo = facilities.set_index("facility_id")
-
 
 def _arc_rows(run_name: str) -> pd.DataFrame:
     """Arcs riding in the chosen period, grouped by (source, target, outcome)."""
@@ -47,12 +45,15 @@ def _arc_rows(run_name: str) -> pd.DataFrame:
     if commodity is not None:
         active = active[active["commodity_category"] == commodity]
     active = active[active["event_type"].isin(outcomes)]
+    # The endpoint coordinates are saved on every arc row, so grouping keeps them.
     grouped = active.groupby(["source_id", "target_id", "event_type"], as_index=False).agg(
-        trips=("quantity", "sum"), distance_km=("distance_km", "mean")
+        trips=("quantity", "sum"),
+        distance_km=("distance_km", "mean"),
+        source_lat=("source_lat", "first"),
+        source_lng=("source_lng", "first"),
+        target_lat=("target_lat", "first"),
+        target_lng=("target_lng", "first"),
     )
-    for role in ("source", "target"):
-        grouped[f"{role}_lat"] = grouped[f"{role}_id"].map(_geo["lat"])
-        grouped[f"{role}_lng"] = grouped[f"{role}_id"].map(_geo["lng"])
     grouped["color"] = grouped["event_type"].map(
         lambda outcome: [*ui_shared.hex_to_rgb(ui_shared.OUTCOME_COLORS[outcome]), 190]
     )

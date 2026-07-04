@@ -28,9 +28,11 @@ if run_b:
     frames[run_b] = ui_shared.load_table(run_b, "flow_totals")
 
 
-def _global_value(flow_totals) -> float:
-    """Whole-run value: total distance or the mean trip duration."""
-    return float(flow_totals[value].dropna().agg(agg))
+def _global_value(run_name: str) -> float:
+    """Whole-run value from meta totals: total distance or the mean trip duration."""
+    totals = ui_shared.load_meta(run_name)["totals"]
+    key = "distance_km" if value == "distance_km" else "mean_duration_periods"
+    return float(totals[key])
 
 
 def _fmt(number: float) -> str:
@@ -41,10 +43,11 @@ def _fmt(number: float) -> str:
 
 
 if level == ui_shared.LEVEL_GLOBAL:
+    # The whole-run values are precomputed once (build_totals) and read from meta.
     columns = st.columns(len(frames) + 1)
     values = {}
-    for column, (run_name, flow_totals) in zip(columns, frames.items(), strict=False):
-        values[run_name] = _global_value(flow_totals)
+    for column, run_name in zip(columns, frames, strict=False):
+        values[run_name] = _global_value(run_name)
         column.metric(f"{measure_label} — {run_name}", _fmt(values[run_name]))
     if run_b:
         diff = values[run_b] - values[run_a]
@@ -69,7 +72,7 @@ else:
     with st.expander("Data table"):
         st.dataframe(data, hide_index=True, width="stretch")
 
-modes = {name: ui_shared.load_meta(name).get("routing_mode", "haversine") for name in frames}
+modes = {name: ui_shared.load_meta(name)["routing_mode"] for name in frames}
 modes_text = "; ".join(f"{name}: {mode}" for name, mode in modes.items())
 st.caption(
     "Distance is the sum of a trip's arc lengths, measured by the run's routing mode "

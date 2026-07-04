@@ -21,8 +21,13 @@ functions of the journal and the current inventory, so historical and simulated
 runs share one definition for each of them.
 """
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:  # gbp.routing imports from gbp.model, so runtime import would cycle
+    from gbp.routing import Routes
 
 # ---------------------------------------------------------------------------
 # Flow-event schema
@@ -619,6 +624,40 @@ def flows_to_arrivals(flows: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def flows_to_redirects(flows: pd.DataFrame) -> pd.DataFrame:
+    """Bounces per period and facility: ``redirected`` events at the full target.
+
+    A ``redirected`` event is the bounce off the full ``planned_target_id`` of
+    the current arc, so the bounce is counted at that facility. Grouped by
+    ``(period_id, facility_id, commodity_category)``.
+    """
+    bounced = flows[flows["event_type"] == "redirected"]
+    return (
+        bounced.groupby(["period_id", "planned_target_id", "commodity_category"], as_index=False)[
+            "quantity"
+        ]
+        .sum()
+        .rename(columns={"planned_target_id": "facility_id"})
+    )
+
+
+def flows_to_losses(flows: pd.DataFrame, reason: str) -> pd.DataFrame:
+    """Losses per period and facility for one loss reason.
+
+    The reason decides where the loss lands. A ``stockout`` loss lands at the
+    trip's ``source_id`` (the dock had no bike to give). A ``dock_full`` loss
+    lands at the trip's ``planned_target_id`` (the bike found no free dock
+    anywhere). Grouped by ``(period_id, facility_id, commodity_category)``.
+    """
+    facility_col = {"stockout": "source_id", "dock_full": "planned_target_id"}[reason]
+    lost = flows[(flows["event_type"] == "lost") & (flows["reason"] == reason)]
+    return (
+        lost.groupby(["period_id", facility_col, "commodity_category"], as_index=False)["quantity"]
+        .sum()
+        .rename(columns={facility_col: "facility_id"})
+    )
+
+
 def flows_to_od_matrix(flows: pd.DataFrame) -> pd.DataFrame:
     """Build the OD demand model (probability and duration per source-target pair)."""
     # Only user departures are intended trips. A redirect's later-leg departure
@@ -875,7 +914,7 @@ _ONE_HOUR = pd.Timedelta(hours=1)
 def flows_with_costs(
     flows: pd.DataFrame,
     rates: pd.DataFrame,
-    period_len: pd.Timedelta = _ONE_HOUR,
+    period_len: pd.Timedelta,
 ) -> pd.DataFrame:
     """Widen the journal with each event's riding time so far and the money it accrued.
 
@@ -904,9 +943,10 @@ def flows_with_costs(
     rates : pandas.DataFrame
         Per-commodity price: ``commodity_category``, ``rate`` (dollars per
         hour; ``commodities_categories_rates_df`` in the resolved data).
-    period_len : pandas.Timedelta, optional
+    period_len : pandas.Timedelta
         Wall-clock length of one period; converts periods to hours for the
-        cost. Defaults to one hour.
+        cost. Required on purpose: a forgotten period length would price the
+        run wrong without any error.
 
     Returns
     -------
@@ -918,6 +958,52 @@ def flows_with_costs(
     hours_per_period = period_len / _ONE_HOUR
     out["cost"] = out["rate"] * out["elapsed_periods"] * hours_per_period
     return out
+
+
+def flows_with_measures(
+    flows: pd.DataFrame,
+    *,
+    routes: "Routes",
+    rates: pd.DataFrame,
+    period_len: pd.Timedelta,
+) -> pd.DataFrame:
+    """Widen the journal with the measures: duration, distance and money columns.
+
+    This is the one place that widens a journal with per-event measures
+    (Notations.md §6.1); the wide journal (``get_flows_wide``) and the artifact
+    builder both call it. Every event row gains:
+
+    - ``planned_duration_periods`` (``planned_end_period - start_period``) and
+      ``realized_duration_periods`` (``realized_end_period - start_period``,
+      NA if lost) -- the trip length in whole periods, planned vs realized.
+    - ``planned_distance_km`` (source to planned target) and
+      ``realized_distance_km`` (source to realized target) -- measured by the
+      scenario's routing mode.
+    - ``rate``, ``elapsed_periods``, ``cost`` -- the event's riding time so far
+      and the money it accrued (see :func:`flows_with_costs`).
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        A flow-event log, historical or simulated.
+    routes : gbp.routing.Routes
+        The scenario's distance / travel-time answerer.
+    rates : pandas.DataFrame
+        Per-commodity price: ``commodity_category``, ``rate`` (dollars per hour).
+    period_len : pandas.Timedelta
+        Wall-clock length of one period (prices periods into dollars).
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``flows`` plus the seven measure columns.
+    """
+    out = flows.copy()
+    out["planned_duration_periods"] = out["planned_end_period"] - out["start_period"]
+    out["realized_duration_periods"] = out["realized_end_period"] - out["start_period"]
+    out["planned_distance_km"] = routes.distance_km(out["source_id"], out["planned_target_id"])
+    out["realized_distance_km"] = routes.distance_km(out["source_id"], out["realized_target_id"])
+    return flows_with_costs(out, rates, period_len)
 
 
 _EARTH_RADIUS_KM = 6371.0088
@@ -1103,13 +1189,7 @@ def check_demand_split(flows: pd.DataFrame, demand: pd.DataFrame) -> list[str]:
         }
     ).rename(columns={"quantity": "demand"})
     served = flows_to_departures(flows).rename(columns={"quantity": "departed"})
-    lost = flows[(flows["event_type"] == "lost") & (flows["reason"] == "stockout")]
-    lost_keys = ["period_id", "source_id", "commodity_category"]
-    lost_demand = (
-        lost.groupby(lost_keys, as_index=False)["quantity"]
-        .sum()
-        .rename(columns={"source_id": "facility_id", "quantity": "lost_demand"})
-    )
+    lost_demand = flows_to_losses(flows, "stockout").rename(columns={"quantity": "lost_demand"})
     merged = (
         demand.merge(served, on=keys, how="outer")
         .merge(lost_demand, on=keys, how="outer")

@@ -9,6 +9,8 @@ and never recomputes what this module can precompute.
 
 from __future__ import annotations
 
+import dataclasses
+import datetime
 import json
 import os
 import pathlib
@@ -17,10 +19,13 @@ from typing import Any
 import pandas as pd
 
 from gbp.model import (
-    flows_with_costs,
+    flows_to_arrivals,
+    flows_to_departures,
+    flows_to_losses,
+    flows_to_redirects,
+    flows_with_measures,
     get_inventory_df,
     is_docking,
-    is_user_departure,
 )
 from gbp.routing import Routes
 
@@ -30,17 +35,79 @@ RUN_TABLES = ("flows", "panel", "arcs", "flow_totals", "facilities")
 #: The panel's row key.
 PANEL_KEYS = ["period_id", "facility_id", "commodity_category"]
 
-#: The panel's value columns, in storage order.
-PANEL_VALUES = [
-    "quantity_sop",
-    "quantity_eop",
-    "demand",
-    "departed",
-    "arrived",
-    "redirected",
-    "lost_demand",
-    "lost_dock_full",
+
+@dataclasses.dataclass(frozen=True)
+class Metric:
+    """One value the UI can show, described once (Notations.md §12).
+
+    ``PANEL_VALUES``, the UI label dictionaries, the KPI row and the panel
+    part of ``build_totals`` are all built from the ``METRICS`` list below.
+    Adding a metric there is the only step: it cannot appear in a picker
+    without a label, or miss the KPI row and the totals.
+    """
+
+    name: str
+    label: str  # full label; the canonical column name is kept in braces
+    short: str  # short label for the map hover box
+    unit: str = "count"  # "count", "dollars" or "km" -- picks the KPI format
+    panel_value: bool = False  # a value column of panel.parquet
+    panel_total: bool = False  # summed over the panel into meta["totals"]
+    kpi: bool = False  # shown as a tile in the KPI row
+    more_is_worse: bool = False  # the KPI delta turns red when it grows
+
+
+#: Every metric of a run, in display and storage order.
+METRICS = [
+    Metric(
+        "quantity_sop",
+        "Inventory at period start (quantity_sop)",
+        "Inventory, start",
+        panel_value=True,
+    ),
+    Metric(
+        "quantity_eop",
+        "Inventory at period end (quantity_eop)",
+        "Inventory, end",
+        panel_value=True,
+    ),
+    Metric("demand", "Demand (demand)", "Demand", panel_value=True, panel_total=True, kpi=True),
+    Metric(
+        "departed", "Departed (departed)", "Departed", panel_value=True, panel_total=True, kpi=True
+    ),
+    Metric("arrived", "Arrived (arrived)", "Arrived", panel_value=True, panel_total=True, kpi=True),
+    Metric(
+        "redirected",
+        "Redirected (redirected)",
+        "Redirected",
+        panel_value=True,
+        panel_total=True,
+        kpi=True,
+        more_is_worse=True,
+    ),
+    Metric(
+        "lost_demand",
+        "Lost demand (lost_demand)",
+        "Lost (stockout)",
+        panel_value=True,
+        panel_total=True,
+        kpi=True,
+        more_is_worse=True,
+    ),
+    Metric(
+        "lost_dock_full",
+        "Lost at full docks (lost_dock_full)",
+        "Lost (dock_full)",
+        panel_value=True,
+        panel_total=True,
+        kpi=True,
+        more_is_worse=True,
+    ),
+    Metric("cost", "Cost, $", "Cost, $", unit="dollars", kpi=True, more_is_worse=True),
+    Metric("distance_km", "Distance, km", "Distance, km", unit="km", kpi=True),
 ]
+
+#: The panel's value columns, in storage order (built from ``METRICS``).
+PANEL_VALUES = [metric.name for metric in METRICS if metric.panel_value]
 
 _DEFAULT_RUNS_ROOT = pathlib.Path(__file__).resolve().parents[1] / "data" / "runs"
 
@@ -90,33 +157,27 @@ def build_panel(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.Data
     """
     panel = get_inventory_df(flows, initial_inventory)
 
-    lost = flows["event_type"] == "lost"
-    counts: dict[str, tuple[pd.Series, str]] = {
-        "departed": (is_user_departure(flows), "source_id"),
-        "arrived": (is_docking(flows), "realized_target_id"),
-        "redirected": (flows["event_type"] == "redirected", "planned_target_id"),
-        "lost_demand": (lost & (flows["reason"] == "stockout"), "source_id"),
-        "lost_dock_full": (lost & (flows["reason"] == "dock_full"), "planned_target_id"),
+    counts: dict[str, pd.DataFrame] = {
+        "departed": flows_to_departures(flows),
+        "arrived": flows_to_arrivals(flows),
+        "redirected": flows_to_redirects(flows),
+        "lost_demand": flows_to_losses(flows, "stockout"),
+        "lost_dock_full": flows_to_losses(flows, "dock_full"),
     }
-    for name, (mask, facility_col) in counts.items():
-        grouped = (
-            flows.loc[mask]
-            .groupby(["period_id", facility_col, "commodity_category"], as_index=False)["quantity"]
-            .sum()
-            .rename(columns={facility_col: "facility_id", "quantity": name})
-        )
+    for name, grouped in counts.items():
+        grouped = grouped.rename(columns={"quantity": name})
         panel = panel.merge(grouped, on=PANEL_KEYS, how="left")
         panel[name] = panel[name].fillna(0).astype("int64")
         # The inventory grid must cover every event; a mismatch means an event
         # happened at a (facility, commodity) pair the grid does not know.
-        if int(panel[name].sum()) != int(flows.loc[mask, "quantity"].sum()):
+        if int(panel[name].sum()) != int(grouped[name].sum()):
             raise ValueError(f"panel dropped {name} events outside the inventory grid")
 
     panel["demand"] = panel["departed"] + panel["lost_demand"]
     return panel[PANEL_KEYS + PANEL_VALUES]
 
 
-def build_arcs(flows: pd.DataFrame, routes: Routes) -> pd.DataFrame:
+def build_arcs(flows: pd.DataFrame, routes: Routes, facilities_geo: pd.DataFrame) -> pd.DataFrame:
     """One row per arc: a ``(flow_id, move_id)`` physical edge of a trip.
 
     Pairs each arc's opening ``departed`` with the event that closed the arc
@@ -125,7 +186,8 @@ def build_arcs(flows: pd.DataFrame, routes: Routes) -> pd.DataFrame:
     actually ended: the realized target when it docked, the planned target
     when it bounced or was lost there. ``distance_km`` is the length of the
     edge, measured by the run's routing mode (straight line or OSRM road
-    network).
+    network). The endpoint coordinates are saved on each row, so the trips
+    map draws arcs without joining another table.
 
     Parameters
     ----------
@@ -133,6 +195,8 @@ def build_arcs(flows: pd.DataFrame, routes: Routes) -> pd.DataFrame:
         A finalized flow-event log.
     routes : gbp.routing.Routes
         The scenario's distance / travel-time answerer.
+    facilities_geo : pandas.DataFrame
+        Facility coordinates: ``facility_id``, ``lat``, ``lng``.
 
     Returns
     -------
@@ -140,7 +204,8 @@ def build_arcs(flows: pd.DataFrame, routes: Routes) -> pd.DataFrame:
         Columns ``flow_id``, ``move_id``, ``commodity_category``,
         ``source_id``, ``target_id``, ``start_period``, ``end_period``,
         ``event_type`` (the closing outcome), ``reason``, ``quantity``,
-        ``distance_km``.
+        ``distance_km``, ``source_lat``, ``source_lng``, ``target_lat``,
+        ``target_lng``.
     """
     opened = flows.loc[
         flows["event_type"] == "departed",
@@ -163,6 +228,10 @@ def build_arcs(flows: pd.DataFrame, routes: Routes) -> pd.DataFrame:
     arcs["target_id"] = arcs["realized_target_id"].fillna(arcs["planned_target_id"])
 
     arcs["distance_km"] = routes.distance_km(arcs["source_id"], arcs["target_id"])
+    geo = facilities_geo.set_index("facility_id")
+    for role in ("source", "target"):
+        arcs[f"{role}_lat"] = arcs[f"{role}_id"].map(geo["lat"])
+        arcs[f"{role}_lng"] = arcs[f"{role}_id"].map(geo["lng"])
     return arcs[
         [
             "flow_id",
@@ -176,6 +245,10 @@ def build_arcs(flows: pd.DataFrame, routes: Routes) -> pd.DataFrame:
             "reason",
             "quantity",
             "distance_km",
+            "source_lat",
+            "source_lng",
+            "target_lat",
+            "target_lng",
         ]
     ]
 
@@ -197,7 +270,7 @@ def build_flow_totals(priced_flows: pd.DataFrame, arcs: pd.DataFrame) -> pd.Data
     Parameters
     ----------
     priced_flows : pandas.DataFrame
-        The journal widened by :func:`gbp.model.flows_with_costs`.
+        The journal widened by :func:`gbp.model.flows_with_measures`.
     arcs : pandas.DataFrame
         The arcs table from :func:`build_arcs`.
 
@@ -270,14 +343,72 @@ def build_facilities(
 def build_totals(panel: pd.DataFrame, flow_totals: pd.DataFrame) -> dict[str, float]:
     """Whole-run sums for ``meta.json``: the numbers the KPI row shows."""
     totals: dict[str, float] = {
-        name: int(panel[name].sum())
-        for name in ["demand", "departed", "arrived", "redirected", "lost_demand", "lost_dock_full"]
+        metric.name: int(panel[metric.name].sum()) for metric in METRICS if metric.panel_total
     }
     totals["cost"] = round(float(flow_totals["cost"].sum()), 2)
     totals["distance_km"] = round(float(flow_totals["distance_km"].sum()), 2)
     duration = flow_totals["duration_periods"].dropna()
     totals["mean_duration_periods"] = round(float(duration.mean()), 3) if len(duration) else 0.0
     return totals
+
+
+def build_meta(
+    tables: dict[str, pd.DataFrame],
+    *,
+    run_name: str,
+    demand_scale_factor: float,
+    sizing_scale_factor: float,
+    number_of_periods: int,
+    period_len_hours: float,
+    routing_mode: str,
+    t0: Any,
+    violations: list[str],
+) -> dict[str, Any]:
+    """Build ``meta.json`` for one run: parameters, violations, and totals.
+
+    This is the one place that defines the ``meta.json`` contract; the runner
+    and the test fixtures both call it, so a saved artifact always carries the
+    same fields (``t0`` and ``routing_mode`` included).
+
+    Parameters
+    ----------
+    tables : dict of str to pandas.DataFrame
+        The run tables from :func:`build_run_tables` (reads ``panel`` and
+        ``flow_totals`` for the totals).
+    run_name : str
+        Folder name of the artifact; also written as ``scenario_id``.
+    demand_scale_factor, sizing_scale_factor : float
+        The run's demand multipliers.
+    number_of_periods : int
+        How many periods the run stepped.
+    period_len_hours : float
+        Wall-clock length of one period, in hours.
+    routing_mode : str
+        How distances were measured (``"haversine"`` or ``"osrm"``).
+    t0 : timestamp-like
+        Wall-clock start of period 0; the UI turns period ids into times with
+        it. Anything ``pandas.Timestamp`` accepts.
+    violations : list of str
+        Run-invariant violations (empty = valid).
+
+    Returns
+    -------
+    dict
+        The ``meta.json`` payload for :func:`save_run`.
+    """
+    return {
+        "run_name": run_name,
+        "scenario_id": run_name,
+        "demand_scale_factor": demand_scale_factor,
+        "sizing_scale_factor": sizing_scale_factor,
+        "number_of_periods": number_of_periods,
+        "period_len_hours": period_len_hours,
+        "routing_mode": routing_mode,
+        "t0": pd.Timestamp(t0).isoformat(),
+        "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "violations": violations,
+        "totals": build_totals(tables["panel"], tables["flow_totals"]),
+    }
 
 
 def build_run_tables(
@@ -313,8 +444,8 @@ def build_run_tables(
     dict of str to pandas.DataFrame
         The five tables of ``RUN_TABLES``, keyed by file stem.
     """
-    priced = flows_with_costs(journal, rates, period_len)
-    arcs = build_arcs(journal, routes)
+    priced = flows_with_measures(journal, routes=routes, rates=rates, period_len=period_len)
+    arcs = build_arcs(journal, routes, facilities_geo)
     return {
         "flows": priced,
         "panel": build_panel(journal, initial_inventory),

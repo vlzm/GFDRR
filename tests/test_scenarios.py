@@ -346,6 +346,7 @@ def test_redirect_neighbor_table_rejects_a_non_redirect_flow():
 # flows_with_costs: riding time and accrued money per event
 # ---------------------------------------------------------------------------
 _RATES = pd.DataFrame({"commodity_category": [scenarios.CLASSIC], "rate": [3.0]})
+_ONE_HOUR = pd.Timedelta(hours=1)
 
 
 @pytest.mark.parametrize("name", list(scenarios.ALL_SCENARIOS))
@@ -354,7 +355,7 @@ def test_costs_follow_the_period_columns(name, run_scenario):
     # departed, and realized_end_period - start_period on the events that close
     # an arc (arrived, redirected). cost is rate * elapsed hours (1h periods).
     _resolved, journal, _state = run_scenario(name)
-    priced = J.flows_with_costs(journal, _RATES)
+    priced = J.flows_with_costs(journal, _RATES, _ONE_HOUR)
 
     opening = priced[(priced["event_type"] == "departed") & (priced["move_id"] == 0)]
     assert (opening["elapsed_periods"] == 0).all()
@@ -381,7 +382,7 @@ def test_costs_accumulate_over_redirect_legs(run_scenario):
     # and docks at s1 in that same period. elapsed_periods must carry the sum of
     # the legs at each event, not restart per leg.
     _resolved, journal, _state = run_scenario("redirect_chain")
-    priced = J.flows_with_costs(journal, _RATES)
+    priced = J.flows_with_costs(journal, _RATES, _ONE_HOUR)
 
     opening = priced[(priced["event_type"] == "departed") & (priced["move_id"] == 0)]
     flow_id = opening.loc[opening["source_id"] == "s1", "flow_id"].iloc[0]
@@ -402,7 +403,7 @@ def test_costs_accumulate_over_redirect_legs(run_scenario):
 def test_costs_work_on_the_historical_journal(run_scenario):
     # The same read-model prices the historical journal, where no simulator ran.
     resolved, _journal, _state = run_scenario("canonical")
-    priced = J.flows_with_costs(resolved.historical_flows_df, _RATES)
+    priced = J.flows_with_costs(resolved.historical_flows_df, _RATES, _ONE_HOUR)
     arrived = priced[priced["event_type"] == "arrived"]
     assert (
         arrived["elapsed_periods"] == arrived["planned_end_period"] - arrived["start_period"]
@@ -413,6 +414,6 @@ def test_costs_work_on_the_historical_journal(run_scenario):
 def test_cost_converts_periods_to_hours(run_scenario):
     # The rate is dollars per hour; with 30-minute periods every cost halves.
     _resolved, journal, _state = run_scenario("single_trip")
-    full = J.flows_with_costs(journal, _RATES)
-    half = J.flows_with_costs(journal, _RATES, period_len=pd.Timedelta(minutes=30))
+    full = J.flows_with_costs(journal, _RATES, _ONE_HOUR)
+    half = J.flows_with_costs(journal, _RATES, pd.Timedelta(minutes=30))
     assert (half["cost"] == full["cost"] / 2).all()

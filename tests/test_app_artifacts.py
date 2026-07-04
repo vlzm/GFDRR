@@ -39,19 +39,24 @@ def _build_tables(resolved, journal):
 
 
 def _save_run(name, resolved, journal, root):
-    """Build and save one run artifact under ``root``; return its meta."""
+    """Build and save one run artifact under ``root``; return its meta.
+
+    ``build_meta`` is the same builder the runner uses, so the saved folder
+    matches the real ``meta.json`` contract (``t0`` and ``routing_mode``
+    included) and the page tests exercise the same path as a real run.
+    """
     tables = _build_tables(resolved, journal)
-    meta = {
-        "run_name": name,
-        "scenario_id": name,
-        "demand_scale_factor": 1.0,
-        "sizing_scale_factor": 1.0,
-        "number_of_periods": int(resolved.periods_df["period_id"].max()) + 1,
-        "period_len_hours": 1.0,
-        "created_at": "2026-01-01T00:00:00",
-        "violations": [],
-        "totals": artifacts.build_totals(tables["panel"], tables["flow_totals"]),
-    }
+    meta = artifacts.build_meta(
+        tables,
+        run_name=name,
+        demand_scale_factor=1.0,
+        sizing_scale_factor=1.0,
+        number_of_periods=int(resolved.periods_df["period_id"].max()) + 1,
+        period_len_hours=1.0,
+        routing_mode="haversine",
+        t0=resolved.periods_df["start_timestamp"].iloc[0],
+        violations=[],
+    )
     artifacts.save_run(name, tables, meta, root)
     return meta
 
@@ -84,14 +89,38 @@ def test_stockout_shows_up_as_lost_demand():
 def test_arcs_pair_every_departed_with_its_close():
     resolved = scenarios.redirect_chain()
     journal, _ = scenarios.run(resolved)
-    arcs = artifacts.build_arcs(journal, resolved.routes)
+    arcs = artifacts.build_arcs(journal, resolved.routes, resolved.facilities_geo_df)
 
     n_departed = int((journal["event_type"] == "departed").sum())
     assert len(arcs) == n_departed
     assert arcs["target_id"].notna().all()
     assert (arcs["distance_km"] >= 0).all()
+    # The endpoint coordinates are saved on the arcs, so the trips map needs no join.
+    for column in ["source_lat", "source_lng", "target_lat", "target_lng"]:
+        assert arcs[column].notna().all()
     # The chain scenario has a flow with more than one arc.
     assert arcs.groupby("flow_id")["move_id"].count().max() >= 2
+
+
+def test_flows_table_carries_the_measures():
+    # flows.parquet is the journal widened by flows_with_measures: every event
+    # row carries the duration, distance and money columns (Notations.md §6.1).
+    resolved = scenarios.canonical()
+    journal, _ = scenarios.run(resolved)
+    flows = _build_tables(resolved, journal)["flows"]
+
+    arrived = flows[flows["event_type"] == "arrived"]
+    assert (
+        arrived["realized_duration_periods"]
+        == arrived["realized_end_period"] - arrived["start_period"]
+    ).all()
+    assert (
+        arrived["planned_duration_periods"]
+        == arrived["planned_end_period"] - arrived["start_period"]
+    ).all()
+    assert arrived["planned_distance_km"].notna().all()
+    assert arrived["realized_distance_km"].notna().all()
+    assert (arrived["cost"] == arrived["rate"] * arrived["elapsed_periods"]).all()
 
 
 def test_flow_totals_one_row_per_flow():
@@ -129,6 +158,48 @@ def test_save_and_load_round_trip(tmp_path):
     panel = artifacts.load_run_table("overflow", "panel", tmp_path)
     assert panel["demand"].sum() == meta["totals"]["demand"]
     assert artifacts.load_run_meta("overflow", tmp_path)["run_name"] == "overflow"
+
+
+def test_every_kpi_metric_has_a_total():
+    # The KPI row reads meta["totals"][metric.name] for every kpi=True metric,
+    # so each of them must get a value in build_totals.
+    resolved = scenarios.overflow()
+    journal, _ = scenarios.run(resolved)
+    tables = _build_tables(resolved, journal)
+    totals = artifacts.build_totals(tables["panel"], tables["flow_totals"])
+    for metric in artifacts.METRICS:
+        if metric.kpi:
+            assert metric.name in totals, f"KPI metric {metric.name} missing from totals"
+        if metric.panel_value:
+            assert metric.name in tables["panel"].columns
+
+
+def test_meta_carries_t0_and_the_run_parameters():
+    # build_meta is the one place that defines the meta.json contract; this
+    # pins the fields the UI reads, t0 and routing_mode included.
+    resolved = scenarios.canonical()
+    journal, _ = scenarios.run(resolved)
+    tables = _build_tables(resolved, journal)
+    meta = artifacts.build_meta(
+        tables,
+        run_name="canonical",
+        demand_scale_factor=1.0,
+        sizing_scale_factor=1.0,
+        number_of_periods=len(resolved.periods_df),
+        period_len_hours=1.0,
+        routing_mode="haversine",
+        t0=resolved.periods_df["start_timestamp"].iloc[0],
+        violations=[],
+    )
+    assert meta["t0"] == "2026-01-01T00:00:00"
+    assert meta["routing_mode"] == "haversine"
+    assert meta["scenario_id"] == "canonical"
+    assert meta["totals"] == artifacts.build_totals(tables["panel"], tables["flow_totals"])
+    # t0 + period * period_len is what the pages show on the time axis.
+    t0 = pd.Timestamp(meta["t0"])
+    assert t0 + 3 * pd.Timedelta(hours=meta["period_len_hours"]) == pd.Timestamp(
+        "2026-01-01T03:00:00"
+    )
 
 
 # ---------------------------------------------------------------------------
