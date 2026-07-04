@@ -21,6 +21,7 @@ from gbp.model import (
     flows_to_arrivals,
     flows_to_departures,
     flows_to_od_matrix,
+    flows_with_costs,
     get_inventory_df,
     haversine_km,
     inventory_at_moments,
@@ -683,6 +684,8 @@ def get_flows_wide(
           ``realized_duration`` (``realized_end_period - start_period``)
         - ``planned_distance_km`` (source to planned target),
           ``realized_distance_km`` (source to realized target)
+        - ``rate``, ``elapsed_periods``, ``cost`` -- the event's riding time so
+          far and the money it accrued (see :func:`gbp.model.flows_with_costs`)
     """
     if flows_df is None:
         flows_df = graph_data.simulated_flows_df
@@ -724,6 +727,7 @@ def get_flows_wide(
         wide["realized_target_lat"],
         wide["realized_target_lng"],
     )
+    wide = flows_with_costs(wide, graph_data.commodities_categories_rates_df, graph_data.period_len)
     return wide
 
 

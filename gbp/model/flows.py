@@ -869,6 +869,57 @@ def flows_with_inventory(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -
     return out
 
 
+_ONE_HOUR = pd.Timedelta(hours=1)
+
+
+def flows_with_costs(
+    flows: pd.DataFrame,
+    rates: pd.DataFrame,
+    period_len: pd.Timedelta = _ONE_HOUR,
+) -> pd.DataFrame:
+    """Widen the journal with each event's riding time so far and the money it accrued.
+
+    Every event row gains three columns:
+
+    - ``rate`` -- the price of riding this commodity, in dollars per hour.
+    - ``elapsed_periods`` -- how many periods the flow has been riding at this
+      event: ``period_id - start_period``. ``start_period`` is the flow's
+      opening period on every row, redirect legs included, so the value is
+      cumulative over legs: 0 on the opening ``departed``, the first leg's
+      length on a ``redirected`` bounce, the sum of all legs on the final
+      ``arrived``.
+    - ``cost`` -- dollars accrued so far: ``rate * elapsed_periods * hours per
+      period``. Cumulative like ``elapsed_periods``; a trip's total cost is the
+      value on its final ``arrived``.
+
+    A stockout ``lost`` row has no ``start_period`` (the trip never departed),
+    so its ``elapsed_periods`` and ``cost`` stay NA: nothing was ridden, nothing
+    accrued. A dock-full ``lost`` row closes a real arc and keeps the time
+    ridden up to the loss.
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        A flow-event log, historical or simulated.
+    rates : pandas.DataFrame
+        Per-commodity price: ``commodity_category``, ``rate`` (dollars per
+        hour; ``commodities_categories_rates_df`` in the resolved data).
+    period_len : pandas.Timedelta, optional
+        Wall-clock length of one period; converts periods to hours for the
+        cost. Defaults to one hour.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``flows`` plus ``rate``, ``elapsed_periods`` and ``cost``.
+    """
+    out = flows.merge(rates[["commodity_category", "rate"]], on="commodity_category", how="left")
+    out["elapsed_periods"] = (out["period_id"] - out["start_period"]).astype("Int64")
+    hours_per_period = period_len / _ONE_HOUR
+    out["cost"] = out["rate"] * out["elapsed_periods"] * hours_per_period
+    return out
+
+
 _EARTH_RADIUS_KM = 6371.0088
 
 

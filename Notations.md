@@ -306,9 +306,17 @@ and its `resource_id` column are canonical and reserved.
 | `planned_end_period` | The period an arc was expected to dock (each redirect leg carries its own). |
 | `realized_end_period` | The period a flow actually docked (NA if lost). |
 | `duration` | Trip length in whole periods (`planned_end_period - start_period`), carried by the OD matrix. |
+| `elapsed_periods` | How many periods a flow has been riding at the moment of an event: `period_id - start_period`. Because `start_period` is the flow's opening period on every row, the value is cumulative over redirect legs: 0 on the opening `departed`, the first leg's length on a `redirected` bounce, the sum of all legs on the final `arrived`. Read-model `flows_with_costs`. |
 | `leg_end_period` | Planning column of `plan_overflow_redirect`: the period a redirect's new leg will dock (the bounce period plus the leg's travel time). Becomes the leg's `planned_end_period`. |
 | `trip_speed_km_per_period` | Mean riding speed over the historical trips (total great-circle distance over total ride time, from the raw timestamps), in km per period. The travel-time fallback for a redirect pair with no OD entry: `round(haversine_km / trip_speed_km_per_period)`. |
 | `period_len` | Wall-clock length of one period (default one hour); `start_timestamp` / `end_timestamp` are the period's bounds. |
+
+### 6.1. Rate and cost (money)
+
+| Canonical | Meaning |
+|---|---|
+| `rate` | Price per hour of use, in dollars. Per `commodity_category` for bikes (`commodities_categories_rates_df` — what a user pays to ride); per `resource_id` for trucks (`resources_rates_df`). |
+| `cost` | Dollars a flow has accrued at the moment of an event: `rate * elapsed_periods * hours per period` (`period_len`). Cumulative like `elapsed_periods` (§6); a trip's total cost is the value on its final `arrived`. Read-model `flows_with_costs`. |
 
 ---
 
