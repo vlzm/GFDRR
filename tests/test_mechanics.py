@@ -5,12 +5,13 @@ rule for both docking sites -- arrivals at their planned station and a redirect
 round at the station chosen for it -- so its tests cover both target columns
 without a full engine run. The ``plan_overflow_redirect`` tests pin down where
 a redirect leg's travel time comes from: the OD matrix when the pair has an
-entry, the distance-over-speed estimate when it does not.
+entry, the ``Routes`` estimate (distance over speed) when it does not.
 """
 
 import pandas as pd
 
 from gbp.consumers.simulator.mechanics import dock_up_to_capacity, plan_overflow_redirect
+from gbp.routing import Routes
 
 CLASSIC = "classic_bike"
 
@@ -73,6 +74,13 @@ def _redirect_setup(lat_b: float) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFr
     return inventory, capacities, geo, overflow
 
 
+def _routes(geo: pd.DataFrame, speed: float = 10.0) -> Routes:
+    """Haversine-mode routes over the two test stations, at ``speed`` km per period."""
+    return Routes(
+        geo, "haversine", trip_speed_km_per_period=speed, period_len=pd.Timedelta(hours=1)
+    )
+
+
 def _od(rows: list[tuple[str, str, int]]) -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -88,7 +96,7 @@ def test_redirect_pair_missing_from_od_estimates_travel_time_from_distance():
     # at 10 km per period the leg takes round(2.22) = 2 periods.
     inventory, capacities, geo, overflow = _redirect_setup(lat_b=40.2)
     redirects, lost = plan_overflow_redirect(
-        inventory, capacities, geo, _od([]), 10.0, overflow, period_id=5
+        inventory, capacities, geo, _od([]), _routes(geo), overflow, period_id=5
     )
     assert lost.empty
     assert redirects["realized_target_id"].tolist() == ["B"]
@@ -100,7 +108,7 @@ def test_redirect_pair_present_in_od_keeps_the_historical_duration():
     # (2 periods, as above) is not used.
     inventory, capacities, geo, overflow = _redirect_setup(lat_b=40.2)
     redirects, lost = plan_overflow_redirect(
-        inventory, capacities, geo, _od([("A", "B", 1)]), 10.0, overflow, period_id=5
+        inventory, capacities, geo, _od([("A", "B", 1)]), _routes(geo), overflow, period_id=5
     )
     assert lost.empty
     assert redirects["leg_end_period"].tolist() == [6]
@@ -111,7 +119,7 @@ def test_redirect_to_a_nearby_station_still_docks_in_the_same_period():
     # docks in the bounce period, as before the fallback existed.
     inventory, capacities, geo, overflow = _redirect_setup(lat_b=40.001)
     redirects, lost = plan_overflow_redirect(
-        inventory, capacities, geo, _od([]), 10.0, overflow, period_id=5
+        inventory, capacities, geo, _od([]), _routes(geo), overflow, period_id=5
     )
     assert lost.empty
     assert redirects["leg_end_period"].tolist() == [5]

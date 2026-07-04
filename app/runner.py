@@ -26,6 +26,7 @@ from gbp.consumers.simulator.engine import Environment
 from gbp.consumers.simulator.validation import validate_run
 from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.loaders.dataloader_raw import RawModelData
+from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -43,6 +44,8 @@ def build_graph_data(
     trips_path: str = DEFAULT_TRIPS_PATH,
     gbfs_base: str = DEFAULT_GBFS_BASE,
     period_len_hours: float = 1.0,
+    routing_mode: str = "haversine",
+    osrm_url: str = DEFAULT_OSRM_URL,
 ) -> ResolvedModelData:
     """Load the raw sources and resolve the graph tables (the heavy step).
 
@@ -54,6 +57,11 @@ def build_graph_data(
         Base URL of the GBFS station feed.
     period_len_hours : float, optional
         Wall-clock length of one period, in hours.
+    routing_mode : {"haversine", "osrm"}, optional
+        How distances and travel times between facilities are measured
+        (see :mod:`gbp.routing`). ``"osrm"`` needs a running OSRM server.
+    osrm_url : str, optional
+        Base URL of the OSRM server. Only read when ``routing_mode="osrm"``.
 
     Returns
     -------
@@ -72,7 +80,12 @@ def build_graph_data(
         electric_bike_rate=5,
         classic_bike_rate=3,
     )
-    return ResolvedModelData(raw, period_len=pd.Timedelta(hours=period_len_hours))
+    return ResolvedModelData(
+        raw,
+        period_len=pd.Timedelta(hours=period_len_hours),
+        routing_mode=routing_mode,
+        osrm_url=osrm_url,
+    )
 
 
 def run_scenario(
@@ -157,6 +170,7 @@ def run_scenario(
         facilities_capacities=graph_data.facilities_capacities_df,
         rates=graph_data.commodities_categories_rates_df,
         period_len=graph_data.period_len,
+        routes=graph_data.routes,
     )
     meta = {
         "run_name": run_name,
@@ -165,6 +179,7 @@ def run_scenario(
         "sizing_scale_factor": sizing_scale_factor,
         "number_of_periods": number_of_periods,
         "period_len_hours": graph_data.period_len / pd.Timedelta(hours=1),
+        "routing_mode": graph_data.routing_mode,
         # Wall-clock start of period 0; the UI turns period ids into times with it.
         "t0": graph_data.t0.isoformat(),
         "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -187,10 +202,21 @@ def main() -> None:
     )
     parser.add_argument("--trips-path", default=DEFAULT_TRIPS_PATH, help="raw trip CSV path")
     parser.add_argument("--gbfs-base", default=DEFAULT_GBFS_BASE, help="GBFS feed base URL")
+    parser.add_argument(
+        "--routing",
+        choices=ROUTING_MODES,
+        default="haversine",
+        help="distance/travel-time mode: haversine formula or a local OSRM server",
+    )
+    parser.add_argument(
+        "--osrm-url", default=DEFAULT_OSRM_URL, help="OSRM server URL (for --routing osrm)"
+    )
     args = parser.parse_args()
 
     print("Loading raw data and resolving the graph tables ...")
-    graph_data = build_graph_data(args.trips_path, args.gbfs_base)
+    graph_data = build_graph_data(
+        args.trips_path, args.gbfs_base, routing_mode=args.routing, osrm_url=args.osrm_url
+    )
     folder = run_scenario(
         graph_data,
         run_name=args.run_name,

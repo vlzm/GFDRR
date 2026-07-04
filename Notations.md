@@ -74,8 +74,8 @@ projection of them. This is the anchor; read it first.
 bounce: the bike reaches the arc's full target, bounces (`redirected`, closing
 the current arc), then departs on a new arc — the **continuation leg**
 (`redirect_leg_events`) — to the station chosen for it. The leg takes the pair's
-travel time from the OD matrix (for a pair with no OD entry, the great-circle
-distance over `trip_speed_km_per_period`); a leg that takes time docks in a
+travel time from the OD matrix (for a pair with no OD entry, the `routes`
+estimate — §13); a leg that takes time docks in a
 later period, where it can bounce again. So a `departed` means one of two things:
 
 - `departed` with `move_id == 0` — a **real user departure** from a dock (`−1` to
@@ -308,7 +308,7 @@ and its `resource_id` column are canonical and reserved.
 | `duration` | Trip length in whole periods (`planned_end_period - start_period`), carried by the OD matrix. |
 | `elapsed_periods` | How many periods a flow has been riding at the moment of an event: `period_id - start_period`. Because `start_period` is the flow's opening period on every row, the value is cumulative over redirect legs: 0 on the opening `departed`, the first leg's length on a `redirected` bounce, the sum of all legs on the final `arrived`. Read-model `flows_with_costs`. |
 | `leg_end_period` | Planning column of `plan_overflow_redirect`: the period a redirect's new leg will dock (the bounce period plus the leg's travel time). Becomes the leg's `planned_end_period`. |
-| `trip_speed_km_per_period` | Mean riding speed over the historical trips (total great-circle distance over total ride time, from the raw timestamps), in km per period. The travel-time fallback for a redirect pair with no OD entry: `round(haversine_km / trip_speed_km_per_period)`. |
+| `trip_speed_km_per_period` | Mean riding speed over the historical trips (total great-circle distance over total ride time, from the raw timestamps), in km per period. `routes` (§13) turns a straight-line distance into a travel time with it. |
 | `period_len` | Wall-clock length of one period (default one hour); `start_timestamp` / `end_timestamp` are the period's bounds. |
 | `t0` | Wall-clock start of period 0: the earliest historical trip start, floored to the hour. Period `k` starts at `t0 + k * period_len` (the `periods_df` grid). Saved in `meta.json`, so the UI can show times instead of period ids. |
 
@@ -410,18 +410,36 @@ happens while a page renders. One saved run is a **run artifact**: a folder
 
 | Canonical | Meaning |
 |---|---|
-| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). |
+| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6, `routing_mode` — see §13), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). |
 | `flows.parquet` | The finalized journal of the run, widened by `flows_with_costs` (`rate`, `elapsed_periods`, `cost`). |
 | `panel.parquet` | The **facility period panel**: one row per `(period_id, facility_id, commodity_category)` with that period's values side by side — `quantity_sop`, `quantity_eop` (§9 inventory), `demand`, `departed`, `arrived`, `redirected` (bounces at this facility as the full planned target), `lost_demand`, `lost_dock_full`. Every map view and hover box is a slice of this one table. |
-| `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, and `distance_km` (great-circle, `haversine_km`). The trips map draws these. |
+| `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, and `distance_km` (measured by the run's `routing_mode` — §13). The trips map draws these. |
 | `flow_totals.parquet` | One row per `flow_id` with the flow's whole-trip values: origin `source_id`, `planned_target_id`, `realized_target_id`, `start_period`, `end_period`, terminal `event_type`, `reason`, `duration_periods`, `distance_km` (sum over its arcs), `cost` (value on the terminal event). The cost and distance/duration charts group this table. Not here: a stockout loss (it has no flow — `flow_id` is NA; it lives in the panel as `lost_demand`) and a flow still riding when the run ends (no terminal event yet). |
 | `facilities.parquet` | Facility attributes for the maps: `facility_id`, `facility_category`, `lat`, `lng`, `capacity`. |
 
 Chart attribution rule: a flow's `cost`, `distance_km` and `duration_periods`
 belong to its **origin facility** (`source_id`) and its **`start_period`** — the
 place and period the demand occurred. `distance_km` is a new column name: the
-great-circle length of an arc in kilometres; a flow's `distance_km` is the sum
-over its arcs.
+length of an arc in kilometres, measured by the run's `routing_mode` (§13);
+a flow's `distance_km` is the sum over its arcs.
+
+---
+
+## 13. Routing (distance and travel time between facilities)
+
+| Canonical | Meaning | Instead of |
+|---|---|---|
+| `routes` | The one object that answers distance and travel-time queries for facility pairs: `distance_km(source, target)` and `duration_periods(source, target)` (class `Routes` in `gbp/routing.py`). Built once per scenario, held on `ResolvedModelData.routes`. Every reader of a facility-pair distance (the wide journal, the arcs table, the redirect travel-time fallback) asks it. | inline `haversine_km` calls |
+| `routing_mode` | How `routes` measures: `haversine` or `osrm`. A `ResolvedModelData` parameter; saved in `meta.json`. | "distance mode", "travel model" |
+| `haversine` (mode) | The formula mode, and the default. Distance is the straight (great-circle) line between the two facilities; travel time is that distance over `trip_speed_km_per_period` (§6). Needs nothing but coordinates. | "formula mode", "straight-line mode" |
+| `osrm` (mode) | Road-network mode. Distance and riding time come from a local OSRM server (`docs/osrm_setup.md`): the full facility-to-facility table is fetched once, in one `/table` request, when `Routes` is built. A pair the server cannot route falls back to the `haversine` answer. | — |
+
+Not routing: `duration` on the OD matrix (§6) stays the mean **historical**
+trip length in both modes — observed data beats any model. `routes` supplies
+distances everywhere, but travel times only where history has no answer (a
+redirect pair with no OD entry). The neighbour ranking of a redirect
+(`neighbor_distance_sq`, §0) also stays as it is in both modes: it only orders
+candidate stations by closeness.
 
 ---
 

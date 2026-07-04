@@ -34,6 +34,7 @@ from gbp.consumers.simulator import (
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.engine import Environment
 from gbp.model import flows as J
+from gbp.routing import Routes
 
 CLASSIC = "classic_bike"
 
@@ -118,6 +119,12 @@ def build_resolved(
     # stations above sit ~0.1 km apart, so at 15 km per period every fallback
     # estimate rounds to zero periods and the scenarios keep their stories.
     resolved.trip_speed_km_per_period = 15.0
+    resolved.routes = Routes(
+        geo,
+        "haversine",
+        trip_speed_km_per_period=resolved.trip_speed_km_per_period,
+        period_len=pd.Timedelta(hours=1),
+    )
     return resolved
 
 

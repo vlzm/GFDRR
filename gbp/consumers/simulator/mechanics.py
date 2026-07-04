@@ -9,14 +9,15 @@ Mechanics never touch :class:`SimulationState` or the event journal: they take
 plain frames and return *decisions* (what fits, what overflows, where each
 overflow flow docks). Applying those decisions to the live state and writing the
 events is the phase's job. So this module depends only on :mod:`state` for the
-inventory arithmetic and on nothing above it: ``journal <- state <- mechanics <-
-phases <- engine``.
+inventory arithmetic, :mod:`gbp.routing` for travel times, and on nothing above
+it: ``journal <- state <- mechanics <- phases <- engine``.
 """
 
 import numpy as np
 import pandas as pd
 
-from gbp.model import haversine_km, neighbor_distance_sq
+from gbp.model import neighbor_distance_sq
+from gbp.routing import Routes
 
 from .state import adjust_inventory, dock_deltas
 
@@ -141,8 +142,7 @@ def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame
 
 def _leg_durations(
     od_matrix: pd.DataFrame,
-    geo: pd.DataFrame,
-    trip_speed_km_per_period: float,
+    routes: Routes,
     source: pd.Series,
     target: pd.Series,
 ) -> pd.Series:
@@ -150,22 +150,14 @@ def _leg_durations(
 
     The pair's mean historical ``duration`` from the OD matrix, over all periods
     and commodities. For a pair no historical trip ever rode, the estimate is
-    the great-circle distance between the two stations divided by
-    ``trip_speed_km_per_period``. Both round to whole periods.
+    ``routes.duration_periods`` — the scenario's routing mode (straight-line
+    distance over the mean speed, or the OSRM riding time). Both round to whole
+    periods.
     """
     pair_duration = od_matrix.groupby(["source_id", "planned_target_id"])["duration"].mean()
     pairs = pd.MultiIndex.from_arrays([source, target])
     from_od = pd.Series(pair_duration.reindex(pairs).to_numpy(), index=source.index)
-    coords = geo.set_index("facility_id")
-    estimate = (
-        haversine_km(
-            source.map(coords["lat"]),
-            source.map(coords["lng"]),
-            target.map(coords["lat"]),
-            target.map(coords["lng"]),
-        )
-        / trip_speed_km_per_period
-    )
+    estimate = routes.duration_periods(source, target)
     return from_od.fillna(estimate).round().astype("int64")
 
 
@@ -174,7 +166,7 @@ def plan_overflow_redirect(
     capacities: pd.DataFrame,
     geo: pd.DataFrame,
     od_matrix: pd.DataFrame,
-    trip_speed_km_per_period: float,
+    routes: Routes,
     overflow: pd.DataFrame,
     period_id: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -203,9 +195,9 @@ def plan_overflow_redirect(
         Facility geography: ``facility_id``, ``lat``, ``lng``.
     od_matrix : pandas.DataFrame
         OD demand model; the source of the per-pair travel times.
-    trip_speed_km_per_period : float
-        Mean historical riding speed; the travel-time fallback for a pair with
-        no OD entry (see :func:`_leg_durations`).
+    routes : gbp.routing.Routes
+        The scenario's distance / travel-time answerer; the travel-time
+        fallback for a pair with no OD entry (see :func:`_leg_durations`).
     overflow : pandas.DataFrame
         The flows that found no free dock at their arc's target.
     period_id : int
@@ -231,8 +223,7 @@ def plan_overflow_redirect(
             break  # no station anywhere has a free dock: the rest is lost
         travel = _leg_durations(
             od_matrix,
-            geo,
-            trip_speed_km_per_period,
+            routes,
             found["planned_target_id"],
             found["realized_target_id"],
         )

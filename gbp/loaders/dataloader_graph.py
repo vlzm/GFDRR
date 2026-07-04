@@ -7,8 +7,7 @@ the replay demand the engine consumes.
 and exposes the graph tables. The :class:`~engine.Environment` and its phases
 read a narrow subset of them: ``periods_df``, ``initial_inventory_df``,
 ``historical_demand_df``, ``historical_od_matrix_df``,
-``facilities_capacities_df``, ``facilities_geo_df`` and
-``trip_speed_km_per_period``.
+``facilities_capacities_df``, ``facilities_geo_df`` and ``routes``.
 """
 
 import pandas as pd
@@ -27,6 +26,7 @@ from gbp.model import (
     inventory_at_moments,
     phase_rank_by_timing,
 )
+from gbp.routing import DEFAULT_OSRM_URL, Routes
 
 # ---------------------------------------------------------------------------
 # Period grid (the simulation clock)
@@ -130,9 +130,9 @@ def get_trip_speed_km_per_period(
     Trips that start and end at the same station, take no time, or miss a
     coordinate carry no speed information and are skipped.
 
-    The simulator uses this value to estimate a redirect leg's travel time when
-    the OD matrix has no entry for the pair (see
-    :func:`gbp.consumers.simulator.mechanics.plan_overflow_redirect`).
+    :class:`gbp.routing.Routes` uses this value to turn a straight-line
+    distance into a travel time — in the ``haversine`` routing mode for every
+    pair, in the ``osrm`` mode only for pairs the server cannot route.
 
     Parameters
     ----------
@@ -435,8 +435,8 @@ class ResolvedModelData:
     Exposes the rich graph tables (entities, attributes, historical
     observations). The engine and its phases read directly: ``periods_df``,
     ``initial_inventory_df``, ``historical_demand_df``,
-    ``historical_od_matrix_df``, ``facilities_capacities_df`` and
-    ``facilities_geo_df``.
+    ``historical_od_matrix_df``, ``facilities_capacities_df``,
+    ``facilities_geo_df`` and ``routes``.
 
     ``initial_inventory_df`` and ``facilities_capacities_df`` are built for the
     base replay: the smallest state that runs the historical demand with no
@@ -450,12 +450,21 @@ class ResolvedModelData:
         The loaded raw entity tables.
     period_len : pandas.Timedelta, optional
         Length of a single simulation period. Defaults to one hour.
+    routing_mode : {"haversine", "osrm"}, optional
+        How ``routes`` measures distance and travel time between facilities
+        (see :mod:`gbp.routing`). Defaults to ``"haversine"``. The ``"osrm"``
+        mode needs a running OSRM server and fetches the full
+        facility-to-facility table here, once.
+    osrm_url : str, optional
+        Base URL of the OSRM server. Only read when ``routing_mode="osrm"``.
     """
 
     def __init__(
         self,
         raw: RawModelData,
         period_len: pd.Timedelta = DEFAULT_PERIOD_LEN,
+        routing_mode: str = "haversine",
+        osrm_url: str = DEFAULT_OSRM_URL,
     ) -> None:
         # Entities
         self.facilities_df = get_facilities_df(raw.stations_df, raw.depots_df)
@@ -503,10 +512,21 @@ class ResolvedModelData:
         self.historical_arrivals_df = flows_to_arrivals(self.historical_flows_df)
         self.historical_od_matrix_df = flows_to_od_matrix(self.historical_flows_df)
 
-        # Mean riding speed from the raw timestamps; the simulator's travel-time
-        # fallback for a redirect leg whose pair has no OD entry.
+        # Mean riding speed from the raw timestamps; Routes turns straight-line
+        # distances into travel times with it (see get_trip_speed_km_per_period).
         self.trip_speed_km_per_period = get_trip_speed_km_per_period(
             raw.trips_df, self.facilities_geo_df, period_len
+        )
+
+        # The one distance / travel-time answerer for facility pairs. In osrm
+        # mode this fetches the full facility-to-facility table now, once.
+        self.routing_mode = routing_mode
+        self.routes = Routes(
+            self.facilities_geo_df,
+            routing_mode,
+            trip_speed_km_per_period=self.trip_speed_km_per_period,
+            period_len=period_len,
+            osrm_url=osrm_url,
         )
 
         # Simulated observations -- filled by attach_simulation after a run
@@ -683,7 +703,8 @@ def get_flows_wide(
         - ``planned_duration`` (``planned_end_period - start_period``),
           ``realized_duration`` (``realized_end_period - start_period``)
         - ``planned_distance_km`` (source to planned target),
-          ``realized_distance_km`` (source to realized target)
+          ``realized_distance_km`` (source to realized target) — measured by
+          the scenario's routing mode (``graph_data.routes``)
         - ``rate``, ``elapsed_periods``, ``cost`` -- the event's riding time so
           far and the money it accrued (see :func:`gbp.model.flows_with_costs`)
     """
@@ -715,17 +736,11 @@ def get_flows_wide(
 
     wide["planned_duration"] = wide["planned_end_period"] - wide["start_period"]
     wide["realized_duration"] = wide["realized_end_period"] - wide["start_period"]
-    wide["planned_distance_km"] = haversine_km(
-        wide["source_lat"],
-        wide["source_lng"],
-        wide["planned_target_lat"],
-        wide["planned_target_lng"],
+    wide["planned_distance_km"] = graph_data.routes.distance_km(
+        wide["source_id"], wide["planned_target_id"]
     )
-    wide["realized_distance_km"] = haversine_km(
-        wide["source_lat"],
-        wide["source_lng"],
-        wide["realized_target_lat"],
-        wide["realized_target_lng"],
+    wide["realized_distance_km"] = graph_data.routes.distance_km(
+        wide["source_id"], wide["realized_target_id"]
     )
     wide = flows_with_costs(wide, graph_data.commodities_categories_rates_df, graph_data.period_len)
     return wide

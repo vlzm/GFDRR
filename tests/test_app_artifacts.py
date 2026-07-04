@@ -34,6 +34,7 @@ def _build_tables(resolved, journal):
         facilities_capacities=resolved.facilities_capacities_df,
         rates=RATES,
         period_len=PERIOD_LEN,
+        routes=resolved.routes,
     )
 
 
@@ -83,7 +84,7 @@ def test_stockout_shows_up_as_lost_demand():
 def test_arcs_pair_every_departed_with_its_close():
     resolved = scenarios.redirect_chain()
     journal, _ = scenarios.run(resolved)
-    arcs = artifacts.build_arcs(journal, resolved.facilities_geo_df)
+    arcs = artifacts.build_arcs(journal, resolved.routes)
 
     n_departed = int((journal["event_type"] == "departed").sum())
     assert len(arcs) == n_departed

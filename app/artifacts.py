@@ -19,10 +19,10 @@ import pandas as pd
 from gbp.model import (
     flows_with_costs,
     get_inventory_df,
-    haversine_km,
     is_docking,
     is_user_departure,
 )
+from gbp.routing import Routes
 
 #: The parquet tables a run artifact holds, by file stem.
 RUN_TABLES = ("flows", "panel", "arcs", "flow_totals", "facilities")
@@ -116,22 +116,23 @@ def build_panel(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.Data
     return panel[PANEL_KEYS + PANEL_VALUES]
 
 
-def build_arcs(flows: pd.DataFrame, facilities_geo: pd.DataFrame) -> pd.DataFrame:
+def build_arcs(flows: pd.DataFrame, routes: Routes) -> pd.DataFrame:
     """One row per arc: a ``(flow_id, move_id)`` physical edge of a trip.
 
     Pairs each arc's opening ``departed`` with the event that closed the arc
     (``arrived``, ``redirected`` or ``lost``). A stockout ``lost`` has no
     ``departed`` row, so it produces no arc. ``target_id`` is where the arc
     actually ended: the realized target when it docked, the planned target
-    when it bounced or was lost there. ``distance_km`` is the great-circle
-    length of the edge.
+    when it bounced or was lost there. ``distance_km`` is the length of the
+    edge, measured by the run's routing mode (straight line or OSRM road
+    network).
 
     Parameters
     ----------
     flows : pandas.DataFrame
         A finalized flow-event log.
-    facilities_geo : pandas.DataFrame
-        Facility geography: ``facility_id``, ``lat``, ``lng``.
+    routes : gbp.routing.Routes
+        The scenario's distance / travel-time answerer.
 
     Returns
     -------
@@ -161,13 +162,7 @@ def build_arcs(flows: pd.DataFrame, facilities_geo: pd.DataFrame) -> pd.DataFram
     arcs = opened.merge(closed, on=["flow_id", "move_id"], how="inner")
     arcs["target_id"] = arcs["realized_target_id"].fillna(arcs["planned_target_id"])
 
-    geo = facilities_geo.set_index("facility_id")
-    arcs["distance_km"] = haversine_km(
-        arcs["source_id"].map(geo["lat"]),
-        arcs["source_id"].map(geo["lng"]),
-        arcs["target_id"].map(geo["lat"]),
-        arcs["target_id"].map(geo["lng"]),
-    )
+    arcs["distance_km"] = routes.distance_km(arcs["source_id"], arcs["target_id"])
     return arcs[
         [
             "flow_id",
@@ -294,6 +289,7 @@ def build_run_tables(
     facilities_capacities: pd.DataFrame,
     rates: pd.DataFrame,
     period_len: pd.Timedelta,
+    routes: Routes,
 ) -> dict[str, pd.DataFrame]:
     """Build every run-artifact table from one finalized journal.
 
@@ -309,6 +305,8 @@ def build_run_tables(
         Per-commodity price: ``commodity_category``, ``rate``.
     period_len : pandas.Timedelta
         Wall-clock length of one period (prices periods into dollars).
+    routes : gbp.routing.Routes
+        The scenario's distance / travel-time answerer (the arc distances).
 
     Returns
     -------
@@ -316,7 +314,7 @@ def build_run_tables(
         The five tables of ``RUN_TABLES``, keyed by file stem.
     """
     priced = flows_with_costs(journal, rates, period_len)
-    arcs = build_arcs(journal, facilities_geo)
+    arcs = build_arcs(journal, routes)
     return {
         "flows": priced,
         "panel": build_panel(journal, initial_inventory),

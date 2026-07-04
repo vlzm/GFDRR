@@ -69,8 +69,11 @@ else:
     with st.expander("Data table"):
         st.dataframe(data, hide_index=True, width="stretch")
 
+modes = {name: ui_shared.load_meta(name).get("routing_mode", "haversine") for name in frames}
+modes_text = "; ".join(f"{name}: {mode}" for name, mode in modes.items())
 st.caption(
-    "Distance is the sum of a trip's arc lengths along the great circle (haversine_km); "
-    "duration is duration_periods on the trip's terminal event. A trip is attributed to the "
+    "Distance is the sum of a trip's arc lengths, measured by the run's routing mode "
+    f"(haversine = straight line, osrm = road network) — {modes_text}. "
+    "Duration is duration_periods on the trip's terminal event. A trip is attributed to the "
     "period and facility it departed from (start_period, source_id)."
 )
