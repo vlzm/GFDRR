@@ -39,8 +39,12 @@ ui_shared.slider_time_caption(period, meta_a, meta_b)
 
 
 def _arc_rows(run_name: str) -> pd.DataFrame:
-    """Arcs riding in the chosen period, grouped by (source, target, outcome)."""
+    """Bike-trip arcs riding in the chosen period, grouped by (source, target, outcome)."""
     arcs = ui_shared.load_table(run_name, "arcs")
+    # Truck moves (flow_type == "rebalance") have their own page. Artifacts
+    # saved before the column existed hold user trips only.
+    if "flow_type" in arcs.columns:
+        arcs = arcs[arcs["flow_type"] == "user_trip"]
     active = arcs[(arcs["start_period"] <= period) & (arcs["end_period"] >= period)]
     if commodity is not None:
         active = active[active["commodity_category"] == commodity]
@@ -119,7 +123,8 @@ for column, (run_name, rows) in zip(columns, frames.items(), strict=True):
 _legend()
 st.caption(
     "An arc is one physical edge of a trip (flow_id, move_id): from the facility it left to "
-    "the facility where the edge ended. Width is the number of trips on the edge this period."
+    "the facility where the edge ended. Width is the number of trips on the edge this period. "
+    "Only user rides are shown; bikes moved by truck are on the Truck trips page."
 )
 
 with st.expander("Data table"):

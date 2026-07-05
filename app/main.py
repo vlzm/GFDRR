@@ -21,8 +21,10 @@ pages = [
     st.Page("views/run_scenario.py", title="Run scenario", icon="▶️"),
     st.Page("views/station_map.py", title="Station map", icon="📍"),
     st.Page("views/trips_map.py", title="Trips map", icon="🚲"),
+    st.Page("views/truck_trips.py", title="Truck trips", icon="🚚"),
     st.Page("views/costs.py", title="Costs", icon="💰"),
     st.Page("views/distance_duration.py", title="Distance & duration", icon="📏"),
     st.Page("views/facility_detail.py", title="Single facility", icon="🔍"),
+    st.Page("views/downloads.py", title="Download data", icon="⬇️"),
 ]
 st.navigation(pages).run()

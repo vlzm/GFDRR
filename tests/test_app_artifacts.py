@@ -100,6 +100,46 @@ def test_arcs_pair_every_departed_with_its_close():
         assert arcs[column].notna().all()
     # The chain scenario has a flow with more than one arc.
     assert arcs.groupby("flow_id")["move_id"].count().max() >= 2
+    # No trucks in this scenario: every arc is a user ride with no resource.
+    assert (arcs["flow_type"] == "user_trip").all()
+    assert arcs["resource_id"].isna().all()
+
+
+def test_arcs_keep_the_truck_on_rebalance_moves():
+    # A bike carried by a truck must stay tellable apart from user rides on
+    # the arcs table: the truck trips page filters on flow_type and shows the
+    # truck (resource_id) on each arc.
+    from gbp.model import rebalance_arrived_events, rebalance_departed_events
+
+    resolved = scenarios.canonical()
+    journal, _ = scenarios.run(resolved)
+    pickups = pd.DataFrame(
+        {
+            "flow_id": ["rb_1_0"],
+            "source_id": ["s1"],
+            "planned_target_id": ["s2"],
+            "commodity_category": [scenarios.CLASSIC],
+            "resource_id": ["truck_1"],
+            "start_period": [1],
+            "planned_end_period": [2],
+        }
+    )
+    with_truck = pd.concat(
+        [
+            journal,
+            rebalance_departed_events(pickups),
+            rebalance_arrived_events(pickups.assign(realized_target_id="s2"), 2),
+        ],
+        ignore_index=True,
+    )
+    arcs = artifacts.build_arcs(with_truck, resolved.routes, resolved.facilities_geo_df)
+
+    truck_arcs = arcs[arcs["flow_type"] == "rebalance"]
+    assert len(truck_arcs) == 1
+    assert truck_arcs["resource_id"].iloc[0] == "truck_1"
+    assert truck_arcs["source_id"].iloc[0] == "s1"
+    assert truck_arcs["target_id"].iloc[0] == "s2"
+    assert arcs.loc[arcs["flow_type"] == "user_trip", "resource_id"].isna().all()
 
 
 def test_flows_table_carries_the_measures():
@@ -131,6 +171,7 @@ def test_flow_totals_one_row_per_flow():
 
     assert flow_totals["flow_id"].is_unique
     assert set(flow_totals["flow_id"]) == set(journal["flow_id"].dropna())
+    assert (flow_totals["flow_type"] == "user_trip").all()
     arrived = flow_totals[flow_totals["event_type"] == "arrived"]
     assert (arrived["duration_periods"] == arrived["end_period"] - arrived["start_period"]).all()
 
@@ -158,6 +199,19 @@ def test_save_and_load_round_trip(tmp_path):
     panel = artifacts.load_run_table("overflow", "panel", tmp_path)
     assert panel["demand"].sum() == meta["totals"]["demand"]
     assert artifacts.load_run_meta("overflow", tmp_path)["run_name"] == "overflow"
+
+
+def test_next_free_run_name_versions_taken_names(tmp_path):
+    # The Run page names runs from the parameters; a taken name must get a
+    # _version_{i} suffix instead of overwriting the saved artifact.
+    resolved = scenarios.overflow()
+    journal, _ = scenarios.run(resolved)
+    _save_run("overflow", resolved, journal, tmp_path)
+
+    assert artifacts.next_free_run_name("fresh", tmp_path) == "fresh"
+    assert artifacts.next_free_run_name("overflow", tmp_path) == "overflow_version_2"
+    _save_run("overflow_version_2", resolved, journal, tmp_path)
+    assert artifacts.next_free_run_name("overflow", tmp_path) == "overflow_version_3"
 
 
 def test_every_kpi_metric_has_a_total():
@@ -209,9 +263,11 @@ PAGES = [
     "home.py",
     "station_map.py",
     "trips_map.py",
+    "truck_trips.py",
     "costs.py",
     "distance_duration.py",
     "facility_detail.py",
+    "downloads.py",
 ]
 
 

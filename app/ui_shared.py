@@ -24,6 +24,20 @@ DIVERGING_MID = "#e1e0d9"
 DIVERGING_POS = "#d03b3b"  # value went up
 GRID_COLOR = "#e1e0d9"
 INK_SECONDARY = "#52514e"
+#: Fixed per-truck colors (the categorical slots of the palette, in order).
+#: Assigned to trucks by id order and never re-ordered by the data.
+TRUCK_COLORS = [
+    "#2a78d6",  # blue
+    "#1baf7a",  # aqua
+    "#eda100",  # yellow
+    "#008300",  # green
+    "#4a3aa7",  # violet
+    "#e34948",  # red
+    "#e87ba4",  # magenta
+    "#eb6834",  # orange
+]
+#: Trucks past the eighth share this gray; the tooltip still names the truck.
+TRUCK_OTHER_COLOR = "#898781"
 
 #: Display label for every panel value column (from the one METRICS table).
 METRIC_LABELS = {metric.name: metric.label for metric in METRICS if metric.panel_value}

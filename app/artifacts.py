@@ -130,6 +130,22 @@ def list_runs(root: pathlib.Path | None = None) -> list[str]:
     return sorted(p.name for p in base.iterdir() if (p / "meta.json").exists())
 
 
+def next_free_run_name(base: str, root: pathlib.Path | None = None) -> str:
+    """Return ``base`` if no saved run has that name, else ``base_version_{i}``.
+
+    ``i`` counts up from 2, so re-running the same parameters gives
+    ``name``, ``name_version_2``, ``name_version_3``, ... and a saved run is
+    never overwritten.
+    """
+    taken = set(list_runs(root))
+    if base not in taken:
+        return base
+    i = 2
+    while f"{base}_version_{i}" in taken:
+        i += 1
+    return f"{base}_version_{i}"
+
+
 # ---------------------------------------------------------------------------
 # Builders: journal -> the tables the UI reads
 # ---------------------------------------------------------------------------
@@ -187,7 +203,9 @@ def build_arcs(flows: pd.DataFrame, routes: Routes, facilities_geo: pd.DataFrame
     when it bounced or was lost there. ``distance_km`` is the length of the
     edge, measured by the run's routing mode (straight line or OSRM road
     network). The endpoint coordinates are saved on each row, so the trips
-    map draws arcs without joining another table.
+    map draws arcs without joining another table. ``flow_type`` tells a user
+    ride (``user_trip``) from a bike carried by a truck (``rebalance``);
+    ``resource_id`` is the truck on a rebalance arc, NA otherwise.
 
     Parameters
     ----------
@@ -201,15 +219,24 @@ def build_arcs(flows: pd.DataFrame, routes: Routes, facilities_geo: pd.DataFrame
     Returns
     -------
     pandas.DataFrame
-        Columns ``flow_id``, ``move_id``, ``commodity_category``,
-        ``source_id``, ``target_id``, ``start_period``, ``end_period``,
-        ``event_type`` (the closing outcome), ``reason``, ``quantity``,
-        ``distance_km``, ``source_lat``, ``source_lng``, ``target_lat``,
-        ``target_lng``.
+        Columns ``flow_id``, ``move_id``, ``flow_type``, ``resource_id``,
+        ``commodity_category``, ``source_id``, ``target_id``,
+        ``start_period``, ``end_period``, ``event_type`` (the closing
+        outcome), ``reason``, ``quantity``, ``distance_km``, ``source_lat``,
+        ``source_lng``, ``target_lat``, ``target_lng``.
     """
     opened = flows.loc[
         flows["event_type"] == "departed",
-        ["flow_id", "move_id", "commodity_category", "source_id", "quantity", "period_id"],
+        [
+            "flow_id",
+            "move_id",
+            "flow_type",
+            "resource_id",
+            "commodity_category",
+            "source_id",
+            "quantity",
+            "period_id",
+        ],
     ].rename(columns={"period_id": "start_period"})
     closed = flows.loc[
         flows["event_type"].isin(["arrived", "redirected", "lost"]),
@@ -236,6 +263,8 @@ def build_arcs(flows: pd.DataFrame, routes: Routes, facilities_geo: pd.DataFrame
         [
             "flow_id",
             "move_id",
+            "flow_type",
+            "resource_id",
             "commodity_category",
             "source_id",
             "target_id",
@@ -277,10 +306,11 @@ def build_flow_totals(priced_flows: pd.DataFrame, arcs: pd.DataFrame) -> pd.Data
     Returns
     -------
     pandas.DataFrame
-        Columns ``flow_id``, ``commodity_category``, ``source_id``,
-        ``planned_target_id``, ``realized_target_id``, ``start_period``,
-        ``end_period``, ``event_type``, ``reason``, ``duration_periods``,
-        ``distance_km``, ``cost``.
+        Columns ``flow_id``, ``flow_type`` (``user_trip`` or ``rebalance``),
+        ``commodity_category``, ``source_id``, ``planned_target_id``,
+        ``realized_target_id``, ``start_period``, ``end_period``,
+        ``event_type``, ``reason``, ``duration_periods``, ``distance_km``,
+        ``cost``.
     """
     # A stockout loss has flow_id NA (no flow ever existed) -- drop those rows
     # here; the panel's lost_demand column is their home.
@@ -304,7 +334,7 @@ def build_flow_totals(priced_flows: pd.DataFrame, arcs: pd.DataFrame) -> pd.Data
     opening = (
         flows.sort_values("event_id")
         .drop_duplicates("flow_id")
-        .loc[:, ["flow_id", "source_id", "planned_target_id", "period_id"]]
+        .loc[:, ["flow_id", "flow_type", "source_id", "planned_target_id", "period_id"]]
         .rename(columns={"period_id": "start_period"})
     )
     totals = opening.merge(terminal, on="flow_id", how="inner")
@@ -314,6 +344,7 @@ def build_flow_totals(priced_flows: pd.DataFrame, arcs: pd.DataFrame) -> pd.Data
     return totals[
         [
             "flow_id",
+            "flow_type",
             "commodity_category",
             "source_id",
             "planned_target_id",

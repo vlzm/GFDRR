@@ -42,16 +42,33 @@ def _fmt(number: float) -> str:
     return f"{number:.2f} periods"
 
 
+def _fmt_global(number: float, run_name: str) -> str:
+    """Whole-run metric text; the mean duration also shown as wall-clock minutes."""
+    if value == "distance_km":
+        return _fmt(number)
+    minutes = number * ui_shared.load_meta(run_name)["period_len_hours"] * 60
+    return f"{number:.2f} periods (~{minutes:.0f} min)"
+
+
 if level == ui_shared.LEVEL_GLOBAL:
     # The whole-run values are precomputed once (build_totals) and read from meta.
     columns = st.columns(len(frames) + 1)
     values = {}
     for column, run_name in zip(columns, frames, strict=False):
         values[run_name] = _global_value(run_name)
-        column.metric(f"{measure_label} — {run_name}", _fmt(values[run_name]))
+        column.metric(f"{measure_label} — {run_name}", _fmt_global(values[run_name], run_name))
     if run_b:
         diff = values[run_b] - values[run_a]
         columns[-1].metric("Difference (B − A)", f"{'+' if diff >= 0 else '-'}{_fmt(abs(diff))}")
+    if value == "duration_periods":
+        st.caption(
+            "This is the mean over trips of duration_periods, which counts period "
+            "edges: a trip that departs and docks inside one period has duration 0; "
+            "a trip that ends in the next period has 1. Most trips are shorter than "
+            "one period, so the mean sits near 0.2 and barely moves between "
+            "scenarios — the demand multiplier changes how many trips ride, not "
+            "how long each one takes."
+        )
 else:
     facilities = None
     if level == ui_shared.LEVEL_FACILITY:
