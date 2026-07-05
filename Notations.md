@@ -53,7 +53,7 @@ projection of them. This is the anchor; read it first.
 | `move_id` | Arc index inside the trip, `0..m`. One physical edge of the trip; each redirect bounce adds one more arc (`move_id = 1, 2, …`). Set by the builders. |
 | `event_id` | Event ordinal inside the trip, `0..n`, set by the builders at emit time. Arc `m` opens with `departed` at event `2m` and ends at event `2m + 1`. Row uniqueness is the pair `(flow_id, event_id)`. |
 | `period_id` | The period the event happened in (§8). |
-| `flow_type` | The kind of flow. Only value today: `user_trip`. |
+| `flow_type` | The kind of flow: `user_trip` (a rider's trip) or `rebalance` (a bike moved by a truck, §14). |
 | `event_type` | One of the four outcomes: `departed`, `arrived`, `redirected`, `lost` (§1). |
 | `commodity_category` | The bike type (§9). |
 | `source_id` | The facility the flow left (§4). |
@@ -62,7 +62,7 @@ projection of them. This is the anchor; read it first.
 | `start_period` | The period the flow departed (§8). |
 | `planned_end_period` | The period it was expected to dock (§8). |
 | `realized_end_period` | The period it actually docked; NA if lost (§8). |
-| `resource_id` | The resource that carried it; NA for user trips (§5b). |
+| `resource_id` | The resource that carried it: the truck's id on `rebalance` events (§14); NA on user trips (§5b). |
 | `quantity` | Bikes in the event. One per bike after expansion (§3). |
 | `reason` | Why a flow did not simply arrive: `stockout` or `dock_full`; NA otherwise (§1). |
 | `phase_rank` | Which inventory phase of a period applied the event's change. An **open-ended** integer that orders the phases inside a period, not a fixed set. Today's user trips use `0` dock-previous, `1` the period's own departures and stockout losses, `2` dock-same; a later phase (such as rebalancing) takes `3`, `4`, … Stamped by the emitting phase (the historical loader stamps it by timing, `phase_rank_by_timing`). A **label** that says which phase; the historical loader's step-ordering input (§0.1). |
@@ -78,16 +78,22 @@ travel time from the OD matrix (for a pair with no OD entry, the `routes`
 estimate — §13); a leg that takes time docks in a
 later period, where it can bounce again. So a `departed` means one of two things:
 
-- `departed` with `move_id == 0` — a **real user departure** from a dock (`−1` to
-  the source's inventory; it is the outflow and the trip the OD model learns from).
+- `departed` with `move_id == 0` — an **undocking**: the bike leaves a dock
+  (`−1` to the source's inventory). On a `user_trip` it is a real user
+  departure — the outflow and the trip the OD model learns from; on a
+  `rebalance` flow it is a truck pickup (§14), which moves inventory the same
+  way but is **not** demand.
 - `departed` with `move_id >= 1` — a **redirect continuation leg** (pure
   transport). The bike never occupied a dock at the full station it left, so this
   event changes **no** inventory and is **not** demand or outflow.
 
-Every reader that means "a user departure" filters through the one named
-predicate `is_user_departure` in `flows.py` (used by `flows_to_departures`,
-`flows_to_od_matrix`, and the `−1` side of the inventory delta rule); the `+1`
-side is the docking predicate `is_docking`. A stockout `lost` has `move_id = 0`
+The `−1` side of the inventory delta rule is the undocking predicate
+`is_undocking` in `flows.py` (a `departed` with `move_id == 0`, user trip and
+rebalance pickup alike); the `+1` side is the docking predicate `is_docking`.
+Every reader that means "a user departure" (demand, outflow, the OD model)
+filters through `is_user_departure` — an undocking `departed` with
+`flow_type == "user_trip"` (used by `flows_to_departures`,
+`flows_to_od_matrix`). A stockout `lost` has `move_id = 0`
 (it has no arc); a dock-full `lost` closes the flow's current arc, so it
 carries that arc's `move_id`.
 
@@ -156,8 +162,8 @@ outcomes — the `event_type` values, the most important words here.
 
 | Canonical | Meaning | Builder | Avoid |
 |---|---|---|---|
-| `departed` | A bike left its source. Opens the flow (move 0); a redirect's continuation leg is also a `departed` (move ≥ 1, built by `redirect_leg_events`). | `departed_events` / `redirect_leg_events` | `dispatched`, `released` |
-| `arrived` | A bike docked at the current arc's target (a plain trip's planned target, or the station a redirect leg headed to). | `arrived_events` | — |
+| `departed` | A bike left its source. Opens the flow (move 0); a redirect's continuation leg is also a `departed` (move ≥ 1, built by `redirect_leg_events`), and so is a truck pickup (`flow_type="rebalance"`, §14). | `departed_events` / `redirect_leg_events` / `rebalance_departed_events` | `dispatched`, `released` |
+| `arrived` | A bike docked at the current arc's target (a plain trip's planned target, the station a redirect leg headed to, or a truck dropoff's station). | `arrived_events` / `rebalance_arrived_events` | — |
 | `redirected` | A bike *bounced* off the full target of its current arc; it rides on on a new leg (`move_id + 1`). The bounce itself docks nowhere. | `redirected_events` | `placed`, `rerouted` |
 | `lost` | A trip that did not happen / a bike that left the system. | `lost_events` | `shortfall`, `missing`, `dropped`, `failed` |
 
@@ -291,9 +297,10 @@ Do **not** use `realized` as the name of the departure *count* — see §7.
 | `resource_category` | The kind of resource. Only value today: `truck`. |
 
 Resources are idle in the historical replay (`resource_id` is NA on every user
-trip event, and the resource observations are empty), but the entity, its
-attributes (`resources_capacities_df`, `resources_rates_df`, `home_facility_id`)
-and its `resource_id` column are canonical and reserved.
+trip event, and the resource observations are empty). The rebalancing phases
+(§14) are their first user: every `rebalance` event carries the truck's
+`resource_id`, and the trucks' attributes (`resources_capacities_df`,
+`resources_rates_df`, `home_facility_id`) feed the routing solver.
 
 ---
 
@@ -453,6 +460,43 @@ distances everywhere, but travel times only where history has no answer (a
 redirect pair with no OD entry). The neighbour ranking of a redirect
 (`neighbor_distance_sq`, §0) also stays as it is in both modes: it only orders
 candidate stations by closeness.
+
+---
+
+## 14. Rebalancing (moving bikes by truck)
+
+Rebalancing moves bikes between stations by truck at night, so that the
+morning demand finds them. It is planned **once per window** and executed
+**period by period**: the plan is computed at one point of simulated time,
+and each of its stops is applied in the period its minute falls into. The
+solver's clock (minutes) and the simulator's clock (periods) never mix.
+Module: `gbp/consumers/simulator/rebalancing.py`.
+
+| Canonical | Meaning |
+|---|---|
+| `rebalance` | The second `flow_type`: one bike moved by a truck. Opens with a `departed` (the pickup, `−1` at `source_id`), closes with an `arrived` (the dropoff, `+1` at `realized_target_id`); `resource_id` is the truck. Not demand: every demand read-model filters it out through `is_user_departure`. |
+| `undocking` | Any event that takes a bike out of a dock: a `departed` with `move_id == 0`, user trip and rebalance pickup alike. Predicate `is_undocking` — the `−1` side of the inventory rule (§0); `is_user_departure` narrows it to `flow_type == "user_trip"` (the demand side). |
+| `rebalancing window` | The wall-clock stretch the trucks work in: `window_start_hour` (default 1, i.e. 01:00) plus `window_minutes` (default 120), both on `RebalancingParams`. The planning phase fires in each period whose start hour equals `window_start_hour`. |
+| `target inventory` / `target` | How many bikes a station should hold when the window ends, from the expected morning demand: per `(facility, commodity)`, the running total of expected departures minus expected arrivals over the target hours (`target_start_hour..target_end_hour`), taken at its highest point. Function `target_inventory`. |
+| `imbalance` | `inventory − target`, per `(facility, commodity)`. Positive: the station has bikes to give (pickups happen there). Negative: it needs bikes (dropoffs happen there). Function `station_imbalance`. |
+| `node` | One solver visit: at most `portion_size` bikes picked up or dropped at one facility. A large imbalance is split into several nodes so that one truck does not have to serve it whole. Before the split, pickup and dropoff totals are matched per commodity — only `min(total surplus, total shortage)` bikes can move, because every truck must end its route empty. Built by `build_rebalance_nodes`. |
+| `stop` | One row of a truck's route in the solver's answer: `resource_id`, `stop_seq` (visit order), `facility_id`, `stop_type` (`pickup` / `dropoff`), `commodity_category`, `quantity`, `minute`. |
+| `minute` | Minutes since the window started — the solver's time axis. Applied as `period = window period + minute // minutes-per-period`; the sub-period detail is kept only for explanation. |
+| `rebalance plan` | The bike-level table the phases execute: one row per bike with `flow_id`, `resource_id`, `commodity_category`, `source_id`, `planned_target_id`, `pickup_period` / `dropoff_period` and the two minutes. Built from the stops by `assign_bikes_to_stops` (a dropoff hands over the bikes that were picked up earliest). Lives on the state (`SimulationState.rebalance_plan`) between the window's periods. |
+| `REBALANCE_RANK` | 3 — the `phase_rank` of `ApplyRebalancingPhase`, after the three user-trip phases (0/1/2). |
+
+**The two phases.** `PlanRebalancingPhase` (writes no events) computes the
+target, the imbalance and the nodes, calls the routing solver
+(`solve_rebalance_vrp` — OR-Tools; trucks start and end at the depot, all
+stops inside `window_minutes`), and stores the plan on the state.
+`ApplyRebalancingPhase` (rank 3) runs every period in three rounds: dock the
+dropoffs due from earlier periods (round 0), execute this period's pickups
+(round 1, cut down to the bikes actually on hand), dock the same-period
+dropoffs (round 2). Between pickup and dropoff the bikes sit in `in_transit`
+like any riding bike; `DockArrivals` skips them (it docks user trips only). A
+dropoff that finds the station full docks at the truck's home depot instead —
+the `planned_*` / `realized_*` split (§5) records the difference. A run opts
+in by appending `rebalancing_phases(params)` to `canonical_phases()`.
 
 ---
 

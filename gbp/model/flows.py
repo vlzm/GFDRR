@@ -92,6 +92,7 @@ FLOW_EVENT_DTYPES = {
 DOCK_PREVIOUS_RANK = 0  # dock bikes that left in an earlier period
 PERIOD_OWN_RANK = 1  # this period's own departures and stockout losses
 DOCK_SAME_RANK = 2  # dock bikes that left and arrive within this same period
+REBALANCE_RANK = 3  # the period's truck pickups and dropoffs (Notations.md §14)
 
 # Event types that dock a bike (+1 at ``realized_target_id``). Only an
 # ``arrived`` lands a bike -- including the ``arrived`` that ends a redirect's
@@ -103,21 +104,35 @@ DOCKING_EVENT_TYPES = ["arrived"]
 
 
 # ---------------------------------------------------------------------------
-# The two event predicates every inventory reader shares
+# The event predicates every inventory reader shares
 # ---------------------------------------------------------------------------
-# These two masks are the single definition of "which events move inventory"
-# (Notations.md §0): a real user departure is the -1 side, a docking is the +1
-# side. Every read-model below filters through them, so a future event type
-# that moves inventory (rebalancing) is added here once, not in each reader.
-def is_user_departure(flows: pd.DataFrame) -> pd.Series:
-    """Mask of real user departures: ``departed`` with ``move_id == 0``.
+# Two masks are the single definition of "which events move inventory"
+# (Notations.md §0): an undocking is the -1 side, a docking is the +1 side.
+# A third mask, ``is_user_departure``, narrows the undockings to the demand
+# side (user trips only) for the read-models that mean "what riders wanted".
+def is_undocking(flows: pd.DataFrame) -> pd.Series:
+    """Mask of undocking events: a ``departed`` that takes a bike out of a dock.
 
-    A user departure takes a bike out of a dock (``-1`` at ``source_id``); it is
-    the outflow and the demand the OD model learns from. A redirect's
-    continuation leg is also a ``departed`` but with ``move_id >= 1`` -- pure
-    transport that moves no inventory -- so it is excluded.
+    The ``-1`` side of the inventory rule (at ``source_id``), the mirror of
+    :func:`is_docking`. An opening ``departed`` (``move_id == 0``) undocks a
+    bike whether a user rides it (``flow_type == "user_trip"``) or a truck
+    carries it away (``flow_type == "rebalance"``, Notations.md §14). A
+    redirect's continuation leg is also a ``departed`` but with
+    ``move_id >= 1`` -- pure transport that moves no inventory -- so it is
+    excluded.
     """
     return (flows["event_type"] == "departed") & (flows["move_id"] == 0)
+
+
+def is_user_departure(flows: pd.DataFrame) -> pd.Series:
+    """Mask of real user departures: an undocking ``departed`` of a user trip.
+
+    The demand side: these events are the outflow and the trips the OD model
+    learns from. A rebalance pickup also undocks a bike (see
+    :func:`is_undocking`) but is a truck move, not demand, so it is excluded
+    here.
+    """
+    return is_undocking(flows) & (flows["flow_type"] == "user_trip")
 
 
 def is_docking(flows: pd.DataFrame) -> pd.Series:
@@ -384,6 +399,100 @@ def lost_events(losses: pd.DataFrame, period_id: int, reason: str) -> pd.DataFra
                 "resource_id": pd.NA,
                 "quantity": losses["quantity"],
                 "reason": reason,
+            }
+        )
+    )
+
+
+def rebalance_departed_events(pickups: pd.DataFrame) -> pd.DataFrame:
+    """One ``departed`` row per bike a truck picks up (``flow_type="rebalance"``).
+
+    Opens a rebalance flow (Notations.md §14): the truck takes the bike out of
+    a dock at ``source_id`` (``-1`` there, see :func:`is_undocking`) and will
+    carry it to ``planned_target_id``. The rows also serve as the in-transit
+    entries while the bike rides on the truck; :func:`rebalance_arrived_events`
+    closes them when the truck drops the bike off.
+
+    Parameters
+    ----------
+    pickups : pandas.DataFrame
+        One row per picked-up bike, carrying ``flow_id``, ``source_id``,
+        ``planned_target_id``, ``commodity_category``, ``resource_id`` (the
+        truck), ``start_period`` (the pickup period) and ``planned_end_period``
+        (the planned dropoff period).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One ``departed`` flow-event row per bike (move 0, event 0).
+    """
+    return _typed_events(
+        pd.DataFrame(
+            {
+                "flow_id": pickups["flow_id"],
+                "move_id": 0,
+                "event_id": 0,
+                "period_id": pickups["start_period"],
+                "flow_type": "rebalance",
+                "event_type": "departed",
+                "commodity_category": pickups["commodity_category"],
+                "source_id": pickups["source_id"],
+                "planned_target_id": pickups["planned_target_id"],
+                "realized_target_id": pd.NA,
+                "start_period": pickups["start_period"],
+                "planned_end_period": pickups["planned_end_period"],
+                "realized_end_period": pd.NA,
+                "resource_id": pickups["resource_id"],
+                "quantity": 1,
+                "reason": pd.NA,
+            }
+        )
+    )
+
+
+def rebalance_arrived_events(dropoffs: pd.DataFrame, period_id: int) -> pd.DataFrame:
+    """One ``arrived`` row per rebalance flow whose truck drops it off at ``period_id``.
+
+    Closes the rebalance flow (event 1): the bike docks at the row's
+    ``realized_target_id`` (``+1`` there, see :func:`is_docking`). The calling
+    phase sets ``realized_target_id`` before building the events: the planned
+    station when its docks have room, the truck's home depot when they do not
+    -- the planned-vs-realized split (Notations.md §5) records the difference.
+
+    Parameters
+    ----------
+    dropoffs : pandas.DataFrame
+        The in-transit rebalance rows being dropped off, carrying ``flow_id``,
+        ``source_id``, ``planned_target_id``, ``realized_target_id`` (where the
+        bike actually docks), ``commodity_category``, ``resource_id``,
+        ``start_period`` and ``planned_end_period``.
+    period_id : int
+        The period the dropoff happens in.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One ``arrived`` flow-event row per bike (move 0, event 1).
+    """
+    return _typed_events(
+        pd.DataFrame(
+            {
+                "flow_id": dropoffs["flow_id"],
+                "move_id": 0,
+                "event_id": 1,
+                "period_id": period_id,
+                "flow_type": "rebalance",
+                "event_type": "arrived",
+                "commodity_category": dropoffs["commodity_category"],
+                "source_id": dropoffs["source_id"],
+                "planned_target_id": dropoffs["planned_target_id"],
+                "realized_target_id": dropoffs["realized_target_id"],
+                "start_period": dropoffs["start_period"],
+                "planned_end_period": dropoffs["planned_end_period"],
+                "realized_end_period": period_id,
+                "resource_id": dropoffs["resource_id"],
+                "quantity": 1,
+                "reason": pd.NA,
             }
         )
     )
@@ -679,8 +788,9 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     Inventory at the end of period ``t`` equals the initial inventory plus the
     cumulative net flow up to and including ``t``, per
     ``(facility_id, commodity_category)``: a docking ``arrived`` is ``+1`` at its
-    ``realized_target_id`` (see :data:`DOCKING_EVENT_TYPES`) and a real user
-    ``departed`` (``move_id == 0``) is ``-1`` at its ``source_id``. A redirect's
+    ``realized_target_id`` (see :data:`DOCKING_EVENT_TYPES`) and an undocking
+    ``departed`` (``move_id == 0``, a user departure or a rebalance pickup) is
+    ``-1`` at its ``source_id``. A redirect's
     move-1 ``departed`` undocks nothing (the bike never sat in a dock at the full
     station) and the ``redirected`` bounce docks nothing, so both are skipped; the
     redirect's net effect is the move-0 ``departed`` (``-1``) and its move-1
@@ -760,18 +870,18 @@ def _inventory_deltas(flows: pd.DataFrame) -> pd.DataFrame:
     """One signed ``delta`` per inventory-moving event, at the facility it touches.
 
     The single inventory delta rule every read-model uses: a docking event
-    (:func:`is_docking`) is ``+quantity`` at its ``realized_target_id`` and a
-    user departure (:func:`is_user_departure`) is ``-quantity`` at its
-    ``source_id``; every other event moves no inventory and is dropped. Each row
-    keeps its ``step_id`` and ``period_id`` so the deltas can be cumulated on
-    either time axis: per step (:func:`inventory_at_moments`) or per period
-    (:func:`get_inventory_df`).
+    (:func:`is_docking`) is ``+quantity`` at its ``realized_target_id`` and an
+    undocking (:func:`is_undocking` -- a user departure or a rebalance pickup)
+    is ``-quantity`` at its ``source_id``; every other event moves no inventory
+    and is dropped. Each row keeps its ``step_id`` and ``period_id`` so the
+    deltas can be cumulated on either time axis: per step
+    (:func:`inventory_at_moments`) or per period (:func:`get_inventory_df`).
     """
     cols = ["step_id", "period_id", "facility_id", "commodity_category", "delta"]
     dock = flows[is_docking(flows)].copy()
     dock["facility_id"] = dock["realized_target_id"]
     dock["delta"] = dock["quantity"].astype("int64")
-    dep = flows[is_user_departure(flows)].copy()
+    dep = flows[is_undocking(flows)].copy()
     dep["facility_id"] = dep["source_id"]
     dep["delta"] = -dep["quantity"].astype("int64")
     return pd.concat([dock[cols], dep[cols]], ignore_index=True)
@@ -868,8 +978,9 @@ def flows_with_inventory(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -
     """Widen the journal with the inventory of each event's own facility.
 
     Every event row gains ``inventory_before`` and ``inventory_after`` for the
-    ``(facility, commodity)`` it changes -- ``source_id`` for a move-0 ``departed``
-    (the ``-1``), ``realized_target_id`` for a docking ``arrived`` (the ``+1``).
+    ``(facility, commodity)`` it changes -- ``source_id`` for an undocking
+    ``departed`` (the ``-1``), ``realized_target_id`` for a docking ``arrived``
+    (the ``+1``).
     Events that move no inventory (a redirect bounce, a move-1 ``departed``, a
     ``lost``) touch no facility, so their two inventory columns are NA. This is the
     "did this event change inventory correctly?" view; for a neighbour's inventory
@@ -891,7 +1002,7 @@ def flows_with_inventory(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -
     moments = inventory_at_moments(flows, initial_inventory)
     out = flows.copy()
     is_dock = is_docking(out)
-    is_dep = is_user_departure(out)
+    is_dep = is_undocking(out)
     out["facility_id"] = pd.Series(pd.NA, index=out.index, dtype="string")
     out.loc[is_dock, "facility_id"] = out.loc[is_dock, "realized_target_id"]
     out.loc[is_dep, "facility_id"] = out.loc[is_dep, "source_id"]

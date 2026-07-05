@@ -57,6 +57,7 @@ def run_sized_scenario(
     sizing_scale_factor: float = 1.0,
     number_of_periods: int,
     validate: bool = True,
+    phases: list[Phase] | None = None,
 ) -> ScenarioRun:
     """Size the state, run the scenario against it, check the run invariants.
 
@@ -82,6 +83,13 @@ def run_sized_scenario(
         When True (default), raise :class:`RunInvariantError` if the finished
         run violates the run invariants I1-I5. When False, the violations are
         only recorded on the result (the runner stores them in ``meta.json``).
+    phases : list of Phase, optional
+        The phase list the *run* uses. Default: ``canonical_phases()``. Pass
+        ``canonical_phases() + rebalancing_phases(params)`` to run with the
+        overnight rebalancing (Notations.md §14). The sizing run always uses
+        the canonical three phases -- the state is sized for the demand alone,
+        so the rebalancer's effect shows up against it instead of being sized
+        away.
 
     Returns
     -------
@@ -105,7 +113,7 @@ def run_sized_scenario(
     # list either way; the engine's own end-of-run check is off to avoid
     # computing the invariants twice.
     run_config = EnvironmentConfig(
-        phases=canonical_phases(),
+        phases=list(phases) if phases is not None else canonical_phases(),
         scenario_id=scenario_id,
         validate=False,
         demand_scale_factor=demand_scale_factor,

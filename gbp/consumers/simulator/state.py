@@ -114,6 +114,11 @@ class SimulationState:
         :meth:`open_step` per ordered batch; the counter only ever grows, so two
         ordered batches can never share a ``step_id``. Threaded through the
         immutable state, so the run stays deterministic.
+    rebalance_plan : pandas.DataFrame
+        The bike-level rebalance plan still to execute (Notations.md §14):
+        one row per bike a truck will move, with its pickup and dropoff
+        periods. Written by ``PlanRebalancingPhase`` once per window, consumed
+        period by period by ``ApplyRebalancingPhase``. Empty outside a window.
     """
 
     state_period_id_obj: PeriodRow
@@ -122,6 +127,7 @@ class SimulationState:
     state_resources_df: pd.DataFrame
     in_transit: pd.DataFrame = dataclasses.field(default_factory=empty_in_transit)
     next_step_id: int = 0
+    rebalance_plan: pd.DataFrame = dataclasses.field(default_factory=pd.DataFrame)
 
     # -- clock ---------------------------------------------------------------
     @property
@@ -169,6 +175,10 @@ class SimulationState:
     def with_in_transit(self, new_in_transit: pd.DataFrame) -> "SimulationState":
         """Return a copy with the in-transit set replaced."""
         return dataclasses.replace(self, in_transit=new_in_transit)
+
+    def with_rebalance_plan(self, new_plan: pd.DataFrame) -> "SimulationState":
+        """Return a copy with the rebalance plan replaced (Notations.md §14)."""
+        return dataclasses.replace(self, rebalance_plan=new_plan)
 
     def append_flows(self, new_flows: pd.DataFrame | None) -> "SimulationState":
         """Append flow events to ``flows`` (the journal, source of truth)."""

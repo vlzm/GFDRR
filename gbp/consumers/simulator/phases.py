@@ -86,8 +86,13 @@ class DockArrivals(Phase):
         self.name = f"dock_arrivals_{when}"
 
     def _due_arrivals(self, in_transit: pd.DataFrame, t: int) -> pd.DataFrame:
-        """Select the in-transit flows this phase docks at period ``t`` (picked by ``when``)."""
-        due_now = in_transit["planned_end_period"] == t
+        """Select the in-transit flows this phase docks at period ``t`` (picked by ``when``).
+
+        User trips only: bikes riding on a truck (``flow_type == "rebalance"``)
+        are also in transit, but their dropoff is applied by
+        ``ApplyRebalancingPhase``, not here.
+        """
+        due_now = (in_transit["planned_end_period"] == t) & (in_transit["flow_type"] == "user_trip")
         if self.when == "previous":
             return in_transit[due_now & (in_transit["start_period"] < t)]
         return in_transit[due_now & (in_transit["start_period"] == t)]
