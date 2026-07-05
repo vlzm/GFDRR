@@ -8,6 +8,8 @@ the run invariants, and save every table the UI reads (Notations.md §12).
 Terminal use::
 
     python app/runner.py --run-name demand_x2 --demand-scale 2.0 --periods 50
+    python app/runner.py --run-name with_trucks --rebalancing \
+        --truck-homes depot_1,depot_1,depot_3
 """
 
 from __future__ import annotations
@@ -19,8 +21,13 @@ from collections.abc import Callable
 import artifacts
 import pandas as pd
 
-from gbp.consumers.simulator import run_sized_scenario
-from gbp.loaders.dataloader_graph import ResolvedModelData
+from gbp.consumers.simulator import (
+    RebalancingParams,
+    canonical_phases,
+    rebalancing_phases,
+    run_sized_scenario,
+)
+from gbp.loaders.dataloader_graph import ResolvedModelData, apply_truck_fleet
 from gbp.loaders.dataloader_raw import RawModelData
 from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
 
@@ -28,6 +35,13 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 DEFAULT_TRIPS_PATH = str(_REPO_ROOT / "data" / "raw" / "202602-citibike-tripdata_1.csv")
 DEFAULT_NUMBER_OF_PERIODS = 50
+
+# The synthetic depot and truck fleet (see gbp/loaders/dataloader_raw.py).
+DEFAULT_N_DEPOTS = 10
+DEPOT_IDS = [f"depot_{i + 1}" for i in range(DEFAULT_N_DEPOTS)]
+DEFAULT_TRUCK_HOMES = ["depot_1"] * 5
+DEFAULT_TRUCK_CAPACITY_BIKES = 20
+DEFAULT_TRUCK_RATE = 50.0
 
 
 def build_graph_data(
@@ -58,11 +72,11 @@ def build_graph_data(
     raw = RawModelData(
         trips_path=trips_path,
         seed=42,
-        n_depots=10,
+        n_depots=DEFAULT_N_DEPOTS,
         depot_capacity=9000,
-        n_trucks=5,
-        truck_capacity_bikes=20,
-        truck_rate=50.0,
+        n_trucks=len(DEFAULT_TRUCK_HOMES),
+        truck_capacity_bikes=DEFAULT_TRUCK_CAPACITY_BIKES,
+        truck_rate=DEFAULT_TRUCK_RATE,
         electric_bike_rate=5,
         classic_bike_rate=3,
     )
@@ -81,6 +95,9 @@ def run_scenario(
     demand_scale_factor: float,
     sizing_scale_factor: float = 1.0,
     number_of_periods: int = DEFAULT_NUMBER_OF_PERIODS,
+    rebalancing: bool = False,
+    truck_homes: list[str] | None = None,
+    truck_capacity_bikes: int = DEFAULT_TRUCK_CAPACITY_BIKES,
     root: pathlib.Path | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> pathlib.Path:
@@ -95,8 +112,9 @@ def run_scenario(
     ----------
     graph_data : ResolvedModelData
         The resolved scenario data. Not modified: the sized state stays inside
-        :func:`run_sized_scenario` and is saved into the artifact. The Run page
-        shares one cached ``graph_data`` across runs, so this must hold.
+        :func:`run_sized_scenario`, and the truck fleet is applied to a
+        shallow copy. The Run page shares one cached ``graph_data`` across
+        runs, so this must hold.
     run_name : str
         Name of the artifact folder (and of the run in the UI).
     demand_scale_factor : float
@@ -105,6 +123,16 @@ def run_scenario(
         Demand multiplier the state is sized to survive with no loss.
     number_of_periods : int, optional
         How many periods to step.
+    rebalancing : bool, optional
+        When True, run with the two overnight-rebalancing phases
+        (Notations.md §14) and the truck fleet below. Default False: the
+        canonical three phases only, trucks stay idle.
+    truck_homes : list of str, optional
+        Home depot per truck, one entry per truck (the list length is the
+        fleet size). Only read when ``rebalancing`` is True. Default:
+        ``DEFAULT_TRUCK_HOMES`` (5 trucks at ``depot_1``).
+    truck_capacity_bikes : int, optional
+        Bikes one truck can carry. Only read when ``rebalancing`` is True.
     root : pathlib.Path, optional
         Runs root override.
     on_progress : callable, optional
@@ -120,13 +148,22 @@ def run_scenario(
         if on_progress is not None:
             on_progress(message)
 
+    homes = list(truck_homes) if truck_homes is not None else list(DEFAULT_TRUCK_HOMES)
+    data = graph_data
+    phases = None
+    if rebalancing:
+        progress(f"Applying the truck fleet: {len(homes)} trucks")
+        data = apply_truck_fleet(graph_data, homes, truck_capacity_bikes, DEFAULT_TRUCK_RATE)
+        phases = canonical_phases() + rebalancing_phases(RebalancingParams())
+
     progress("Sizing the state, running the simulation, checking the invariants I1-I5")
     result = run_sized_scenario(
-        graph_data,
+        data,
         scenario_id=run_name,
         demand_scale_factor=demand_scale_factor,
         sizing_scale_factor=sizing_scale_factor,
         number_of_periods=number_of_periods,
+        phases=phases,
         # The UI records the violation list in meta.json instead of failing
         # on a raised error.
         validate=False,
@@ -136,13 +173,17 @@ def run_scenario(
     tables = artifacts.build_run_tables(
         result.simulated_flows_df,
         initial_inventory=result.initial_inventory_df,
-        facilities=graph_data.facilities_df,
-        facilities_geo=graph_data.facilities_geo_df,
+        facilities=data.facilities_df,
+        facilities_geo=data.facilities_geo_df,
         facilities_capacities=result.facilities_capacities_df,
-        rates=graph_data.commodities_categories_rates_df,
-        period_len=graph_data.period_len,
-        routes=graph_data.routes,
+        rates=data.commodities_categories_rates_df,
+        period_len=data.period_len,
+        routes=data.routes,
     )
+    rebalancing_meta: dict = {"enabled": rebalancing}
+    if rebalancing:
+        rebalancing_meta["truck_homes"] = homes
+        rebalancing_meta["truck_capacity_bikes"] = truck_capacity_bikes
     meta = artifacts.build_meta(
         tables,
         run_name=run_name,
@@ -153,6 +194,7 @@ def run_scenario(
         routing_mode=graph_data.routing_mode,
         t0=graph_data.t0,
         violations=result.violations,
+        rebalancing=rebalancing_meta,
     )
     return artifacts.save_run(run_name, tables, meta, root)
 
@@ -170,6 +212,25 @@ def main() -> None:
     )
     parser.add_argument("--trips-path", default=DEFAULT_TRIPS_PATH, help="raw trip CSV path")
     parser.add_argument(
+        "--rebalancing",
+        action="store_true",
+        help="run with the overnight rebalancing phases (trucks move bikes at night)",
+    )
+    parser.add_argument(
+        "--truck-homes",
+        default=None,
+        help=(
+            "home depot per truck, comma-separated (the list length is the fleet size), "
+            "e.g. depot_1,depot_1,depot_3; default: 5 trucks at depot_1"
+        ),
+    )
+    parser.add_argument(
+        "--truck-capacity",
+        type=int,
+        default=DEFAULT_TRUCK_CAPACITY_BIKES,
+        help="bikes one truck can carry",
+    )
+    parser.add_argument(
         "--routing",
         choices=ROUTING_MODES,
         default="haversine",
@@ -184,12 +245,18 @@ def main() -> None:
     graph_data = build_graph_data(
         args.trips_path, routing_mode=args.routing, osrm_url=args.osrm_url
     )
+    truck_homes = None
+    if args.truck_homes:
+        truck_homes = [home.strip() for home in args.truck_homes.split(",") if home.strip()]
     folder = run_scenario(
         graph_data,
         run_name=args.run_name,
         demand_scale_factor=args.demand_scale,
         sizing_scale_factor=args.sizing_scale,
         number_of_periods=args.periods,
+        rebalancing=args.rebalancing,
+        truck_homes=truck_homes,
+        truck_capacity_bikes=args.truck_capacity,
         on_progress=print,
     )
     meta = artifacts.load_run_meta(args.run_name)

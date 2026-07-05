@@ -29,6 +29,7 @@ from gbp.consumers.simulator.rebalancing import (
     target_inventory,
 )
 from gbp.consumers.simulator.validation import validate_run
+from gbp.loaders.dataloader_graph import apply_truck_fleet
 from gbp.model import flows as J
 from tests import scenarios
 from tests.invariants import check_journal_well_formed
@@ -275,7 +276,13 @@ def _with_rebalancing_data(resolved, truck_capacity: int = 20):
         ],
         ignore_index=True,
     )
-    resolved.resources_df = pd.DataFrame({"resource_id": [TRUCK], "home_facility_id": [DEPOT]})
+    resolved.resources_df = pd.DataFrame(
+        {
+            "resource_id": [TRUCK],
+            "resource_category": ["truck"],
+            "home_facility_id": [DEPOT],
+        }
+    )
     resolved.resources_capacities_df = pd.DataFrame(
         {"resource_id": [TRUCK], "capacity": [truck_capacity]}
     )
@@ -337,9 +344,10 @@ def test_rebalancing_moves_bikes_and_serves_the_morning_demand():
     )
     calls: list[pd.DataFrame] = []
 
-    def scripted_solver(nodes, depot_id, travel_minutes, trucks, params):
+    def scripted_solver(nodes, travel_minutes, trucks, params):
         calls.append(nodes)
-        assert depot_id == DEPOT
+        assert trucks["home_facility_id"].tolist() == [DEPOT]
+        assert DEPOT in travel_minutes.index
         return _scripted_stops(3)
 
     journal, state = _run(
@@ -399,7 +407,7 @@ def test_pickups_are_cut_to_the_bikes_on_hand():
         scenarios.build_resolved(trips, initial_inventory={"s1": 5, "s2": 0})
     )
 
-    def scripted_solver(nodes, depot_id, travel_minutes, trucks, params):
+    def scripted_solver(nodes, travel_minutes, trucks, params):
         return _scripted_stops(3)
 
     journal, state = _run(
@@ -426,7 +434,7 @@ def test_dropoff_overflow_docks_at_the_depot():
         scenarios.build_resolved(trips, capacities={"s2": 2}, initial_inventory={"s1": 5, "s2": 0})
     )
 
-    def scripted_solver(nodes, depot_id, travel_minutes, trucks, params):
+    def scripted_solver(nodes, travel_minutes, trucks, params):
         return _scripted_stops(3)
 
     journal, state = _run(
@@ -448,7 +456,7 @@ def test_no_shortage_means_no_plan_and_no_solver_call():
         scenarios.build_resolved(trips, initial_inventory={"s1": 5, "s2": 5})
     )
 
-    def failing_solver(nodes, depot_id, travel_minutes, trucks, params):
+    def failing_solver(nodes, travel_minutes, trucks, params):
         raise AssertionError("the solver must not be called when nothing is short")
 
     journal, state = _run(
@@ -481,15 +489,15 @@ def _nodes(rows: list[tuple[str, str, str, int]]) -> pd.DataFrame:
 
 
 def _one_truck(capacity: int) -> pd.DataFrame:
-    return pd.DataFrame({"resource_id": [TRUCK], "capacity": [capacity]})
+    return pd.DataFrame(
+        {"resource_id": [TRUCK], "capacity": [capacity], "home_facility_id": [DEPOT]}
+    )
 
 
 def test_solver_serves_balanced_nodes_within_the_window():
     """One pickup and one matching dropoff: the route is depot -> s1 -> s2 -> depot."""
     nodes = _nodes([("s1", CLASSIC, "pickup", 3), ("s2", CLASSIC, "dropoff", 3)])
-    stops = solve_rebalance_vrp(
-        nodes, DEPOT, _uniform_travel([DEPOT, "s1", "s2"]), _one_truck(20), FAST
-    )
+    stops = solve_rebalance_vrp(nodes, _uniform_travel([DEPOT, "s1", "s2"]), _one_truck(20), FAST)
     assert stops["stop_type"].tolist() == ["pickup", "dropoff"]
     assert stops["facility_id"].tolist() == ["s1", "s2"]
     assert stops["stop_seq"].tolist() == [0, 1]
@@ -505,9 +513,7 @@ def test_solver_serves_balanced_nodes_within_the_window():
 def test_solver_skips_nodes_larger_than_the_truck():
     """A 3-bike portion cannot ride a 2-bike truck; both nodes are skipped."""
     nodes = _nodes([("s1", CLASSIC, "pickup", 3), ("s2", CLASSIC, "dropoff", 3)])
-    stops = solve_rebalance_vrp(
-        nodes, DEPOT, _uniform_travel([DEPOT, "s1", "s2"]), _one_truck(2), FAST
-    )
+    stops = solve_rebalance_vrp(nodes, _uniform_travel([DEPOT, "s1", "s2"]), _one_truck(2), FAST)
     assert stops.empty
 
 
@@ -515,9 +521,35 @@ def test_solver_skips_nodes_that_do_not_fit_the_window():
     """Stations 200 minutes away cannot be visited inside a 120-minute window."""
     nodes = _nodes([("s1", CLASSIC, "pickup", 3), ("s2", CLASSIC, "dropoff", 3)])
     stops = solve_rebalance_vrp(
-        nodes, DEPOT, _uniform_travel([DEPOT, "s1", "s2"], minutes=200.0), _one_truck(20), FAST
+        nodes, _uniform_travel([DEPOT, "s1", "s2"], minutes=200.0), _one_truck(20), FAST
     )
     assert stops.empty
+
+
+def test_each_truck_starts_from_its_own_home_depot():
+    """Two trucks, two depots: only the truck whose depot is near can serve.
+
+    ``depot_2`` sits 200 minutes from every other facility, so ``truck_2``
+    cannot reach any node and return within the 120-minute window. All the
+    work falls to ``truck_1``, based at the near ``depot_1``.
+    """
+    far_depot = "depot_2"
+    nodes = _nodes([("s1", CLASSIC, "pickup", 3), ("s2", CLASSIC, "dropoff", 3)])
+    travel = _uniform_travel([DEPOT, far_depot, "s1", "s2"])
+    travel.loc[far_depot, :] = 200.0
+    travel.loc[:, far_depot] = 200.0
+    travel.loc[far_depot, far_depot] = 0.0
+    trucks = pd.DataFrame(
+        {
+            "resource_id": ["truck_1", "truck_2"],
+            "capacity": [20, 20],
+            "home_facility_id": [DEPOT, far_depot],
+        }
+    )
+    stops = solve_rebalance_vrp(nodes, travel, trucks, FAST)
+    assert len(stops) == 2
+    assert (stops["resource_id"] == "truck_1").all()
+    assert stops["facility_id"].tolist() == ["s1", "s2"]
 
 
 def test_solver_keeps_commodities_apart():
@@ -532,7 +564,7 @@ def test_solver_keeps_commodities_apart():
         ]
     )
     stops = solve_rebalance_vrp(
-        nodes, DEPOT, _uniform_travel([DEPOT, "s1", "s2", "s3"]), _one_truck(20), FAST
+        nodes, _uniform_travel([DEPOT, "s1", "s2", "s3"]), _one_truck(20), FAST
     )
     assert len(stops) == 4  # every node is served
 
@@ -562,3 +594,30 @@ def test_full_run_with_the_real_solver():
     assert lost.empty
     assert check_journal_well_formed(journal) == []
     assert validate_run(state, resolved) == []
+
+
+# ---------------------------------------------------------------------------
+# The truck fleet as a run parameter
+# ---------------------------------------------------------------------------
+def test_apply_truck_fleet_rebuilds_the_resource_tables():
+    """One home entry per truck; the three resource tables are rebuilt to match."""
+    resolved = _with_rebalancing_data(scenarios.build_resolved([("s1", "s2", 0, 1)]))
+    out = apply_truck_fleet(
+        resolved, ["depot_1", "depot_1"], truck_capacity_bikes=15, truck_rate=50.0
+    )
+    assert out.resources_df["resource_id"].tolist() == ["truck_1", "truck_2"]
+    assert (out.resources_df["home_facility_id"] == "depot_1").all()
+    assert out.resources_capacities_df["capacity"].tolist() == [15, 15]
+    assert out.resources_rates_df["rate"].tolist() == [50.0, 50.0]
+    # The input container keeps its own fleet (the copy is shallow).
+    assert resolved.resources_df["resource_id"].tolist() == [TRUCK]
+
+
+def test_apply_truck_fleet_rejects_bad_homes():
+    """An empty fleet or a home that is not a depot facility is a ValueError."""
+    resolved = _with_rebalancing_data(scenarios.build_resolved([("s1", "s2", 0, 1)]))
+    with pytest.raises(ValueError, match="at least one truck"):
+        apply_truck_fleet(resolved, [], truck_capacity_bikes=15, truck_rate=50.0)
+    with pytest.raises(ValueError, match="not depot facilities"):
+        # s1 is a station, not a depot.
+        apply_truck_fleet(resolved, ["s1"], truck_capacity_bikes=15, truck_rate=50.0)

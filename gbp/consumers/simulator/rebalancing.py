@@ -388,7 +388,6 @@ def _empty_stops() -> pd.DataFrame:
 
 def solve_rebalance_vrp(
     nodes: pd.DataFrame,
-    depot_id: str,
     travel_minutes: pd.DataFrame,
     trucks: pd.DataFrame,
     params: RebalancingParams,
@@ -396,25 +395,27 @@ def solve_rebalance_vrp(
     """Route the trucks through the pickup and dropoff nodes within the window.
 
     The core routing problem (pickup and delivery of one interchangeable
-    good): every truck starts and ends empty at the depot, a pickup node puts
-    its bikes on the truck, a dropoff node takes bikes off it, the load never
-    goes below zero or above the truck's capacity, and every route fits into
-    ``params.window_minutes``. Nodes that do not fit are skipped at a high
-    cost, so the solver serves as many as it can and only then minimizes
+    good): every truck starts and ends empty at its home depot, a pickup node
+    puts its bikes on the truck, a dropoff node takes bikes off it, the load
+    never goes below zero or above the truck's capacity, and every route fits
+    into ``params.window_minutes``. Nodes that do not fit are skipped at a
+    high cost, so the solver serves as many as it can and only then minimizes
     driving.
 
     The OR-Tools model, piece by piece:
 
-    - Locations: position 0 is the depot, positions 1..n are the nodes (a
-      facility appears once per node). All quantities of time are integers in
+    - Locations: the first positions are the home depots (one per distinct
+      depot in the fleet), the positions after them are the nodes (a facility
+      appears once per node). Each truck's route starts and ends at the
+      position of its own home depot. All quantities of time are integers in
       tenths of a minute (OR-Tools works in whole numbers).
     - Travel: moving from ``a`` to ``b`` costs the service time at ``a``
       (``stop_service_minutes + bike_service_minutes * quantity``; zero at
-      the depot) plus the travel minutes ``a -> b``. With the service time
+      a depot) plus the travel minutes ``a -> b``. With the service time
       charged at departure, the running total of a route at a node is that
       node's arrival minute.
     - A "minutes" dimension caps every route at ``window_minutes``, return
-      to the depot included.
+      to the home depot included.
     - One load dimension per commodity, bounded ``[0, truck capacity]`` and
       forced to 0 at the route's end: a truck can only drop bikes it picked
       up, of the same commodity, and never keeps bikes at the end. With more
@@ -430,13 +431,12 @@ def solve_rebalance_vrp(
     nodes : pandas.DataFrame
         The solver visits (:data:`NODE_COLUMNS`, from
         :func:`build_rebalance_nodes`).
-    depot_id : str
-        The facility every truck starts from and returns to.
     travel_minutes : pandas.DataFrame
-        Square matrix of truck travel minutes over the involved facilities
-        (from :func:`truck_travel_minutes`).
+        Square matrix of truck travel minutes over the involved facilities,
+        home depots included (from :func:`truck_travel_minutes`).
     trucks : pandas.DataFrame
-        The fleet: ``resource_id``, ``capacity`` (bikes per truck).
+        The fleet: ``resource_id``, ``capacity`` (bikes per truck),
+        ``home_facility_id`` (the depot the truck starts from and returns to).
     params : RebalancingParams
         Window length, service times, drop penalty, solver time limit.
 
@@ -450,17 +450,25 @@ def solve_rebalance_vrp(
     if nodes.empty:
         return _empty_stops()
 
-    # Positions: 0 = depot, 1..n = one per node row. Times in tenths of a minute.
-    facilities = [depot_id, *nodes["facility_id"].tolist()]
+    # Positions: 0..k-1 = the distinct home depots, then one per node row.
+    # Times in tenths of a minute.
+    depots = list(dict.fromkeys(trucks["home_facility_id"]))
+    n_depots = len(depots)
+    facilities = [*depots, *nodes["facility_id"].tolist()]
     minutes = travel_minutes.loc[facilities, facilities].to_numpy(dtype="float64")
-    quantities = [0, *nodes["quantity"].astype(int).tolist()]
+    quantities = [0] * n_depots + nodes["quantity"].astype(int).tolist()
     service = np.array(
-        [0.0]
-        + [params.stop_service_minutes + params.bike_service_minutes * q for q in quantities[1:]]
+        [0.0] * n_depots
+        + [
+            params.stop_service_minutes + params.bike_service_minutes * q
+            for q in quantities[n_depots:]
+        ]
     )
     transit = np.rint((service[:, None] + minutes) * _MINUTE_SCALE).astype("int64")
 
-    manager = pywrapcp.RoutingIndexManager(len(facilities), len(trucks), 0)
+    depot_position = {depot: position for position, depot in enumerate(depots)}
+    starts = [depot_position[home] for home in trucks["home_facility_id"]]
+    manager = pywrapcp.RoutingIndexManager(len(facilities), len(trucks), starts, starts)
     routing = pywrapcp.RoutingModel(manager)
 
     def transit_callback(from_index: int, to_index: int) -> int:
@@ -484,11 +492,11 @@ def solve_rebalance_vrp(
         for vehicle in range(len(trucks)):
             dimension.CumulVar(routing.End(vehicle)).SetRange(0, 0)
 
-    signs = [0, *(1 if t == "pickup" else -1 for t in nodes["node_type"])]
+    signs = [0] * n_depots + [1 if t == "pickup" else -1 for t in nodes["node_type"]]
     deltas = [sign * quantity for sign, quantity in zip(signs, quantities, strict=True)]
     commodities = list(dict.fromkeys(nodes["commodity_category"]))
     for commodity in commodities:
-        of_commodity = [False, *(c == commodity for c in nodes["commodity_category"])]
+        of_commodity = [False] * n_depots + [c == commodity for c in nodes["commodity_category"]]
         _add_load_dimension(
             f"load_{commodity}",
             [delta if mine else 0 for delta, mine in zip(deltas, of_commodity, strict=True)],
@@ -498,7 +506,7 @@ def solve_rebalance_vrp(
 
     # Skipping a node is allowed but costs far more than any driving.
     penalty = int(params.drop_penalty_minutes * _MINUTE_SCALE)
-    for position in range(1, len(facilities)):
+    for position in range(n_depots, len(facilities)):
         routing.AddDisjunction([manager.NodeToIndex(position)], penalty)
 
     search = pywrapcp.DefaultRoutingSearchParameters()
@@ -519,8 +527,8 @@ def solve_rebalance_vrp(
         index = routing.Start(vehicle)
         while not routing.IsEnd(index):
             position = manager.IndexToNode(index)
-            if position != 0:
-                node = nodes.iloc[position - 1]
+            if position >= n_depots:
+                node = nodes.iloc[position - n_depots]
                 rows.append(
                     {
                         "resource_id": resource_id,
@@ -593,10 +601,9 @@ def assign_bikes_to_stops(
     return pd.DataFrame(rows, columns=PLAN_COLUMNS).astype(PLAN_DTYPES)
 
 
-#: The solver seam: PlanRebalancingPhase calls any function with this shape.
-SolverFn = Callable[
-    [pd.DataFrame, str, pd.DataFrame, pd.DataFrame, RebalancingParams], pd.DataFrame
-]
+#: The solver seam: PlanRebalancingPhase calls any function with this shape
+#: (nodes, travel_minutes, trucks, params) -> stops.
+SolverFn = Callable[[pd.DataFrame, pd.DataFrame, pd.DataFrame, RebalancingParams], pd.DataFrame]
 
 
 # ---------------------------------------------------------------------------
@@ -659,15 +666,25 @@ class PlanRebalancingPhase(Phase):
             # Nothing to move: no station is short, or none has bikes to give.
             return state.with_rebalance_plan(empty_rebalance_plan())
 
-        homes = resolved.resources_df["home_facility_id"].dropna().unique()
-        if len(homes) != 1:
-            raise SimulatorConfigError(f"rebalancing expects one shared depot, got {list(homes)}")
-        depot_id = str(homes[0])
-        facility_ids = [depot_id, *nodes["facility_id"].unique()]
+        trucks = resolved.resources_capacities_df.merge(
+            resolved.resources_df[["resource_id", "home_facility_id"]], on="resource_id"
+        )
+        if trucks.empty:
+            raise SimulatorConfigError("rebalancing needs at least one truck")
+        if trucks["home_facility_id"].isna().any():
+            no_home = trucks.loc[trucks["home_facility_id"].isna(), "resource_id"].tolist()
+            raise SimulatorConfigError(f"trucks with no home depot: {no_home}")
+        homes = list(dict.fromkeys(trucks["home_facility_id"]))
+        known = set(resolved.facilities_geo_df["facility_id"])
+        unknown = [home for home in homes if home not in known]
+        if unknown:
+            raise SimulatorConfigError(f"home depots missing from the facility tables: {unknown}")
+
+        facility_ids = [*homes, *nodes["facility_id"].unique()]
         travel = truck_travel_minutes(
             resolved.facilities_geo_df, facility_ids, self.params.truck_speed_km_per_hour
         )
-        stops = self._solver(nodes, depot_id, travel, resolved.resources_capacities_df, self.params)
+        stops = self._solver(nodes, travel, trucks, self.params)
         minutes_per_period = int(resolved.period_len / pd.Timedelta(minutes=1))
         plan = assign_bikes_to_stops(stops, period.period_id, minutes_per_period)
         return state.with_rebalance_plan(plan)

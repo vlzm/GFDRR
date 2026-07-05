@@ -1,6 +1,7 @@
 """Run page: set the demand multiplier and periods, run, save a new artifact."""
 
 import artifacts
+import pandas as pd
 import runner
 import streamlit as st
 import ui_shared
@@ -44,6 +45,32 @@ with st.form("run_form"):
     periods = right.number_input(
         "Number of periods", min_value=1, max_value=2000, value=runner.DEFAULT_NUMBER_OF_PERIODS
     )
+    rebalancing = st.checkbox(
+        "Overnight rebalancing",
+        value=False,
+        help=(
+            "Trucks move bikes between stations at night (window opens at 01:00, "
+            "two hours long) so the morning demand finds them. See Notations.md §14."
+        ),
+    )
+    with st.expander("Truck fleet (read only when rebalancing is on)"):
+        st.caption(
+            "One row per truck; pick the truck's home depot — the truck starts and "
+            "ends its night route there. Add or delete rows to change the fleet size."
+        )
+        fleet = st.data_editor(
+            pd.DataFrame({"home_depot": runner.DEFAULT_TRUCK_HOMES}),
+            column_config={
+                "home_depot": st.column_config.SelectboxColumn(
+                    "Home depot", options=runner.DEPOT_IDS, required=True
+                )
+            },
+            num_rows="dynamic",
+            hide_index=False,
+        )
+        truck_capacity = st.number_input(
+            "Truck capacity (bikes per truck)", min_value=1, max_value=200, value=20
+        )
     with st.expander("Data sources"):
         trips_path = st.text_input("Trips CSV", value=runner.DEFAULT_TRIPS_PATH)
     submitted = st.form_submit_button("Run", type="primary")
@@ -52,6 +79,10 @@ if submitted:
     name = run_name.strip()
     if not name:
         st.error("Enter a run name.")
+        st.stop()
+    truck_homes = fleet["home_depot"].dropna().tolist()
+    if rebalancing and not truck_homes:
+        st.error("Rebalancing is on but the truck fleet is empty. Add at least one truck.")
         st.stop()
     if name in artifacts.list_runs():
         st.warning(f"Run “{name}” already exists — it will be overwritten.")
@@ -64,6 +95,9 @@ if submitted:
             demand_scale_factor=float(demand_scale),
             sizing_scale_factor=float(sizing_scale),
             number_of_periods=int(periods),
+            rebalancing=bool(rebalancing),
+            truck_homes=truck_homes,
+            truck_capacity_bikes=int(truck_capacity),
             on_progress=st.write,
         )
         status.update(label=f"Done: {folder}", state="complete", expanded=False)

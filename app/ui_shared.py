@@ -94,9 +94,13 @@ def pick_scenario_pair() -> tuple[str | None, str | None]:
         for label, name in [("A", run_a), ("B", run_b)]:
             if name is not None:
                 meta = load_meta(name)
+                # Runs saved before the rebalancing feature have no such key.
+                rebalancing = meta.get("rebalancing", {}).get("enabled", False)
+                trucks = meta.get("rebalancing", {}).get("truck_homes", [])
+                suffix = f", rebalancing on ({len(trucks)} trucks)" if rebalancing else ""
                 st.caption(
                     f"{label}: demand scale {meta['demand_scale_factor']}, "
-                    f"{meta['number_of_periods']} periods"
+                    f"{meta['number_of_periods']} periods{suffix}"
                 )
     return run_a, run_b
 

@@ -423,7 +423,7 @@ happens while a page renders. One saved run is a **run artifact**: a folder
 
 | Canonical | Meaning |
 |---|---|
-| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6, `routing_mode` — see §13), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). |
+| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6, `routing_mode` — see §13, `rebalancing` — see §14: `enabled`, and when on also `truck_homes` and `truck_capacity_bikes`), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). |
 | `flows.parquet` | The finalized journal of the run, widened by `flows_with_measures` with the measures (§6.1): `rate`, `elapsed_periods`, `cost`, the planned/realized `duration_periods` and `distance_km` pairs. |
 | `panel.parquet` | The **facility period panel**: one row per `(period_id, facility_id, commodity_category)` with that period's values side by side — `quantity_sop`, `quantity_eop` (§9 inventory), `demand`, `departed`, `arrived`, `redirected` (bounces at this facility as the full planned target), `lost_demand`, `lost_dock_full`. Every map view and hover box is a slice of this one table. |
 | `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, `distance_km` (measured by the run's `routing_mode` — §13), and the endpoint coordinates (`source_lat`, `source_lng`, `target_lat`, `target_lng`), so the trips map draws arcs without joining another table. |
@@ -477,6 +477,8 @@ Module: `gbp/consumers/simulator/rebalancing.py`.
 | `rebalance` | The second `flow_type`: one bike moved by a truck. Opens with a `departed` (the pickup, `−1` at `source_id`), closes with an `arrived` (the dropoff, `+1` at `realized_target_id`); `resource_id` is the truck. Not demand: every demand read-model filters it out through `is_user_departure`. |
 | `undocking` | Any event that takes a bike out of a dock: a `departed` with `move_id == 0`, user trip and rebalance pickup alike. Predicate `is_undocking` — the `−1` side of the inventory rule (§0); `is_user_departure` narrows it to `flow_type == "user_trip"` (the demand side). |
 | `rebalancing window` | The wall-clock stretch the trucks work in: `window_start_hour` (default 1, i.e. 01:00) plus `window_minutes` (default 120), both on `RebalancingParams`. The planning phase fires in each period whose start hour equals `window_start_hour`. |
+| `home depot` / `home_facility_id` | The depot one truck starts its route from and returns to (column `home_facility_id` on `resources_df`). Trucks may have different home depots. A dropoff whose station is full docks its bikes at the truck's home depot. |
+| `truck fleet` | How many trucks run and each truck's home depot — a **run parameter**, not part of the loaded data: `apply_truck_fleet` (in `gbp/loaders/dataloader_graph.py`) replaces the three resource tables on a shallow copy of the resolved data. The Run page and the `--truck-homes` runner flag set it; default: 5 trucks at `depot_1`. |
 | `target inventory` / `target` | How many bikes a station should hold when the window ends, from the expected morning demand: per `(facility, commodity)`, the running total of expected departures minus expected arrivals over the target hours (`target_start_hour..target_end_hour`), taken at its highest point. Function `target_inventory`. |
 | `imbalance` | `inventory − target`, per `(facility, commodity)`. Positive: the station has bikes to give (pickups happen there). Negative: it needs bikes (dropoffs happen there). Function `station_imbalance`. |
 | `node` | One solver visit: at most `portion_size` bikes picked up or dropped at one facility. A large imbalance is split into several nodes so that one truck does not have to serve it whole. Before the split, pickup and dropoff totals are matched per commodity — only `min(total surplus, total shortage)` bikes can move, because every truck must end its route empty. Built by `build_rebalance_nodes`. |
@@ -487,8 +489,9 @@ Module: `gbp/consumers/simulator/rebalancing.py`.
 
 **The two phases.** `PlanRebalancingPhase` (writes no events) computes the
 target, the imbalance and the nodes, calls the routing solver
-(`solve_rebalance_vrp` — OR-Tools; trucks start and end at the depot, all
-stops inside `window_minutes`), and stores the plan on the state.
+(`solve_rebalance_vrp` — OR-Tools; each truck starts and ends at its own
+home depot (`home_facility_id` on `resources_df`), all stops inside
+`window_minutes`), and stores the plan on the state.
 `ApplyRebalancingPhase` (rank 3) runs every period in three rounds: dock the
 dropoffs due from earlier periods (round 0), execute this period's pickups
 (round 1, cut down to the bikes actually on hand), dock the same-period

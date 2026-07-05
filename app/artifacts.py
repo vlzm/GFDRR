@@ -363,6 +363,7 @@ def build_meta(
     routing_mode: str,
     t0: Any,
     violations: list[str],
+    rebalancing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build ``meta.json`` for one run: parameters, violations, and totals.
 
@@ -390,6 +391,10 @@ def build_meta(
         it. Anything ``pandas.Timestamp`` accepts.
     violations : list of str
         Run-invariant violations (empty = valid).
+    rebalancing : dict, optional
+        The run's rebalancing settings: ``enabled`` (bool) and, when on,
+        ``truck_homes`` (home depot per truck) and ``truck_capacity_bikes``.
+        Defaults to ``{"enabled": False}``.
 
     Returns
     -------
@@ -407,6 +412,7 @@ def build_meta(
         "t0": pd.Timestamp(t0).isoformat(),
         "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "violations": violations,
+        "rebalancing": rebalancing if rebalancing is not None else {"enabled": False},
         "totals": build_totals(tables["panel"], tables["flow_totals"]),
     }
 

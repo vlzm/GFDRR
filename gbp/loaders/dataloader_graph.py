@@ -10,9 +10,15 @@ read a narrow subset of them: ``periods_df``, ``initial_inventory_df``,
 ``facilities_capacities_df``, ``facilities_geo_df`` and ``routes``.
 """
 
+import copy
+
 import pandas as pd
 
-from gbp.loaders.dataloader_raw import RawModelData
+from gbp.loaders.dataloader_raw import (
+    RawModelData,
+    get_trucks_capacities_df,
+    get_trucks_rates_df,
+)
 from gbp.model import (
     arrived_events,
     departed_events,
@@ -182,15 +188,16 @@ def get_facilities_df(stations_df: pd.DataFrame, depots_df: pd.DataFrame) -> pd.
 
 
 def get_resources_df(trucks_df: pd.DataFrame) -> pd.DataFrame:
-    """Build the resource table from trucks with their category."""
-    return pd.concat(
-        [
-            trucks_df[["truck_id"]]
-            .rename(columns={"truck_id": "resource_id"})
-            .assign(resource_category="truck"),
-        ],
-        ignore_index=True,
+    """Build the resource table from trucks: id, category, home facility.
+
+    ``home_facility_id`` is the depot the truck starts and ends its
+    rebalancing route at (Notations.md §14).
+    """
+    out = trucks_df[["truck_id", "home_depot_id"]].rename(
+        columns={"truck_id": "resource_id", "home_depot_id": "home_facility_id"}
     )
+    out.insert(1, "resource_category", "truck")
+    return out
 
 
 def get_commodities_categories_df() -> pd.DataFrame:
@@ -258,9 +265,58 @@ def get_commodities_categories_rates_df(bike_rates_df: pd.DataFrame) -> pd.DataF
     return bike_rates_df.rename(columns={"rideable_type": "commodity_category"})
 
 
-def get_resources_additional_attributes_df(trucks_df: pd.DataFrame) -> pd.DataFrame:
-    """Additional attributes: resource_id, home_facility_id."""
-    return trucks_df.rename(columns={"truck_id": "resource_id"}).assign(home_facility_id="depot_1")
+def apply_truck_fleet(
+    resolved: "ResolvedModelData",
+    truck_homes: list[str],
+    truck_capacity_bikes: int,
+    truck_rate: float,
+) -> "ResolvedModelData":
+    """Return a shallow copy of ``resolved`` with a new truck fleet.
+
+    ``truck_homes`` lists the home depot of each truck, one entry per truck:
+    ``["depot_1", "depot_1", "depot_3"]`` is a fleet of three trucks, two
+    based at ``depot_1`` and one at ``depot_3``. The fleet is a run
+    parameter: the heavy graph tables are untouched, only the three resource
+    tables (``resources_df``, ``resources_capacities_df``,
+    ``resources_rates_df``) are rebuilt.
+
+    Parameters
+    ----------
+    resolved : ResolvedModelData
+        The resolved scenario data. Not modified.
+    truck_homes : list of str
+        Home depot per truck; every entry must be a depot facility.
+    truck_capacity_bikes : int
+        Bikes one truck can carry.
+    truck_rate : float
+        Price per hour of truck use, in dollars.
+
+    Returns
+    -------
+    ResolvedModelData
+        A shallow copy carrying the new fleet.
+    """
+    if not truck_homes:
+        raise ValueError("truck_homes is empty: the fleet needs at least one truck")
+    facilities = resolved.facilities_df
+    depots = set(facilities.loc[facilities["facility_category"] == "depot", "facility_id"])
+    unknown = sorted(set(truck_homes) - depots)
+    if unknown:
+        raise ValueError(f"truck homes are not depot facilities: {unknown}")
+
+    trucks_df = pd.DataFrame(
+        {
+            "truck_id": [f"truck_{i + 1}" for i in range(len(truck_homes))],
+            "home_depot_id": list(truck_homes),
+        }
+    )
+    out = copy.copy(resolved)
+    out.resources_df = get_resources_df(trucks_df)
+    out.resources_capacities_df = get_resources_capacities_df(
+        get_trucks_capacities_df(truck_capacity_bikes, trucks_df)
+    )
+    out.resources_rates_df = get_resources_rates_df(get_trucks_rates_df(truck_rate, trucks_df))
+    return out
 
 
 # ---------------------------------------------------------------------------

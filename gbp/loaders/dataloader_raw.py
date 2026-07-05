@@ -114,9 +114,14 @@ def get_trips_df(trips_raw_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_trucks_df(n_trucks: int) -> pd.DataFrame:
-    """Build a table of ``n_trucks`` trucks with generated ids."""
+    """Build a table of ``n_trucks`` trucks with generated ids.
+
+    Every truck starts at the first depot (``home_depot_id = "depot_1"``);
+    a run can replace the fleet with
+    :func:`gbp.loaders.dataloader_graph.apply_truck_fleet`.
+    """
     truck_ids = [f"truck_{i + 1}" for i in range(n_trucks)]
-    return pd.DataFrame({"truck_id": truck_ids})
+    return pd.DataFrame({"truck_id": truck_ids, "home_depot_id": "depot_1"})
 
 
 def get_trucks_rates_df(truck_rate: float, df_trucks: pd.DataFrame) -> pd.DataFrame:
