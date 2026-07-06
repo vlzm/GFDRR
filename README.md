@@ -4,6 +4,8 @@ A bike-sharing simulator built on the Citi Bike domain: the `gbp/` package runs
 the simulation, the `app/` folder is a Streamlit web interface that shows saved
 runs. The canonical scenario lives in `notebooks/test_pipeline.ipynb`.
 
+The documentation starts at [docs/README.md](docs/README.md).
+
 ## Install
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
