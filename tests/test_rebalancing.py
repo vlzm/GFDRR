@@ -6,10 +6,11 @@ deterministically no matter what the routing search does. The real OR-Tools
 core (``solve_rebalance_vrp``) has its own tests, plus one full run routed by
 it end to end.
 
-The full-run stories reuse the synthetic scenario builder
-(:func:`tests.scenarios.build_resolved`) and extend it with the tables the
-rebalancing phases read: a depot, the truck fleet, the historical arrivals and
-the period length.
+The full-run stories reuse the synthetic scenario builders in
+:mod:`tests.scenarios`: :func:`tests.scenarios.build_resolved` plus
+:func:`tests.scenarios.with_rebalancing_data`, which adds the tables the
+rebalancing phases read (a depot, the truck fleet, the historical arrivals
+and the period length).
 """
 
 import numpy as np
@@ -17,8 +18,6 @@ import pandas as pd
 import pytest
 
 from gbp.consumers.simulator import canonical_phases, rebalancing_phases
-from gbp.consumers.simulator.config import EnvironmentConfig
-from gbp.consumers.simulator.engine import Environment
 from gbp.consumers.simulator.rebalancing import (
     RebalancingParams,
     assign_bikes_to_stops,
@@ -34,9 +33,9 @@ from gbp.model import flows as J
 from tests import scenarios
 from tests.invariants import check_journal_well_formed
 
-CLASSIC = "classic_bike"
-DEPOT = "depot_1"
-TRUCK = "truck_1"
+CLASSIC = scenarios.CLASSIC
+DEPOT = scenarios.DEPOT
+TRUCK = scenarios.TRUCK
 
 
 # ---------------------------------------------------------------------------
@@ -256,80 +255,6 @@ def test_assign_bikes_to_stops_matches_earliest_pickups_and_buckets_minutes():
 # ---------------------------------------------------------------------------
 # Full runs with a scripted solver
 # ---------------------------------------------------------------------------
-def _with_rebalancing_data(resolved, truck_capacity: int = 20):
-    """Extend a synthetic resolved slice with the tables the rebalancing phases read."""
-    depot_geo = pd.DataFrame({"facility_id": [DEPOT], "lat": [40.05], "lng": [-74.05]})
-    resolved.facilities_geo_df = pd.concat(
-        [resolved.facilities_geo_df, depot_geo], ignore_index=True
-    )
-    resolved.facilities_df = pd.concat(
-        [
-            resolved.facilities_df,
-            pd.DataFrame({"facility_id": [DEPOT], "facility_category": ["depot"]}),
-        ],
-        ignore_index=True,
-    )
-    resolved.facilities_capacities_df = pd.concat(
-        [
-            resolved.facilities_capacities_df,
-            pd.DataFrame({"facility_id": [DEPOT], "capacity": [10_000]}),
-        ],
-        ignore_index=True,
-    )
-    resolved.resources_df = pd.DataFrame(
-        {
-            "resource_id": [TRUCK],
-            "resource_category": ["truck"],
-            "home_facility_id": [DEPOT],
-        }
-    )
-    resolved.resources_capacities_df = pd.DataFrame(
-        {"resource_id": [TRUCK], "capacity": [truck_capacity]}
-    )
-    resolved.historical_arrivals_df = J.flows_to_arrivals(resolved.historical_flows_df)
-    resolved.period_len = pd.Timedelta(hours=1)
-    return resolved
-
-
-def _scripted_stops(quantity: int) -> pd.DataFrame:
-    """One truck route: pick ``quantity`` bikes at s1 (minute 10), drop at s2 (minute 70)."""
-    return pd.DataFrame(
-        [
-            {
-                "resource_id": TRUCK,
-                "stop_seq": 0,
-                "facility_id": "s1",
-                "stop_type": "pickup",
-                "commodity_category": CLASSIC,
-                "quantity": quantity,
-                "minute": 10.0,
-            },
-            {
-                "resource_id": TRUCK,
-                "stop_seq": 1,
-                "facility_id": "s2",
-                "stop_type": "dropoff",
-                "commodity_category": CLASSIC,
-                "quantity": quantity,
-                "minute": 70.0,
-            },
-        ]
-    )
-
-
-def _run(resolved, phases):
-    """Step every period of the grid with the given phase list."""
-    config = EnvironmentConfig(
-        phases=phases,
-        scenario_id="test-rebalancing",
-        validate=False,
-        number_of_periods=len(resolved.periods_df),
-    )
-    env = Environment(resolved, config)
-    state = env.run()
-    return env.simulated_flows_df, state
-
-
 def test_rebalancing_moves_bikes_and_serves_the_morning_demand():
     """Three bikes trucked s1 -> s2 overnight turn 3 stockouts into 3 departures.
 
@@ -339,7 +264,7 @@ def test_rebalancing_moves_bikes_and_serves_the_morning_demand():
     the route crosses the period edge without returning to the depot).
     """
     trips = [("s2", "s1", 6, 7)] * 3
-    resolved = _with_rebalancing_data(
+    resolved = scenarios.with_rebalancing_data(
         scenarios.build_resolved(trips, initial_inventory={"s1": 5, "s2": 0})
     )
     calls: list[pd.DataFrame] = []
@@ -348,11 +273,11 @@ def test_rebalancing_moves_bikes_and_serves_the_morning_demand():
         calls.append(nodes)
         assert trucks["home_facility_id"].tolist() == [DEPOT]
         assert DEPOT in travel_minutes.index
-        return _scripted_stops(3)
+        return scenarios.scripted_stops(3)
 
-    journal, state = _run(
+    journal, state = scenarios.run(
         resolved,
-        canonical_phases() + rebalancing_phases(RebalancingParams(), scripted_solver),
+        phases=canonical_phases() + rebalancing_phases(RebalancingParams(), scripted_solver),
     )
 
     # The planner fired exactly once: only period 1 starts at 01:00.
@@ -387,10 +312,10 @@ def test_rebalancing_moves_bikes_and_serves_the_morning_demand():
 def test_without_rebalancing_the_same_story_loses_the_morning_demand():
     """The baseline of the story above: s2's 3 trips are stockouts."""
     trips = [("s2", "s1", 6, 7)] * 3
-    resolved = _with_rebalancing_data(
+    resolved = scenarios.with_rebalancing_data(
         scenarios.build_resolved(trips, initial_inventory={"s1": 5, "s2": 0})
     )
-    journal, _ = _run(resolved, canonical_phases())
+    journal, _ = scenarios.run(resolved, phases=canonical_phases())
     lost = journal[(journal["event_type"] == "lost") & (journal["reason"] == "stockout")]
     assert int(lost["quantity"].sum()) == 3
 
@@ -403,16 +328,16 @@ def test_pickups_are_cut_to_the_bikes_on_hand():
     executes for 2; the third plan row is dropped together with its dropoff.
     """
     trips = [("s1", "s2", 1, 2)] * 3 + [("s2", "s1", 6, 7)] * 3
-    resolved = _with_rebalancing_data(
+    resolved = scenarios.with_rebalancing_data(
         scenarios.build_resolved(trips, initial_inventory={"s1": 5, "s2": 0})
     )
 
     def scripted_solver(nodes, travel_minutes, trucks, params):
-        return _scripted_stops(3)
+        return scenarios.scripted_stops(3)
 
-    journal, state = _run(
+    journal, state = scenarios.run(
         resolved,
-        canonical_phases() + rebalancing_phases(RebalancingParams(), scripted_solver),
+        phases=canonical_phases() + rebalancing_phases(RebalancingParams(), scripted_solver),
     )
 
     rebalance = journal[journal["flow_type"] == "rebalance"]
@@ -430,16 +355,16 @@ def test_dropoff_overflow_docks_at_the_depot():
     reality difference is visible in the journal.
     """
     trips = [("s2", "s1", 6, 7)] * 3
-    resolved = _with_rebalancing_data(
+    resolved = scenarios.with_rebalancing_data(
         scenarios.build_resolved(trips, capacities={"s2": 2}, initial_inventory={"s1": 5, "s2": 0})
     )
 
     def scripted_solver(nodes, travel_minutes, trucks, params):
-        return _scripted_stops(3)
+        return scenarios.scripted_stops(3)
 
-    journal, state = _run(
+    journal, state = scenarios.run(
         resolved,
-        canonical_phases() + rebalancing_phases(RebalancingParams(), scripted_solver),
+        phases=canonical_phases() + rebalancing_phases(RebalancingParams(), scripted_solver),
     )
 
     dropoffs = journal[(journal["flow_type"] == "rebalance") & (journal["event_type"] == "arrived")]
@@ -452,16 +377,16 @@ def test_dropoff_overflow_docks_at_the_depot():
 def test_no_shortage_means_no_plan_and_no_solver_call():
     """When no station is short of bikes, the planner stores an empty plan."""
     trips = [("s1", "s2", 6, 7)]
-    resolved = _with_rebalancing_data(
+    resolved = scenarios.with_rebalancing_data(
         scenarios.build_resolved(trips, initial_inventory={"s1": 5, "s2": 5})
     )
 
     def failing_solver(nodes, travel_minutes, trucks, params):
         raise AssertionError("the solver must not be called when nothing is short")
 
-    journal, state = _run(
+    journal, state = scenarios.run(
         resolved,
-        canonical_phases() + rebalancing_phases(RebalancingParams(), failing_solver),
+        phases=canonical_phases() + rebalancing_phases(RebalancingParams(), failing_solver),
     )
     assert journal[journal["flow_type"] == "rebalance"].empty
     assert state.rebalance_plan.empty
@@ -577,10 +502,10 @@ def test_solver_keeps_commodities_apart():
 def test_full_run_with_the_real_solver():
     """The story of the first full-run test, now routed by OR-Tools itself."""
     trips = [("s2", "s1", 6, 7)] * 3
-    resolved = _with_rebalancing_data(
+    resolved = scenarios.with_rebalancing_data(
         scenarios.build_resolved(trips, initial_inventory={"s1": 5, "s2": 0})
     )
-    journal, state = _run(resolved, canonical_phases() + rebalancing_phases(FAST))
+    journal, state = scenarios.run(resolved, phases=canonical_phases() + rebalancing_phases(FAST))
 
     rebalance = journal[journal["flow_type"] == "rebalance"]
     assert len(rebalance[rebalance["event_type"] == "departed"]) == 3
@@ -601,7 +526,7 @@ def test_full_run_with_the_real_solver():
 # ---------------------------------------------------------------------------
 def test_apply_truck_fleet_rebuilds_the_resource_tables():
     """One home entry per truck; the three resource tables are rebuilt to match."""
-    resolved = _with_rebalancing_data(scenarios.build_resolved([("s1", "s2", 0, 1)]))
+    resolved = scenarios.with_rebalancing_data(scenarios.build_resolved([("s1", "s2", 0, 1)]))
     out = apply_truck_fleet(
         resolved, ["depot_1", "depot_1"], truck_capacity_bikes=15, truck_rate=50.0
     )
@@ -615,7 +540,7 @@ def test_apply_truck_fleet_rebuilds_the_resource_tables():
 
 def test_apply_truck_fleet_rejects_bad_homes():
     """An empty fleet or a home that is not a depot facility is a ValueError."""
-    resolved = _with_rebalancing_data(scenarios.build_resolved([("s1", "s2", 0, 1)]))
+    resolved = scenarios.with_rebalancing_data(scenarios.build_resolved([("s1", "s2", 0, 1)]))
     with pytest.raises(ValueError, match="at least one truck"):
         apply_truck_fleet(resolved, [], truck_capacity_bikes=15, truck_rate=50.0)
     with pytest.raises(ValueError, match="not depot facilities"):

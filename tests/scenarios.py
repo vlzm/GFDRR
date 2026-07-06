@@ -21,6 +21,12 @@ Each scenario is a known story:
 Tests run the real :class:`Environment` on them and assert the journal is
 well-formed (:mod:`tests.invariants`) and the run invariants I1-I5 hold
 (:func:`gbp.consumers.simulator.validation.validate_run`).
+
+For rebalancing stories, :func:`with_rebalancing_data` extends a scenario with
+the tables the rebalancing phases read (a depot, the truck fleet, the
+historical arrivals, the period length), and :func:`scripted_stops` builds a
+fixed one-truck route to inject as a solver stand-in, so a story does not
+depend on what the routing search finds.
 """
 
 import types
@@ -30,10 +36,13 @@ import pandas as pd
 from gbp.consumers.simulator import canonical_phases
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.engine import Environment
+from gbp.consumers.simulator.phases import Phase
 from gbp.model import flows as J
 from gbp.routing import Routes
 
 CLASSIC = "classic_bike"
+DEPOT = "depot_1"
+TRUCK = "truck_1"
 
 
 def _history(trips: list[tuple[str, str, int, int]]) -> pd.DataFrame:
@@ -126,16 +135,22 @@ def build_resolved(
 
 
 def run(
-    resolved: types.SimpleNamespace, *, demand_scale_factor: float = 1.0
+    resolved: types.SimpleNamespace,
+    *,
+    phases: list[Phase] | None = None,
+    demand_scale_factor: float = 1.0,
 ) -> tuple[pd.DataFrame, object]:
-    """Run the canonical three-phase loop on ``resolved``; return (journal, state).
+    """Run the engine on ``resolved``; return (journal, state).
+
+    ``phases`` defaults to the canonical three-phase loop; a rebalancing story
+    passes ``canonical_phases() + rebalancing_phases(...)`` instead.
 
     Invariant checking is switched off here so the caller can assert on the
     violation list directly (a clearer failure than a raised error); the tests
     call :func:`validate_run` themselves.
     """
     config = EnvironmentConfig(
-        phases=canonical_phases(),
+        phases=phases if phases is not None else canonical_phases(),
         scenario_id="test",
         validate=False,
         demand_scale_factor=demand_scale_factor,
@@ -144,6 +159,85 @@ def run(
     env = Environment(resolved, config)
     state = env.run()
     return env.simulated_flows_df, state
+
+
+def with_rebalancing_data(
+    resolved: types.SimpleNamespace, truck_capacity: int = 20
+) -> types.SimpleNamespace:
+    """Extend a synthetic resolved slice with the tables the rebalancing phases read.
+
+    Adds one depot (``depot_1``) to the facility tables, one truck
+    (``truck_1``) based there, the historical arrivals marginal, and the
+    period length.
+    """
+    depot_geo = pd.DataFrame({"facility_id": [DEPOT], "lat": [40.05], "lng": [-74.05]})
+    resolved.facilities_geo_df = pd.concat(
+        [resolved.facilities_geo_df, depot_geo], ignore_index=True
+    )
+    resolved.facilities_df = pd.concat(
+        [
+            resolved.facilities_df,
+            pd.DataFrame({"facility_id": [DEPOT], "facility_category": ["depot"]}),
+        ],
+        ignore_index=True,
+    )
+    resolved.facilities_capacities_df = pd.concat(
+        [
+            resolved.facilities_capacities_df,
+            pd.DataFrame({"facility_id": [DEPOT], "capacity": [10_000]}),
+        ],
+        ignore_index=True,
+    )
+    resolved.resources_df = pd.DataFrame(
+        {
+            "resource_id": [TRUCK],
+            "resource_category": ["truck"],
+            "home_facility_id": [DEPOT],
+        }
+    )
+    resolved.resources_capacities_df = pd.DataFrame(
+        {"resource_id": [TRUCK], "capacity": [truck_capacity]}
+    )
+    resolved.historical_arrivals_df = J.flows_to_arrivals(resolved.historical_flows_df)
+    resolved.period_len = pd.Timedelta(hours=1)
+    return resolved
+
+
+def scripted_stops(
+    quantity: int,
+    *,
+    pickup_minute: float = 10.0,
+    dropoff_minute: float = 70.0,
+) -> pd.DataFrame:
+    """One fixed truck route: pick ``quantity`` bikes at s1, drop them at s2.
+
+    The minutes place the two stops on the simulator clock: with one-hour
+    periods, a minute below 60 falls in the window period itself and minute
+    60-119 in the next one. Injected as a solver stand-in, so a story does not
+    depend on the routing search.
+    """
+    return pd.DataFrame(
+        [
+            {
+                "resource_id": TRUCK,
+                "stop_seq": 0,
+                "facility_id": "s1",
+                "stop_type": "pickup",
+                "commodity_category": CLASSIC,
+                "quantity": quantity,
+                "minute": pickup_minute,
+            },
+            {
+                "resource_id": TRUCK,
+                "stop_seq": 1,
+                "facility_id": "s2",
+                "stop_type": "dropoff",
+                "commodity_category": CLASSIC,
+                "quantity": quantity,
+                "minute": dropoff_minute,
+            },
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
