@@ -82,21 +82,28 @@ journal → run artifact → web interface
 
 ## Where to go next (levels 3–5)
 
-Level 3 — every module and its contract, in coarse words. Read
-[simulator.md](simulator.md): what a period is, what state the simulator
-carries, the phase loop, the mechanics, the invariants. Then
-[rebalancing.md](rebalancing.md): how a truck plan is computed and how the
-trucks execute it period by period.
+Level 3 — every module and its contract, in coarse words. Five documents
+cover the run chain from the map above. [dataloader.md](dataloader.md): how
+the raw trip CSV becomes `ResolvedModelData` — the entities, the historical
+journal, the sized initial state. [simulator.md](simulator.md): what a period
+is, what state the simulator carries, the phase loop, the mechanics, the
+invariants. [rebalancing.md](rebalancing.md): how a truck plan is computed
+and how the trucks execute it period by period.
+[flow_journal.md](flow_journal.md): the journal library
+(`gbp/model/flows.py`) shared by the loaders and the simulator — the event
+schema, the builders, the read-models, the checks. [app.md](app.md): how a
+finished run becomes a saved artifact and how the web interface draws it.
 
 Level 4a — exact contracts. [`Notations.md`](../Notations.md) (repository
 root) defines every column, status, and table name.
 [scenarios.md](scenarios.md) shows the worked scenarios — each one a short
 story, a sequence diagram, and a toy journal table reproduced by a test.
 
-Level 4b — why it is built this way. The closing sections of
+Level 4b — why it is built this way. Every level-3 document ends with a
+"Why It Is Built This Way" section: the load-bearing decisions, each with
+the alternative that was rejected and the reason. Start with
 [simulator.md](simulator.md#why-it-is-built-this-way) and
-[rebalancing.md](rebalancing.md#why-it-is-built-this-way): the load-bearing
-decisions, each with the alternative that was rejected and the reason.
+[rebalancing.md](rebalancing.md#why-it-is-built-this-way).
 
 Level 5 — line by line. Not a document: the code itself, entered through
 `notebooks/test_pipeline.ipynb` and, for single modules, one-off walkthrough

@@ -16,6 +16,24 @@ Use this skill when writing, rewriting, or reviewing project documentation in
    before writing.
 4. Keep the edit scoped to documentation unless the user asks for code changes.
 
+## Factual Check
+
+Do not stop at language cleanup. Verify the document's main behavioral claims
+against the code before editing.
+
+- List the claims that use verbs such as `builds`, `replaces`, `sizes`,
+  `writes`, `checks`, `reads`, `derives`, `loads`, or `saves`.
+- For each claim, find the source code line that proves it: an assignment, a
+  function call, a return value, or a caller that wires the helper into the
+  process.
+- If a helper function exists but the object being described does not call it,
+  say that clearly. Do not imply that a container performs work done later by
+  another caller.
+- If the document describes an execution order, verify the order from the real
+  constructor, runner, phase list, or artifact builder.
+- If a claim cannot be verified quickly, soften it or remove it rather than
+  making the prose more confident.
+
 ## Language
 
 - Write project documents in plain English.
@@ -66,6 +84,11 @@ Check that a new reader can answer these questions:
 - What state or table changes?
 - What is written to the journal or saved artifact?
 - What proves the result stayed valid?
+
+Then reread the changed sections and check each behavioral sentence against the
+source code you inspected. Look for remaining vague or misleading words such as
+`log`, `slot`, `heavy`, `promise`, and `raw-derived` unless they are code names
+or exact source terms.
 
 Run the editor diagnostics for changed files when available. If the document is
 new, verify that its file name and language match the project convention.

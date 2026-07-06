@@ -577,7 +577,7 @@ The scenario tables in [`scenarios.md`](scenarios.md) are rebuilt by
 `tests/test_docs_scenarios.py`, so documented journal rows must stay aligned
 with the code.
 
-## Why The Design Works This Way
+## Why It Is Built This Way
 
 ### The Journal Is The Source Of Truth
 

@@ -326,7 +326,7 @@ The normal run checks also cover rebalance flows. Every pickup must close with
 one arrival. Bikes on trucks are counted through `in_transit` until they dock.
 Inventory must never go below zero.
 
-## Why the Design Looks This Way
+## Why It Is Built This Way
 
 The plan is computed once per window because a truck route is one continuous
 route. Re-planning every period would ask the solver to redo a route that may
