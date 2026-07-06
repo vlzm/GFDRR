@@ -1,17 +1,18 @@
-# Scenario catalog — the shapes a flow journal can take
+# Scenario catalog: flow journal examples
 
 This document lists the canonical scenarios of the simulator. Each scenario is
-a short story about one bike (or one truck route), a sequence diagram, and a
-toy journal table with real values. The tables are not written by hand: each
+a small example about one bike (or one truck route), a sequence diagram, and a
+small journal table with real values. The tables are not written by hand: each
 one was produced by running the real engine on a small synthetic scenario, and
 a test compares the document with a fresh run cell by cell. If the code
-changes a journal shape, the test goes red before this document can drift.
+changes the journal rows, the test fails before this document can go out of
+date.
 
 The vocabulary is [Notations.md](../Notations.md): the flow-event schema is
 §0, the step axis (`step_id`, `phase_rank`, `phase_round`) is §0.1, the four
 outcomes (`departed`, `arrived`, `redirected`, `lost`) are §1, rebalancing is
-§14. This document does not re-explain those concepts; it shows them
-happening.
+§14. This document does not re-explain those concepts; it shows their concrete
+journal rows.
 
 ## How the scenarios are built
 
@@ -20,13 +21,13 @@ Every scenario is a tiny synthetic run built by `build_resolved` in
 `(source, target, start_period, end_period)`. The trips play two roles at
 once:
 
-- they are the **history**: the historical demand and the OD matrix are
+- they are the history: the historical demand and the OD matrix are
   derived from them, so a pair of stations has exactly the travel time its
   trips show;
-- the run **replays** that history: each period's demand departs again,
+- the run replays that history: each period's demand departs again,
   against the initial inventory and the dock capacities the scenario sets.
 
-Unless the setup says otherwise, dock capacities are huge (10 000) and every
+Unless the setup says otherwise, dock capacities are large (10 000) and every
 station starts empty. Periods are one hour long and start at
 2026‑01‑01 00:00, so period 1 starts at 01:00 and period 6 at 06:00.
 
@@ -63,10 +64,10 @@ and compares the fresh journal with the table, cell by cell.
 
 ## How to read the diagrams
 
-The participants of each diagram are the pools a bike can sit in: station
+The participants of each diagram are the pools that can hold a bike: station
 docks and `in_transit`, the set of bikes riding between stations (for a
 rebalance flow: the bike on the truck). A solid arrow moves the bike from one
-pool to another; a crossed arrow (✕) is an event that docks nothing
+pool to another; an arrow with `--x` is an event that docks nothing
 (`redirected`, `lost`). Each note names the period, the phase that wrote the
 events below it, and the step.
 
@@ -201,9 +202,9 @@ Checked by `test_scenario_04_redirect_same_period` in
 
 ### Scenario 5 — redirect, the new arc takes time
 
-The same bounce as in scenario 4, but this time history taught the OD matrix
-that `s3 → s2` takes two periods. The bounce and the new arc's departure are
-still written in period 0 (round 1, step 2); the bike then rides in
+The same bounce as in scenario 4, but this time the OD matrix has a historical
+trip where `s3 → s2` takes two periods. The bounce and the new arc's departure
+are still written in period 0 (round 1, step 2); the bike then rides in
 `in_transit` and docks at `s2` in period 2 — inside that period's normal
 dock-previous batch (`phase_rank` 0, `phase_round` 0, step 3, shared with the
 other trip docking at `s2` that period). The bike reserves nothing at `s2`
@@ -212,7 +213,7 @@ inventory. If `s2` had filled up meanwhile, the bike would bounce again
 (scenario 8).
 
 Setup: the `overflow_delayed` scenario from `tests/scenarios.py` — trips
-`s1 → s3` twice (period 0 → 0) and `s3 → s2` (period 0 → 2, which teaches the
+`s1 → s3` twice (period 0 → 0) and `s3 → s2` (period 0 → 2, which provides the
 two-period travel time); capacity of `s3` is 1; `s1` starts with 2 bikes,
 `s3` with 1.
 
@@ -282,7 +283,7 @@ Checked by `test_scenario_06_redirect_first_arc_later` in
 
 The most general single redirect. The bike departs `s1` in period 0, reaches
 the full `s4` in period 1 and bounces there; the new arc to `s3` takes two
-more periods (the historical `s4 → s3` trip taught that time), so the bike
+more periods (the historical `s4 → s3` trip provides that time), so the bike
 docks at `s3` in period 3, with that period's dock-previous batch.
 
 Note the `step_id` gap: the flow's steps are 0, 1, 1, 3. Step 2 is not
@@ -290,7 +291,7 @@ missing — it is the other trip (`s4 → s3`) docking at `s3` in period 2. This
 is what run-global numbering looks like inside one flow.
 
 Setup: trips `s1 → s4` (period 0 → 1) and `s4 → s3` (period 0 → 2, which
-teaches the two-period travel time); capacity of `s4` is 0; `s1` and `s4`
+provides the two-period travel time); capacity of `s4` is 0; `s1` and `s4`
 start with 1 bike each.
 
 ```mermaid
@@ -321,12 +322,12 @@ Checked by `test_scenario_07_redirect_both_arcs_later` in
 
 ### Scenario 8 — redirect chain: the bike bounces a second time
 
-Scenario 7 with one twist: while the bike rides its new arc toward `s3`, the
-other trip docks there first and fills the single dock. On arrival in
-period 3 the bike bounces again and gets a third arc (`move_id` 2) to `s1` —
+Scenario 7 with one change: while the bike rides its new arc toward `s3`, the
+other trip docks there first and fills the single dock. When this bike arrives
+in period 3, it bounces again and gets a third arc (`move_id` 2) to `s1` —
 the only station left with a free dock — where it docks instantly.
 
-This is the general shape of a flow: `departed`, then zero or more
+This is the general event sequence of a flow: `departed`, then zero or more
 (`redirected`, `departed`) pairs, then exactly one terminal `arrived` (or
 `lost`). Arc `m` opens at event `2m` and closes at event `2m + 1`. However
 many times it bounces, the flow still changes inventory exactly twice: −1 at
@@ -368,7 +369,7 @@ Checked by `test_scenario_08_redirect_chain` in
 
 ### Scenario 9 — network full: the bike is lost to dock_full
 
-Every dock in the network is full, so an arriving bike fits nowhere. There is
+Every dock in the network is full, so an arriving bike cannot dock. There is
 no station to redirect to, so the flow closes with `lost`,
 `reason = dock_full`. Unlike a stockout loss, this flow did depart: it keeps
 its `flow_id` and its `start_period`, and its loss is counted at the
@@ -404,10 +405,10 @@ Checked by `test_scenario_09_network_full` in
 
 ## Rebalancing scenarios
 
-Rebalancing moves bikes by truck at night so the morning demand finds them
-(Notations.md §14). `PlanRebalancingPhase` fires once per simulated day, in
-the period whose start hour is the window start (default 01:00 — period 1
-here), and stores a bike-level plan; it writes no events.
+Rebalancing moves bikes by truck at night so bikes are available for morning
+demand (Notations.md §14). `PlanRebalancingPhase` fires once per simulated
+day, in the period whose start hour is the window start (default 01:00 —
+period 1 here), and stores a bike-level plan; it writes no events.
 `ApplyRebalancingPhase` runs every period at `phase_rank` 3, in three rounds:
 dock dropoffs due from earlier periods (round 0), execute this period's
 pickups (round 1), dock same-period dropoffs (round 2). A pickup is a
@@ -415,11 +416,11 @@ pickups (round 1), dock same-period dropoffs (round 2). A pickup is a
 `in_transit` like any riding bike. Rebalance flows are not demand: every
 demand read-model filters them out by `flow_type`.
 
-All four scenarios below share one story: three morning trips want to leave
+All four scenarios below share one case: three morning trips want to leave
 `s2` at 06:00 (period 6), but `s2` starts empty while `s1` holds 5 bikes
 nobody asks for. The scripted route picks 3 bikes at `s1` and drops them at
 `s2`; only the stop minutes (and one capacity) differ. Without the truck, all
-three morning trips would be stockout losses — that baseline is
+three morning trips would be stockout losses. That case is checked by
 `tests/test_rebalancing.py::test_without_rebalancing_the_same_story_loses_the_morning_demand`.
 
 ### Scenario 10 — truck route inside one period
@@ -458,9 +459,9 @@ Checked by `test_scenario_10_truck_route_inside_one_period` in
 
 ### Scenario 11 — truck route across periods
 
-The same route, but the dropoff is at minute 70 — past the one-hour period
-edge, so it lands in period 2. The truck does not return to the depot at the
-period edge; the bikes simply stay in `in_transit` overnight. In period 2 the
+The same route, but the dropoff is at minute 70: after the one-hour period
+ends, so it lands in period 2. The truck does not return to the depot when the
+period ends; the bikes stay in `in_transit` overnight. In period 2 the
 dropoffs are due from an earlier period, so they dock in round 0 (step 1).
 
 Setup: as scenario 10, but the dropoff is at minute 70.
@@ -495,7 +496,8 @@ The truck brings 3 bikes to `s2`, whose docks hold two. Two bikes dock at
 `s2`; the third cannot be unloaded and rides back to the truck's home depot —
 its `realized_target_id` becomes `depot_1` while its `planned_target_id`
 stays `s2`, so the plan-versus-reality difference is visible in the journal.
-The depot's own capacity is never checked: it is the parking of last resort.
+The depot's own capacity is never checked: it is where the truck can always
+drop bikes when a station is full.
 
 The consequence shows up at 06:00: `s2` holds only 2 bikes against a demand
 of 3, so one morning trip is lost to a stockout.
@@ -531,11 +533,12 @@ Checked by `test_scenario_12_dropoff_overflow_docks_at_the_depot` in
 ### Scenario 13 — pickup cut to the bikes on hand
 
 The plan is built at 01:00 from the inventory of that moment (5 bikes at
-`s1`), but execution never trusts it blindly. Here the truck reaches `s1` at
+`s1`), but execution checks inventory again before pickup. Here the truck
+reaches `s1` at
 minute 70 — in period 2 — and by then three night riders have left `s1`
 (their departures run at `phase_rank` 1, before the truck's `phase_rank` 3).
 Only 2 bikes remain, so the pickup executes for 2; the third plan row is
-dropped together with its dropoff. The journal shows two rebalance flows, not
+removed together with its dropoff. The journal shows two rebalance flows, not
 three.
 
 Setup: trips `s1 → s2` three times (period 2 → 3, the night riders) and
@@ -585,8 +588,7 @@ Checked by `test_scenario_14_nothing_to_move` in
 ## The checks every scenario passes
 
 Besides its own table, every scenario above is run through the same three
-checks in `tests/test_docs_scenarios.py` (they are the executable version of
-the old "check it by eye" list):
+checks in `tests/test_docs_scenarios.py`:
 
 - `test_journal_is_well_formed_and_run_invariants_hold` — the journal has the
   right schema and legal event sequences (`tests/invariants.py`), and the run
