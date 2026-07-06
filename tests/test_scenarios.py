@@ -136,7 +136,7 @@ def test_redirect_chain_bounces_again_on_arrival(run_scenario):
 def test_stockout_logs_the_lost_demand(run_scenario):
     _resolved, journal, _state = run_scenario("stockout")
     stockout = journal[(journal["event_type"] == "lost") & (journal["reason"] == "stockout")]
-    assert int(stockout["quantity"].sum()) == 3  # 5 wanted, 2 in stock, 3 lost
+    assert int(stockout["quantity"].sum()) == 3  # 5 wanted, 2 in inventory, 3 lost
     departures = J.flows_to_departures(journal)
     s1_p0 = departures[(departures["facility_id"] == "s1") & (departures["period_id"] == 0)]
     assert int(s1_p0["quantity"].sum()) == 2  # only what the inventory covered

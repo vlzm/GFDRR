@@ -289,7 +289,7 @@ def form_potential_trips(
     """Split each source's departures across targets by the OD probabilities.
 
     Each ``(source, commodity)`` departs ``quantity`` bikes this period; the OD
-    matrix ``P(target | source, commodity)`` decides their destinations. The
+    matrix ``P(target | source, commodity)`` decides their targets. The
     expected count per target (``departures * probability``) is rounded to whole
     bikes by the largest-remainder method, so the per-source total is preserved
     exactly. Each OD pair's mean historical duration sets the arrival period.

@@ -829,8 +829,8 @@ def _pickups_up_to_inventory(due: pd.DataFrame, inventory: pd.DataFrame) -> pd.D
     """Keep the planned pickups the source can actually give.
 
     Within each ``(source, commodity)`` the first plan rows (in pickup-minute
-    order) are kept, up to the bikes on hand; the rest are dropped -- their
-    bikes stay where the night demand left them, and their dropoffs never
+    order) are kept, up to the bikes on hand; the rest are cut from the plan --
+    their bikes stay where the night demand left them, and their dropoffs never
     happen. The same cumulative-count pattern as :func:`dock_up_to_capacity`,
     keyed by source and commodity.
     """

@@ -206,10 +206,12 @@ inventory anywhere else.
 
 | Canonical | Meaning | Avoid |
 |---|---|---|
-| `inventory` | Bikes currently docked at facilities (the amount on hand). Columns `facility_id`, `commodity_category`, `quantity`. | `stock`, `on-hand` |
+| `inventory` | Bikes currently docked at facilities (the amount on hand). Columns `facility_id`, `commodity_category`, `quantity`. | `stock`; `on-hand` as a data name (the prose phrase "bikes on hand" is fine — this file uses it too) |
 | `in_transit` | Bikes that departed but have not yet docked (the working set). | "moving set", "moving bikes" |
 | `demand` | The number of trips users wanted. `demand = departed + lost(stockout)`. | — |
 | `supply` | Inventory in its "available to depart" role (`state_supply_df`; the `available` column inside `realize_departures`). A *role view* of `inventory`, not a second word for the inventory table in general. | — |
+| `free_docks` | Free dock slots per facility: `capacity` minus all bikes docked there, summed across commodities (the docks are shared). Function `free_docks` in `mechanics.py`; the redirect explainer's `free_before` / `free_after` are the same value at the step's two moments. | `available docks`, `slots` |
+| `fits` / `overflow` | The two halves of the one docking rule, `dock_up_to_capacity(due, free)`: within each target the first `free` flows dock (`fits`), the rest are `overflow`. A user trip's overflow is redirected (§1); a rebalance dropoff's overflow docks at the truck's home depot (§14). | `spillover`, `excess` |
 
 `stock` is the main offender: the fundamental thing is `inventory`, so never write
 `stock` / `stock_before` — write `inventory` / `inventory_before`. (The one
@@ -255,7 +257,7 @@ One stem, one root: row = `flow event`, trip = `flow`, table = `flows`, new rows
 | `facility_category` | The kind of facility: `station` or `depot`. | — |
 | `source` | The facility a trip leaves from. Column `source_id`. | `origin` (except OD matrix) |
 | `target` | The facility a trip goes to. Columns `planned_target_id`, `realized_target_id`. | `destination` (except OD matrix); a bare `target_id` |
-| `origin` / `destination` | Reserved for the **OD matrix** (Origin–Destination matrix) only, where O and D stand for exactly source and target. | using them anywhere else |
+| `origin` / `destination` | Reserved for the **OD matrix** (Origin–Destination matrix) only, where O and D stand for exactly source and target. One more allowed spot, the same O sense: the chart attribution rule (§12) says a flow's totals belong to its "origin facility" — in code that is always the `source_id` column. | using them anywhere else |
 | `neighbor_distance_sq` | The one neighbour-ranking metric: squared Euclidean distance on (lat, lng), in `flows.py`. Both the redirect mechanics (deciding where a bounced bike goes) and the explainer `redirect_neighbor_table` rank stations with it, so the explanation always matches the decision. | a second inline distance formula |
 
 **Decision — `facility` vs `station`.** The schema column is `facility_id` and
@@ -263,7 +265,9 @@ the journal is the source of truth, so `facility` is canonical for identifiers a
 code. "station" is the natural domain word and is fine in plain-English prose, but
 is never an identifier. Collapsing the two fully would mean renaming `facility_id`
 → `station_id` across the whole schema — a separate, larger decision. Until then:
-`facility` in code, "station" only as prose.
+`facility` in code, "station" only as prose. A local name for rows filtered to
+`facility_category == "station"` (such as `stations` in the loader's sizing
+helpers) states the category value, not a facility identifier, and is allowed.
 
 **The raw → canonical boundary.** The raw Citi Bike sources use their own names
 (`station_id`, `depot_id`, `truck_id`, `ride_id`, `rideable_type`). These are the
@@ -461,6 +465,12 @@ redirect pair with no OD entry). The neighbour ranking of a redirect
 (`neighbor_distance_sq`, §0) also stays as it is in both modes: it only orders
 candidate stations by closeness.
 
+One recorded exception: truck travel times for rebalancing
+(`truck_travel_minutes`, §14) do not ask `routes`, because its table is built
+with the bike profile and would give riding times. They use the straight-line
+distance at the truck's speed in both modes; a car-profile OSRM table is a
+recorded TODO in `rebalancing.py`.
+
 ---
 
 ## 14. Rebalancing (moving bikes by truck)
@@ -479,8 +489,10 @@ Module: `gbp/consumers/simulator/rebalancing.py`.
 | `rebalancing window` | The wall-clock stretch the trucks work in: `window_start_hour` (default 1, i.e. 01:00) plus `window_minutes` (default 120), both on `RebalancingParams`. The planning phase fires in each period whose start hour equals `window_start_hour`. |
 | `home depot` / `home_facility_id` | The depot one truck starts its route from and returns to (column `home_facility_id` on `resources_df`). Trucks may have different home depots. A dropoff whose station is full docks its bikes at the truck's home depot. |
 | `truck fleet` | How many trucks run and each truck's home depot — a **run parameter**, not part of the loaded data: `apply_truck_fleet` (in `gbp/loaders/dataloader_graph.py`) replaces the three resource tables on a shallow copy of the resolved data. The Run page and the `--truck-homes` runner flag set it; default: 5 trucks at `depot_1`. |
-| `target inventory` / `target` | How many bikes a station should hold when the window ends, from the expected morning demand: per `(facility, commodity)`, the running total of expected departures minus expected arrivals over the target hours (`target_start_hour..target_end_hour`), taken at its highest point. Function `target_inventory`. |
+| `target inventory` / `target` | How many bikes a station should hold when the window ends, from the expected morning demand: per `(facility, commodity)`, the running total of expected departures minus expected arrivals over the target hours (`target_start_hour..target_end_hour`), taken at its highest point. The departures and arrivals are the historical marginals scaled by the run's `demand_scale_factor`. Function `target_inventory`. |
 | `imbalance` | `inventory − target`, per `(facility, commodity)`. Positive: the station has bikes to give (pickups happen there). Negative: it needs bikes (dropoffs happen there). Function `station_imbalance`. |
+| free-docks clip | Planning-time cut of the dropoff side: a station's planned inflow is reduced to its free docks (§2 `free_docks`; every commodity's share is scaled by the same factor and rounded down, so the total fits). Pickups are untouched — `target >= 0` already bounds them by the inventory. Function `clip_dropoffs_to_free_docks`, applied between the imbalance and the nodes. |
+| `truck travel time` | Minutes a truck drives between two facilities: straight-line (great-circle) distance at `truck_speed_km_per_hour`, in both routing modes — the recorded exception to `routes` (§13). Function `truck_travel_minutes`; the solver's travel input. |
 | `node` | One solver visit: at most `portion_size` bikes picked up or dropped at one facility. A large imbalance is split into several nodes so that one truck does not have to serve it whole. Before the split, pickup and dropoff totals are matched per commodity — only `min(total surplus, total shortage)` bikes can move, because every truck must end its route empty. Built by `build_rebalance_nodes`. |
 | `stop` | One row of a truck's route in the solver's answer: `resource_id`, `stop_seq` (visit order), `facility_id`, `stop_type` (`pickup` / `dropoff`), `commodity_category`, `quantity`, `minute`. |
 | `minute` | Minutes since the window started — the solver's time axis. Applied as `period = window period + minute // minutes-per-period`; the sub-period detail is kept only for explanation. |
@@ -488,7 +500,8 @@ Module: `gbp/consumers/simulator/rebalancing.py`.
 | `REBALANCE_RANK` | 3 — the `phase_rank` of `ApplyRebalancingPhase`, after the three user-trip phases (0/1/2). |
 
 **The two phases.** `PlanRebalancingPhase` (writes no events) computes the
-target, the imbalance and the nodes, calls the routing solver
+target and the imbalance, clips the dropoff side to each station's free docks
+(`clip_dropoffs_to_free_docks`), builds the nodes, calls the routing solver
 (`solve_rebalance_vrp` — OR-Tools; each truck starts and ends at its own
 home depot (`home_facility_id` on `resources_df`), all stops inside
 `window_minutes`), and stores the plan on the state.
@@ -508,7 +521,16 @@ in by appending `rebalancing_phases(params)` to `canonical_phases()`.
 The audit (`check-notations`) lists current offenders here so the file does not
 rot. Remove an entry once its hits are gone.
 
-- None currently. The last sweep fixed `stockout`/`sink` used as data names,
-  `target_id` aligned to `planned_target_id`, and the figurative words `dormant` /
-  `bites` / `gating` / `spine` (the last also renamed `check_spine_closure` →
+- None currently. The 2026-07-06 sweep fixed `stock` in docstrings and comments
+  (`dataloader_graph.py`, `flows.py`), an `origin_id` parameter and a bare
+  `realized` local in `flows.py`, `destinations` used for OD targets
+  (`phases.py`, `mechanics.py`), `shortfall` in a rebalancing test name, and
+  `dropped` as a variable for dropoff events (`tests/test_rebalancing.py`).
+  Allowed uses were written into the sections instead of being re-flagged every
+  audit: "bikes on hand" as prose (§2), "origin facility" in the chart
+  attribution rule (§4, §12), `stations` as a local name for category-filtered
+  rows (§4), and the truck travel-time exception to `routes` (§13).
+- Earlier sweeps fixed `stockout`/`sink` used as data names, `target_id`
+  aligned to `planned_target_id`, and the figurative words `dormant` / `bites` /
+  `gating` / `spine` (the last also renamed `check_spine_closure` →
   `check_flow_closure`).

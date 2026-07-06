@@ -810,10 +810,10 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     -------
     pandas.DataFrame
         Columns ``period_id``, ``facility_id``, ``commodity_category``,
-        ``quantity_sop`` (start-of-period stock: what is on hand before the
+        ``quantity_sop`` (start-of-period inventory: what is on hand before the
         period's own flows, equal to the previous period's end value, and the
         initial inventory for period 0) and ``quantity_eop`` (end-of-period
-        stock: after the period's own flows). One row per
+        inventory: after the period's own flows). One row per
         ``(period, facility, commodity)`` for every period in
         ``[0, max(period_id)]``.
     """
@@ -849,10 +849,10 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     initial = initial_inventory.set_index(["facility_id", "commodity_category"])["quantity"]
     full_index = net.index.union(initial.index)
     net = net.reindex(full_index, fill_value=0)
-    # End-of-period stock: initial plus the running total of net flow up to and
-    # including each period. Start-of-period stock is that minus the period's own
-    # net flow, so it equals the previous period's end value (and the initial
-    # inventory for period 0).
+    # End-of-period inventory: initial plus the running total of net flow up to
+    # and including each period. Start-of-period inventory is that minus the
+    # period's own net flow, so it equals the previous period's end value (and
+    # the initial inventory for period 0).
     eop = net.cumsum(axis=1).add(initial.reindex(full_index).fillna(0), axis=0)
     sop = eop - net
 
@@ -1157,17 +1157,17 @@ def neighbor_distance_sq(
     return (lat - other_lat) ** 2 + (lng - other_lng) ** 2
 
 
-def _squared_distances(geo: pd.DataFrame, origin_id: str) -> pd.Series:
-    """Squared distance from ``origin_id`` to every other facility, nearest first.
+def _squared_distances(geo: pd.DataFrame, facility_id: str) -> pd.Series:
+    """Squared distance from ``facility_id`` to every other facility, nearest first.
 
     Ranks with :func:`neighbor_distance_sq` -- the same metric and stable
     tie-break the redirect mechanics use -- so the order here matches the order
-    a redirect actually walks. The origin itself is dropped.
+    a redirect actually walks. The facility itself is dropped.
     """
     coords = geo.set_index("facility_id")[["lat", "lng"]]
-    o = coords.loc[origin_id]
+    o = coords.loc[facility_id]
     d2 = neighbor_distance_sq(coords["lat"], coords["lng"], o["lat"], o["lng"])
-    return d2.drop(index=origin_id).sort_values(kind="stable")
+    return d2.drop(index=facility_id).sort_values(kind="stable")
 
 
 def redirect_neighbor_table(
@@ -1232,15 +1232,15 @@ def redirect_neighbor_table(
     commodity = bounce["commodity_category"]
     # C: the station this bounce's new leg heads to (the leg's planned target).
     leg = one[(one["event_type"] == "departed") & (one["move_id"] == bounce["move_id"] + 1)]
-    realized = leg["planned_target_id"].iloc[0] if not leg.empty else pd.NA
+    realized_target = leg["planned_target_id"].iloc[0] if not leg.empty else pd.NA
 
     # Neighbours of B by distance, cut at C (inclusive) or the first n_neighbors.
     distances = _squared_distances(geo, full_station)
     order = list(distances.index)
     if n_neighbors is not None:
         order = order[:n_neighbors]
-    elif pd.notna(realized) and realized in order:
-        order = order[: order.index(realized) + 1]
+    elif pd.notna(realized_target) and realized_target in order:
+        order = order[: order.index(realized_target) + 1]
 
     # Dock occupancy at the redirect step, summed across commodities (shared docks).
     # inventory_at_moments lists every facility at every step, so a neighbour with
@@ -1259,7 +1259,7 @@ def redirect_neighbor_table(
             "step_id": step_id,
             "period_id": period_id,
             "planned_target_id": full_station,
-            "realized_target_id": realized,
+            "realized_target_id": realized_target,
             "commodity_category": commodity,
             "neighbor_rank": range(len(order)),
             "facility_id": pd.array(order, dtype="string"),

@@ -68,7 +68,7 @@ def _morning_grid() -> pd.DataFrame:
     return periods
 
 
-def test_target_inventory_is_the_peak_of_the_running_shortfall():
+def test_target_inventory_is_the_peak_of_running_departures_minus_arrivals():
     """Target = highest running total of departures minus arrivals over the morning."""
     demand = pd.DataFrame(
         {
@@ -363,13 +363,13 @@ def test_rebalancing_moves_bikes_and_serves_the_morning_demand():
     assert nodes.loc[nodes["node_type"] == "dropoff", "quantity"].sum() == 3
 
     rebalance = journal[journal["flow_type"] == "rebalance"]
-    picked = rebalance[rebalance["event_type"] == "departed"]
-    dropped = rebalance[rebalance["event_type"] == "arrived"]
-    assert len(picked) == 3 and (picked["period_id"] == 1).all()
-    assert (picked["source_id"] == "s1").all()
-    assert (picked["resource_id"] == TRUCK).all()
-    assert len(dropped) == 3 and (dropped["period_id"] == 2).all()
-    assert (dropped["realized_target_id"] == "s2").all()
+    pickups = rebalance[rebalance["event_type"] == "departed"]
+    dropoffs = rebalance[rebalance["event_type"] == "arrived"]
+    assert len(pickups) == 3 and (pickups["period_id"] == 1).all()
+    assert (pickups["source_id"] == "s1").all()
+    assert (pickups["resource_id"] == TRUCK).all()
+    assert len(dropoffs) == 3 and (dropoffs["period_id"] == 2).all()
+    assert (dropoffs["realized_target_id"] == "s2").all()
     assert (rebalance["phase_rank"] == J.REBALANCE_RANK).all()
 
     # The morning demand at s2 is now served: 3 departures, no stockout.
@@ -442,9 +442,9 @@ def test_dropoff_overflow_docks_at_the_depot():
         canonical_phases() + rebalancing_phases(RebalancingParams(), scripted_solver),
     )
 
-    dropped = journal[(journal["flow_type"] == "rebalance") & (journal["event_type"] == "arrived")]
-    assert dropped["realized_target_id"].value_counts().to_dict() == {"s2": 2, DEPOT: 1}
-    assert (dropped["planned_target_id"] == "s2").all()
+    dropoffs = journal[(journal["flow_type"] == "rebalance") & (journal["event_type"] == "arrived")]
+    assert dropoffs["realized_target_id"].value_counts().to_dict() == {"s2": 2, DEPOT: 1}
+    assert (dropoffs["planned_target_id"] == "s2").all()
     assert check_journal_well_formed(journal) == []
     assert validate_run(state, resolved) == []
 
@@ -584,8 +584,8 @@ def test_full_run_with_the_real_solver():
 
     rebalance = journal[journal["flow_type"] == "rebalance"]
     assert len(rebalance[rebalance["event_type"] == "departed"]) == 3
-    dropped = rebalance[rebalance["event_type"] == "arrived"]
-    assert (dropped["realized_target_id"] == "s2").all()
+    dropoffs = rebalance[rebalance["event_type"] == "arrived"]
+    assert (dropoffs["realized_target_id"] == "s2").all()
 
     morning = journal[journal["period_id"] == 6]
     served = morning[J.is_user_departure(morning) & (morning["source_id"] == "s2")]

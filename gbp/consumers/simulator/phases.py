@@ -172,7 +172,7 @@ class FormDeparturesPhase(Phase):
     2. Book the demand that did *not* fit as ``lost`` events
        (``reason="stockout"``), so the journal keeps the full split
        ``demand = departed + lost`` instead of quietly dropping the lost demand.
-    3. Spread the departures over the destinations with the OD probabilities
+    3. Spread the departures over the targets with the OD probabilities
        ``P(target | source, commodity)``, set each trip's arrival period from
        the mean historical duration of its pair, and emit one ``departed`` flow
        per bike. In the simple case the OD matrix is the historical one, so a
@@ -203,7 +203,7 @@ class FormDeparturesPhase(Phase):
         inventory_before = int(state.state_inventory_df["quantity"].sum())
 
         # Mechanics -- bound the demand by the inventory, then spread each
-        # source's departures over the destinations with the OD matrix and split
+        # source's departures over the targets with the OD matrix and split
         # the totals into one departed flow per bike.
         departures = realize_departures(demand_now, state.state_inventory_df)
         inventory = adjust_inventory(

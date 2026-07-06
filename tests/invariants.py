@@ -70,7 +70,7 @@ def check_journal_well_formed(flows: pd.DataFrame) -> list[str]:
     if stockout["flow_id"].notna().any():
         v.append("stockout loss carries a flow_id (it should be aggregated and id-less)")
     if not ((stockout["move_id"] == 0) & (stockout["event_id"] == 0)).all():
-        v.append("stockout loss is not placed at (move 0, event 0)")
+        v.append("stockout loss is not at (move 0, event 0)")
 
     # -- per-flow shape: the heart of the check ------------------------------
     flow_rows = flows[flows["flow_id"].notna()]

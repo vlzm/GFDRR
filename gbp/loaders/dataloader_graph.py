@@ -353,11 +353,11 @@ def get_replay_initial_inventory_df(
     of inventory is therefore per inventory step (Notations.md "step"), not per
     period: the end-of-period value already counts those late same-period
     arrivals, so it overstates what is on hand at the moment of departure. Sizing
-    the start stock against the per-period low point leaves real stockouts.
+    the start inventory against the per-period low point leaves real stockouts.
 
-    Starting from zero stock, :func:`inventory_at_moments` gives the inventory
+    Starting from zero inventory, :func:`inventory_at_moments` gives the inventory
     after every step; its per-``(facility, commodity)`` minimum is the deepest the
-    trajectory ever goes. Holding that much stock at the start lifts the whole
+    trajectory ever goes. Holding that much inventory at the start lifts the whole
     trajectory so its floor is exactly zero, and every historical departure finds
     a bike.
 
@@ -463,7 +463,7 @@ def get_saturated_inventory_df(
 
     Every station holds ``quantity`` bikes of each commodity.
     Used by the base scenario instead of a snapshot of today's real station
-    stock. Such a snapshot is a *current* observation, unrelated to the
+    inventory. Such a snapshot is a *current* observation, unrelated to the
     historical start state, so limiting
     demand against it starves the replay (most departures lose to a stockout that
     never happened historically). With inventory far above any period's demand the
@@ -554,7 +554,7 @@ class ResolvedModelData:
 
         historical_departures_df = flows_to_departures(self.historical_flows_df)
 
-        # Size the start stock against the per-step low point of the inventory
+        # Size the start inventory against the per-step low point of the inventory
         # trajectory, so the replay never hits a stockout (see the function's
         # docstring for why the per-period low point is not enough).
         self.initial_inventory_df = get_replay_initial_inventory_df(
@@ -595,7 +595,7 @@ class ResolvedModelData:
         self.simulated_arrivals_df: pd.DataFrame | None = None
         self.simulated_od_matrix_df: pd.DataFrame | None = None
 
-        # Consistency check: the start-of-period stock at period 0 is, by
+        # Consistency check: the start-of-period inventory at period 0 is, by
         # construction, the initial inventory. Verify the two agree per commodity
         # category, so a mismatch in how either is built is caught early.
         init_by_cat = self.initial_inventory_df.groupby("commodity_category")["quantity"].sum()
@@ -773,8 +773,9 @@ def get_flows_wide(
         )
     wide = flows_df.copy()
 
-    # ``_join_inventory`` works off end-of-period stock, so keep only that column
-    # from get_inventory_df (which now also returns start-of-period stock).
+    # ``_join_inventory`` works off end-of-period inventory, so keep only that
+    # column from get_inventory_df (which now also returns the start-of-period
+    # value).
     inventory = get_inventory_df(flows_df, graph_data.initial_inventory_df).rename(
         columns={"quantity_eop": "quantity"}
     )[["period_id", "facility_id", "commodity_category", "quantity"]]
