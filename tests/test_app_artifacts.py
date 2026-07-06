@@ -274,7 +274,7 @@ PAGES = [
 @pytest.fixture(scope="module")
 def runs_root(tmp_path_factory):
     """Two saved synthetic runs, so the comparison view has an A and a B."""
-    root = tmp_path_factory.mktemp("runs")
+    root = tmp_path_factory.mktemp("data") / "runs"
     for name, builder in [("base", scenarios.overflow), ("scaled", scenarios.stockout)]:
         resolved = builder()
         journal, _ = scenarios.run(resolved)
@@ -286,7 +286,7 @@ def _run_page(page, runs_root, monkeypatch, compare):
     """Render one page under AppTest; return the finished test object."""
     from streamlit.testing.v1 import AppTest
 
-    monkeypatch.setenv("GBP_RUNS_ROOT", str(runs_root))
+    monkeypatch.setenv("DATA_DIR", str(runs_root.parent))
     at = AppTest.from_file(str(_REPO_ROOT / "app" / "views" / page), default_timeout=30)
     if compare:
         at.session_state["scenario_a_value"] = "base"

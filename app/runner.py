@@ -31,9 +31,7 @@ from gbp.loaders.dataloader_graph import ResolvedModelData, apply_truck_fleet
 from gbp.loaders.dataloader_raw import RawModelData
 from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-
-DEFAULT_TRIPS_PATH = str(_REPO_ROOT / "data" / "raw" / "202602-citibike-tripdata_1.csv")
+DEFAULT_TRIPS_PATH = str(artifacts.data_dir() / "raw" / "202602-citibike-tripdata_1.csv")
 DEFAULT_NUMBER_OF_PERIODS = 50
 
 # The synthetic depot and truck fleet (see gbp/loaders/dataloader_raw.py).

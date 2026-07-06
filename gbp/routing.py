@@ -24,6 +24,8 @@ and the artifact builder.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import requests
@@ -33,8 +35,10 @@ from gbp.model import haversine_km
 #: The two ways a scenario can measure distance and travel time.
 ROUTING_MODES = ("haversine", "osrm")
 
-#: The bike OSRM server started by ``scripts/osrm/serve.sh bike``.
-DEFAULT_OSRM_URL = "http://127.0.0.1:5000"
+#: Base URL of the OSRM server. Set the ``OSRM_URL`` environment variable to
+#: point somewhere else (in a container the server is not on localhost);
+#: without it, this is the bike server started by ``scripts/osrm/serve.sh bike``.
+DEFAULT_OSRM_URL = os.environ.get("OSRM_URL", "http://127.0.0.1:5000")
 
 _OSRM_TIMEOUT_SECONDS = 300
 

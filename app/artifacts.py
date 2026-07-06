@@ -109,12 +109,22 @@ METRICS = [
 #: The panel's value columns, in storage order (built from ``METRICS``).
 PANEL_VALUES = [metric.name for metric in METRICS if metric.panel_value]
 
-_DEFAULT_RUNS_ROOT = pathlib.Path(__file__).resolve().parents[1] / "data" / "runs"
+_DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[1] / "data"
+
+
+def data_dir() -> pathlib.Path:
+    """Root of the data folder (raw CSV, OSRM graph, run artifacts).
+
+    Set the ``DATA_DIR`` environment variable to point somewhere else
+    (in a container the data is mounted as ``/data``); without it, this is
+    ``data/`` at the repository root.
+    """
+    return pathlib.Path(os.environ.get("DATA_DIR", _DEFAULT_DATA_DIR))
 
 
 def runs_root() -> pathlib.Path:
-    """Folder that holds all run artifacts; override with ``GBP_RUNS_ROOT``."""
-    return pathlib.Path(os.environ.get("GBP_RUNS_ROOT", _DEFAULT_RUNS_ROOT))
+    """Folder that holds all run artifacts: ``<data_dir>/runs``."""
+    return data_dir() / "runs"
 
 
 def run_dir(run_name: str, root: pathlib.Path | None = None) -> pathlib.Path:

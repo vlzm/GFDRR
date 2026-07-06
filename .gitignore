@@ -87,9 +87,8 @@ dmypy.json
 # pyenv
 .python-version
 
-# uv
+# uv (uv.lock is committed: it pins exact versions for reproducible builds)
 .uv/
-uv.lock
 
 # Local data
 data/

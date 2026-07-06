@@ -1,0 +1,12 @@
+# Keep the image small: data and local working files never go into the build.
+data/
+notebooks/
+other_staff/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
