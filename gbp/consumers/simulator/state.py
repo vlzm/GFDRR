@@ -1,16 +1,19 @@
 """Simulator state: the network's facts at the current period.
 
 This module owns the live state of one run -- the inventory, the in-transit
-working set and the period clock (:class:`PeriodRow`) -- plus the inventory
-arithmetic that maintains it (:func:`adjust_inventory` and the per-event delta
-builders).
+working set and the period clock (:class:`PeriodRow`).
 
 The flow journal that backs the state lives in :mod:`flows` (the single source
 of truth); the rules that mutate the state in a period live in :mod:`mechanics`.
 ``SimulationState`` keeps the journal and two materialized projections of it
-(inventory, ``in_transit``) and exposes the marginal observations as read-only
-properties derived on demand through :mod:`flows`. Dependency direction:
-``journal <- state <- mechanics <- phases <- engine``.
+(inventory, ``in_transit``). Both projections are maintained by one write path,
+:meth:`SimulationState.apply_step_events`: it derives the inventory change and
+the in-transit change from the events themselves (the model-layer rules
+:func:`gbp.model.inventory_deltas_from_events` and
+:func:`gbp.model.in_transit_after_events`), so a phase cannot write events that
+disagree with the projections. The marginal observations are exposed as
+read-only properties derived on demand through :mod:`flows`. Dependency
+direction: ``journal <- state <- mechanics <- phases <- engine``.
 """
 
 import dataclasses
@@ -23,11 +26,13 @@ from gbp.model import (
     flows_to_arrivals,
     flows_to_departures,
     flows_to_od_matrix,
+    in_transit_after_events,
+    inventory_deltas_from_events,
 )
 
 
 # ---------------------------------------------------------------------------
-# Inventory updates
+# Inventory arithmetic (also used by phases/mechanics for local decision copies)
 # ---------------------------------------------------------------------------
 def adjust_inventory(inventory: pd.DataFrame, deltas: pd.DataFrame) -> pd.DataFrame:
     """Add signed ``delta`` per (facility_id, commodity_category)."""
@@ -39,6 +44,9 @@ def adjust_inventory(inventory: pd.DataFrame, deltas: pd.DataFrame) -> pd.DataFr
 def dock_deltas(docked: pd.DataFrame, target_col: str = "planned_target_id") -> pd.DataFrame:
     """+1 per docking bike, grouped by the station docked at and the commodity.
 
+    For decision rows that are not events yet (the redirect's round loop in
+    :mod:`mechanics`). A phase's real inventory write derives its deltas from
+    the events instead (:func:`gbp.model.inventory_deltas_from_events`).
     ``target_col`` selects which station the bike docked at: ``planned_target_id``
     when it docked at its planned target, ``realized_target_id`` when an overflow
     flow was redirected elsewhere.
@@ -49,17 +57,6 @@ def dock_deltas(docked: pd.DataFrame, target_col: str = "planned_target_id") -> 
         .reset_index(name="delta")
         .rename(columns={target_col: "facility_id"})
     )
-
-
-def departure_deltas_from_counts(departures: pd.DataFrame) -> pd.DataFrame:
-    """``-departed`` per (facility, commodity) for the inventory decrement."""
-    d = (
-        departures[departures["departed"] > 0]
-        .rename(columns={"departed": "delta"})[["facility_id", "commodity_category", "delta"]]
-        .copy()
-    )
-    d["delta"] = -d["delta"]
-    return d
 
 
 # ---------------------------------------------------------------------------
@@ -87,10 +84,12 @@ class SimulationState:
 
     ``state_flows_df`` is the append-only event journal and the single source of
     truth for what happened. ``state_inventory_df`` and ``in_transit`` are
-    materialized projections of that journal, kept incrementally for speed.
-    ``in_transit`` is deliberately *not* part of the named state contract: it is
-    internal plumbing (the "departed but not yet docked" working set), the same
-    kind of projection as inventory but not worth observing on its own.
+    materialized projections of that journal, kept incrementally for speed and
+    maintained only by :meth:`apply_step_events` -- a phase writes events and
+    the projections follow. ``in_transit`` is deliberately *not* part of the
+    named state contract: it is internal plumbing (the "departed but not yet
+    docked" working set), the same kind of projection as inventory but not
+    worth observing on its own.
 
     The "Additional" observations are exposed as read-only properties derived on
     demand: ``state_departures_df``, ``state_arrivals_df``, ``state_demand_df``,
@@ -168,14 +167,6 @@ class SimulationState:
         return flows_to_od_matrix(self.state_flows_df)
 
     # -- functional updates --------------------------------------------------
-    def with_inventory(self, new_inventory: pd.DataFrame) -> "SimulationState":
-        """Return a copy with the inventory replaced."""
-        return dataclasses.replace(self, state_inventory_df=new_inventory)
-
-    def with_in_transit(self, new_in_transit: pd.DataFrame) -> "SimulationState":
-        """Return a copy with the in-transit set replaced."""
-        return dataclasses.replace(self, in_transit=new_in_transit)
-
     def with_rebalance_plan(self, new_plan: pd.DataFrame) -> "SimulationState":
         """Return a copy with the rebalance plan replaced (Notations.md §14)."""
         return dataclasses.replace(self, rebalance_plan=new_plan)
@@ -201,7 +192,7 @@ class SimulationState:
         return self.next_step_id, dataclasses.replace(self, next_step_id=self.next_step_id + 1)
 
     def apply_step_events(self, new_flows: pd.DataFrame, phase_rank: int) -> "SimulationState":
-        """Write one phase's events to the journal as correctly numbered steps.
+        """Write one phase's events as numbered steps and apply what they imply.
 
         The single write path for a phase. The phase hands over the events it
         built this period (``new_flows``, the builder output) and its rank;
@@ -218,10 +209,19 @@ class SimulationState:
           :meth:`open_step`, so two separately ordered batches never share a
           ``step_id`` (Notations.md §0.1).
 
+        The same call maintains the two projections, so events and projections
+        cannot disagree:
+
+        - inventory moves by exactly the batch's ``+1`` / ``-1`` rule
+          (:func:`gbp.model.inventory_deltas_from_events`);
+        - ``in_transit`` gains the batch's still-riding ``departed`` rows and
+          loses the rows whose arc the batch closes
+          (:func:`gbp.model.in_transit_after_events`).
+
         Rows that share a round share one step even when only some of them move
         inventory -- a step is the batch applied together, not only its ``+1`` /
         ``-1`` rows. Empty ``new_flows`` opens nothing (a step opened for
-        nothing would leave a gap in the numbering).
+        nothing would leave a gap in the numbering) and changes nothing.
         """
         if new_flows.empty:
             return self
@@ -236,7 +236,18 @@ class SimulationState:
         for round_no in sorted(flows["phase_round"].unique()):
             step_by_round[round_no], working = working.open_step()
         flows["step_id"] = flows["phase_round"].map(step_by_round)
-        return working.append_flows(flows)
+
+        deltas = inventory_deltas_from_events(flows)
+        inventory = (
+            self.state_inventory_df
+            if deltas.empty
+            else adjust_inventory(self.state_inventory_df, deltas)
+        )
+        return dataclasses.replace(
+            working.append_flows(flows),
+            state_inventory_df=inventory,
+            in_transit=in_transit_after_events(self.in_transit, flows),
+        )
 
     def advance_period(self, next_period_obj: PeriodRow) -> "SimulationState":
         """Return a copy moved to ``next_period_obj``."""

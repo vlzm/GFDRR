@@ -114,10 +114,16 @@ departures, one redirect round). Between two steps inventory is constant.
 operation, `SimulationState.apply_step_events`: behind it the state opens a step
 per ordered batch (`SimulationState.open_step` — the next number from a single
 run-global counter), stamps `phase_rank`, `phase_round` and `step_id` on the
-rows, and appends them to the journal.
+rows, and appends them to the journal. The same call moves the live inventory by
+the batch's `+1`/`-1` rule (`inventory_deltas_from_events`) and updates
+`in_transit` (`in_transit_after_events`), so a phase cannot write events that
+disagree with either value.
 The phases run in step order — dock-previous, then departures, then dock-same, then
 any later phase, and a redirect's rounds in turn — so the counter hands out
-0, 1, 2, … in exactly the order steps must sort. The number comes from the counter,
+0, 1, 2, … in exactly the order steps must sort. Each phase class declares its
+rank once (`Phase.phase_rank`), and the engine refuses a phase list that is not
+ordered by rank, so the list order and the stamped ranks cannot disagree. The
+number comes from the counter,
 never from the event columns, so two separately opened steps always get different
 `step_id` values.
 
@@ -330,7 +336,7 @@ trip event, and the resource observations are empty). The rebalancing phases
 |---|---|
 | `rate` | Price per hour of use, in dollars. Per `commodity_category` for bikes (`commodities_categories_rates_df` — what a user pays to ride); per `resource_id` for trucks (`resources_rates_df`). |
 | `cost` | Dollars a flow has accrued at the moment of an event: `rate * elapsed_periods * hours per period` (`period_len`). Cumulative like `elapsed_periods` (§6); a trip's total cost is the value on its final `arrived`. Read-model `flows_with_costs`. |
-| `measures` | The money, time and length columns an event row can be widened with: `rate`, `elapsed_periods`, `cost`, `planned_duration_periods`, `realized_duration_periods` (§6), `planned_distance_km`, `realized_distance_km` (§13). One read-model, `flows_with_measures`, adds them all; the wide journal (`get_flows_wide`) and the artifact builder call it. |
+| `measures` | The money, time and length columns an event row can be widened with: `rate`, `elapsed_periods`, `cost`, `planned_duration_periods`, `realized_duration_periods` (§6), `planned_distance_km`, `realized_distance_km` (§13). One read-model, `flows_with_measures`, adds them all; the canonical notebook and the artifact builder call it. |
 
 ---
 

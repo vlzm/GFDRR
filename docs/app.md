@@ -34,7 +34,7 @@ One saved run is a folder `data/runs/<run_name>/` with six files:
 |---|---|---|
 | `meta.json` | — (parameters, invariant `violations`, whole-run `totals`) | `build_meta` |
 | `flows.parquet` | flow event (the journal widened with the measures) | `flows_with_measures` |
-| `panel.parquet` | `(period_id, facility_id, commodity_category)` | `build_panel` |
+| `panel.parquet` | `(period_id, facility_id, commodity_category)` | `flows_to_panel` (model layer) |
 | `arcs.parquet` | arc — a `(flow_id, move_id)` physical edge of a trip | `build_arcs` |
 | `flow_totals.parquet` | flow, with its whole-trip values | `build_flow_totals` |
 | `facilities.parquet` | facility, with coordinates and capacity | `build_facilities` |
@@ -86,25 +86,27 @@ journal:
 ```python
 priced = flows_with_measures(journal, routes=routes, rates=rates, period_len=period_len)
 arcs = build_arcs(journal, routes, facilities_geo)
+panel = flows_to_panel(journal, initial_inventory)[PANEL_KEYS + PANEL_VALUES]
 return {
     "flows": priced,
-    "panel": build_panel(journal, initial_inventory),
+    "panel": panel,
     "arcs": arcs,
     "flow_totals": build_flow_totals(priced, arcs),
     "facilities": build_facilities(facilities, facilities_geo, facilities_capacities),
 }
 ```
 
-### `build_panel`
+### The panel (`flows_to_panel`)
 
-The facility period panel: for each `(period_id, facility_id,
-commodity_category)`, the period's values side by side. It starts from
+The facility period panel is a read-model of the journal and lives in the
+model layer: `gbp.model.flows_to_panel`. For each `(period_id, facility_id,
+commodity_category)` it gives the period's values side by side. It starts from
 `get_inventory_df` (the `quantity_sop` / `quantity_eop` columns) and merges
 one marginal per column: `departed`, `arrived`, `redirected`, `lost_demand`,
 `lost_dock_full`. Then `demand = departed + lost_demand`. Every map view and
 hover box is a slice of this one table.
 
-After each merge the builder checks that no events were dropped:
+After each merge the read-model checks that no events were dropped:
 
 ```python
 if int(panel[name].sum()) != int(grouped[name].sum()):
@@ -113,6 +115,9 @@ if int(panel[name].sum()) != int(grouped[name].sum()):
 
 A mismatch means an event happened at a `(facility, commodity)` pair the
 inventory grid does not know — a real data error, caught at build time.
+`artifacts.py` only selects the columns (`PANEL_KEYS + PANEL_VALUES`), so a
+metric named in `METRICS` but missing from the model fails loudly at build
+time.
 
 ### `build_arcs`
 
@@ -147,15 +152,19 @@ Metric("lost_demand", "Lost demand (lost_demand)", "Lost (stockout)",
 
 `PANEL_VALUES`, the UI label dictionaries, the KPI row and the totals in
 `meta.json` are all built from this one list. A metric with `panel_value=True`,
-`panel_total=True`, or `kpi=True` is used in the matching place. Adding a metric
-does not require separate label, picker, KPI and totals lists.
+`panel_total=True`, or `kpi=True` is used in the matching place. A metric whose
+total comes from `flow_totals` instead of the panel sets `flow_value` (the
+column) and `flow_agg` (`"sum"` or `"mean"`) — `cost`, `distance_km` and
+`mean_duration_periods` are described this way, and `build_totals` computes
+every total from the list. Adding a metric does not require separate label,
+picker, KPI and totals lists.
 
 ### Save And Load
 
 `save_run` writes the five parquet files first and `meta.json` last, so a
 folder with a `meta.json` is always a complete artifact — `list_runs` keys on
-that file. `load_run_table` and `load_run_meta` are the only artifact read
-paths.
+that file. `load_run_table` and `load_run_meta` are the raw file reads; only
+the `ui_shared` loader calls them (pages go through its typed accessors).
 
 The Run scenario page calls `next_free_run_name` before it runs. A taken name
 gets a `_version_2`, `_version_3`, … suffix there, so that page does not
@@ -167,13 +176,20 @@ overwrite a saved run. A caller that passes an existing `run_name` directly to
 `main.py` registers the pages and runs navigation. Everything else pages
 share lives in `ui_shared.py`:
 
-- `load_table` / `load_meta` — the cached read path. The cache key includes
-  the file's modification time, so a rewritten artifact invalidates itself.
+- the run-artifact loader — the one front door to a saved run. Typed
+  accessors per table (`load_panel`, `load_arcs`, `load_flow_totals`,
+  `load_facilities`, `load_meta`) plus `rebalancing_settings` for the
+  rebalancing block of `meta.json`. The cache key includes the file's
+  modification time, so a rewritten artifact invalidates itself.
+  Old-artifact fallbacks live here: `load_arcs(run, flow_type=...)` handles
+  arcs saved before the `flow_type` column existed.
 - `pick_scenario_pair` — the sidebar pickers for scenario A and the optional
   comparison scenario B. The picks live in `st.session_state`, so every page
   shows the same pair.
 - `kpi_row` and `validation_badge` — the whole-run totals as tiles (with the
   B − A delta when B is chosen) and the green/red invariant badge.
+  `delta_b_minus_a` owns the comparison convention (direction B − A, the
+  ASCII sign `st.metric` reads) for every difference tile.
 - `panel_slice` / `panel_commodity_slice` — the one place that defines the
   "All types" pick: it sums the panel value columns over the bike types.
 - `period_start_time` — turns a period id into wall-clock time from the
@@ -181,6 +197,14 @@ share lives in `ui_shared.py`:
 - the palette, `sequential_colors` / `diverging_colors` for the maps, and
   `aggregate_flow_totals` / `level_line_chart` for the cost and
   distance/duration charts.
+- `FlowTotalsView` / `flow_totals_page` — the shared body of a `flow_totals`
+  metric page (whole-run tiles with the B − A difference, or the per-period
+  chart with the facility multiselect). The Costs and Distance & duration
+  pages are configs over this one module.
+- `arc_map_rows` / `arc_deck` — the shared arc map: group arcs into map rows
+  (the endpoint coordinates ride on every arc row) and draw the pydeck
+  `ArcLayer`. The Trips map and Truck trips pages keep only their filter,
+  colors, and tooltip.
 
 The pages, and which artifact tables each reads:
 

@@ -144,6 +144,53 @@ def is_docking(flows: pd.DataFrame) -> pd.Series:
     return flows["event_type"].isin(DOCKING_EVENT_TYPES)
 
 
+def _event_deltas(events: pd.DataFrame, extra_cols: tuple[str, ...] = ()) -> pd.DataFrame:
+    """One signed ``delta`` per inventory-moving event, at the facility it touches.
+
+    The single ``+1`` / ``-1`` rule, written once: a docking (:func:`is_docking`)
+    is ``+quantity`` at its ``realized_target_id`` and an undocking
+    (:func:`is_undocking`) is ``-quantity`` at its ``source_id``; every other
+    event moves no inventory and is dropped. ``extra_cols`` names event columns
+    to carry along (the read-models keep ``step_id`` and ``period_id`` to
+    cumulate on a time axis; a write-time batch needs none).
+    """
+    cols = [*extra_cols, "facility_id", "commodity_category", "delta"]
+    dock = events[is_docking(events)].copy()
+    dock["facility_id"] = dock["realized_target_id"]
+    dock["delta"] = dock["quantity"].astype("int64")
+    undock = events[is_undocking(events)].copy()
+    undock["facility_id"] = undock["source_id"]
+    undock["delta"] = -undock["quantity"].astype("int64")
+    return pd.concat([dock[cols], undock[cols]], ignore_index=True)
+
+
+def inventory_deltas_from_events(events: pd.DataFrame) -> pd.DataFrame:
+    """Net inventory change one batch of events implies, per (facility, commodity).
+
+    The write-time form of the one ``+1`` / ``-1`` rule (:func:`_event_deltas`),
+    summed per (facility, commodity). ``SimulationState.apply_step_events`` uses
+    it to move the live inventory by exactly what the events it writes imply;
+    the read-models cumulate the same per-event deltas back from the journal,
+    so the live inventory and the journal cannot state the rule differently.
+
+    Parameters
+    ----------
+    events : pandas.DataFrame
+        Flow-event rows (builder output or a journal slice).
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``facility_id``, ``commodity_category``, ``delta`` -- one row per
+        (facility, commodity) the batch touches; empty when nothing moves.
+    """
+    return (
+        _event_deltas(events)
+        .groupby(["facility_id", "commodity_category"], as_index=False)["delta"]
+        .sum()
+    )
+
+
 # ---------------------------------------------------------------------------
 # Flow-event builders
 # ---------------------------------------------------------------------------
@@ -514,6 +561,44 @@ def empty_in_transit() -> pd.DataFrame:
     )
 
 
+#: Ordering columns stamped at write time (``SimulationState.apply_step_events``).
+#: In-transit rows are kept in builder shape, so these are dropped on entry.
+_ORDERING_COLUMNS = ["phase_rank", "phase_round", "step_id"]
+
+
+def in_transit_after_events(in_transit: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
+    """Return the in-transit set after one batch of events.
+
+    A ``departed`` row opens an arc: the bike is riding (or on a truck) and the
+    row itself is the in-transit entry. The event that ends the same arc --
+    ``arrived``, ``redirected`` or ``lost`` with the same ``(flow_id,
+    move_id)`` -- closes it and removes the entry. An arc opened and closed
+    inside the same batch (a zero-duration redirect leg, a same-period truck
+    dropoff) never enters the set. A stockout ``lost`` has no ``flow_id`` and
+    closes nothing.
+
+    Parameters
+    ----------
+    in_transit : pandas.DataFrame
+        The current in-transit set (``departed``-event rows).
+    events : pandas.DataFrame
+        One batch of flow-event rows.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The in-transit set after the batch.
+    """
+    closing = events[events["event_type"].isin(["arrived", "redirected", "lost"])]
+    closing = closing[closing["flow_id"].notna()]
+    closed = pd.MultiIndex.from_frame(closing[["flow_id", "move_id"]])
+    opened = events[events["event_type"] == "departed"]
+    riding = opened[~pd.MultiIndex.from_frame(opened[["flow_id", "move_id"]]).isin(closed)]
+    riding = riding.drop(columns=[c for c in _ORDERING_COLUMNS if c in riding.columns])
+    kept = in_transit[~pd.MultiIndex.from_frame(in_transit[["flow_id", "move_id"]]).isin(closed)]
+    return pd.concat([kept, riding], ignore_index=True)
+
+
 # ---------------------------------------------------------------------------
 # Flow journal (the run's single source of truth)
 # ---------------------------------------------------------------------------
@@ -866,25 +951,88 @@ def get_inventory_df(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd
     ]
 
 
-def _inventory_deltas(flows: pd.DataFrame) -> pd.DataFrame:
-    """One signed ``delta`` per inventory-moving event, at the facility it touches.
+#: The panel's row key and value columns, in canonical order.
+PANEL_KEYS = ["period_id", "facility_id", "commodity_category"]
+PANEL_VALUES = [
+    "quantity_sop",
+    "quantity_eop",
+    "demand",
+    "departed",
+    "arrived",
+    "redirected",
+    "lost_demand",
+    "lost_dock_full",
+]
 
-    The single inventory delta rule every read-model uses: a docking event
-    (:func:`is_docking`) is ``+quantity`` at its ``realized_target_id`` and an
-    undocking (:func:`is_undocking` -- a user departure or a rebalance pickup)
-    is ``-quantity`` at its ``source_id``; every other event moves no inventory
-    and is dropped. Each row keeps its ``step_id`` and ``period_id`` so the
-    deltas can be cumulated on either time axis: per step
-    (:func:`inventory_at_moments`) or per period (:func:`get_inventory_df`).
+
+def flows_to_panel(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.DataFrame:
+    """Build the per-(period, facility, commodity) state of the run, in one table.
+
+    One row per ``(period_id, facility_id, commodity_category)`` -- covering
+    every period up to the journal's last, even pairs with no events -- with
+    the period's values side by side:
+
+    - ``quantity_sop`` / ``quantity_eop`` -- start / end inventory
+      (:func:`get_inventory_df`);
+    - ``departed``, ``arrived``, ``redirected`` -- the event marginals
+      (:func:`flows_to_departures`, :func:`flows_to_arrivals`,
+      :func:`flows_to_redirects`);
+    - ``lost_demand`` -- stockout losses, landed at the trip's ``source_id``;
+    - ``lost_dock_full`` -- dock-full losses, landed at the trip's
+      ``planned_target_id`` (see :func:`flows_to_losses` for why the two
+      reasons land at different facilities);
+    - ``demand = departed + lost_demand`` -- the demand identity
+      (Notations.md §2; checked run-wide by :func:`check_demand_split`).
+
+    This read-model owns two guarantees the callers would otherwise restate:
+    the period grid covers every event (an event at a (facility, commodity)
+    pair the inventory grid does not know raises ``ValueError``), and the
+    demand identity holds per row by construction.
+
+    Parameters
+    ----------
+    flows : pandas.DataFrame
+        A finalized flow-event log (it must carry ``step_id``).
+    initial_inventory : pandas.DataFrame
+        Starting inventory: ``facility_id``, ``commodity_category``, ``quantity``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The panel, keyed by :data:`PANEL_KEYS` with :data:`PANEL_VALUES`
+        columns.
     """
-    cols = ["step_id", "period_id", "facility_id", "commodity_category", "delta"]
-    dock = flows[is_docking(flows)].copy()
-    dock["facility_id"] = dock["realized_target_id"]
-    dock["delta"] = dock["quantity"].astype("int64")
-    dep = flows[is_undocking(flows)].copy()
-    dep["facility_id"] = dep["source_id"]
-    dep["delta"] = -dep["quantity"].astype("int64")
-    return pd.concat([dock[cols], dep[cols]], ignore_index=True)
+    panel = get_inventory_df(flows, initial_inventory)
+
+    counts: dict[str, pd.DataFrame] = {
+        "departed": flows_to_departures(flows),
+        "arrived": flows_to_arrivals(flows),
+        "redirected": flows_to_redirects(flows),
+        "lost_demand": flows_to_losses(flows, "stockout"),
+        "lost_dock_full": flows_to_losses(flows, "dock_full"),
+    }
+    for name, grouped in counts.items():
+        grouped = grouped.rename(columns={"quantity": name})
+        panel = panel.merge(grouped, on=PANEL_KEYS, how="left")
+        panel[name] = panel[name].fillna(0).astype("int64")
+        # The inventory grid must cover every event; a mismatch means an event
+        # happened at a (facility, commodity) pair the grid does not know.
+        if int(panel[name].sum()) != int(grouped[name].sum()):
+            raise ValueError(f"panel dropped {name} events outside the inventory grid")
+
+    panel["demand"] = panel["departed"] + panel["lost_demand"]
+    return panel[PANEL_KEYS + PANEL_VALUES]
+
+
+def _inventory_deltas(flows: pd.DataFrame) -> pd.DataFrame:
+    """Per-event deltas with ``step_id`` and ``period_id`` kept for cumulation.
+
+    The read-time view of the one ``+1`` / ``-1`` rule (:func:`_event_deltas`):
+    each row keeps its ``step_id`` and ``period_id`` so the deltas can be
+    cumulated on either time axis -- per step (:func:`inventory_at_moments`) or
+    per period (:func:`get_inventory_df`).
+    """
+    return _event_deltas(flows, ("step_id", "period_id"))
 
 
 def inventory_at_moments(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.DataFrame:
@@ -1081,8 +1229,8 @@ def flows_with_measures(
     """Widen the journal with the measures: duration, distance and money columns.
 
     This is the one place that widens a journal with per-event measures
-    (Notations.md §6.1); the wide journal (``get_flows_wide``) and the artifact
-    builder both call it. Every event row gains:
+    (Notations.md §6.1); the canonical notebook and the artifact builder both
+    call it. Every event row gains:
 
     - ``planned_duration_periods`` (``planned_end_period - start_period``) and
       ``realized_duration_periods`` (``realized_end_period - start_period``,

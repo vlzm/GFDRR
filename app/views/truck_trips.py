@@ -1,7 +1,6 @@
 """Truck trips: the bikes trucks moved during overnight rebalancing, on a map."""
 
 import pandas as pd
-import pydeck as pdk
 import streamlit as st
 import ui_shared
 
@@ -16,30 +15,20 @@ run_a, run_b = ui_shared.pick_scenario_pair()
 if run_a is None:
     st.stop()
 
-facilities = ui_shared.load_table(run_a, "facilities")
+facilities = ui_shared.load_facilities(run_a)
 
 
 def _truck_moves(run_name: str) -> pd.DataFrame | None:
     """Truck moves of a run: one row per (truck, source, target, periods) group.
 
     Returns None when the artifact predates the ``flow_type`` column on arcs
-    (saved by an older version of the app) — the moves cannot be told apart
-    from user trips there.
+    (the loader cannot tell truck moves from user trips there).
     """
-    arcs = ui_shared.load_table(run_name, "arcs")
-    if "flow_type" not in arcs.columns:
+    moves = ui_shared.load_arcs(run_name, flow_type="rebalance")
+    if moves is None:
         return None
-    moves = arcs[arcs["flow_type"] == "rebalance"]
-    return moves.groupby(
-        ["resource_id", "source_id", "target_id", "start_period", "end_period"],
-        as_index=False,
-    ).agg(
-        bikes=("quantity", "sum"),
-        distance_km=("distance_km", "first"),
-        source_lat=("source_lat", "first"),
-        source_lng=("source_lng", "first"),
-        target_lat=("target_lat", "first"),
-        target_lng=("target_lng", "first"),
+    return ui_shared.arc_map_rows(
+        moves, ["resource_id", "source_id", "target_id", "start_period", "end_period"], "bikes"
     )
 
 
@@ -53,40 +42,11 @@ def _truck_color_map(frames: dict[str, pd.DataFrame]) -> dict[str, str]:
     }
 
 
-def _deck(rows: pd.DataFrame) -> pdk.Deck:
-    """Build the arc map of one scenario's truck moves."""
-    layer = pdk.Layer(
-        "ArcLayer",
-        data=rows,
-        get_source_position="[source_lng, source_lat]",
-        get_target_position="[target_lng, target_lat]",
-        get_source_color="color",
-        get_target_color="color",
-        get_width="bikes",
-        width_scale=1,
-        width_min_pixels=2,
-        width_max_pixels=12,
-        pickable=True,
-    )
-    view_state = pdk.ViewState(
-        latitude=float(facilities["lat"].mean()),
-        longitude=float(facilities["lng"].mean()),
-        zoom=11,
-    )
-    return pdk.Deck(
-        layers=[layer],
-        initial_view_state=view_state,
-        map_style=None,
-        tooltip={
-            "html": (
-                "<b>{resource_id}</b>: {source_id} → {target_id}<br/>"
-                "Bikes: {bikes}<br/>Picked up period {start_period}, "
-                "dropped period {end_period}<br/>Distance: {distance_km} km"
-            ),
-            "style": {"backgroundColor": "#1a1a19", "color": "#ffffff", "fontSize": "12px"},
-        },
-    )
-
+TOOLTIP = (
+    "<b>{resource_id}</b>: {source_id} → {target_id}<br/>"
+    "Bikes: {bikes}<br/>Picked up period {start_period}, "
+    "dropped period {end_period}<br/>Distance: {distance_km} km"
+)
 
 frames: dict[str, pd.DataFrame | None] = {run_a: _truck_moves(run_a)}
 if run_b:
@@ -100,7 +60,7 @@ for column, (run_name, rows) in zip(columns, frames.items(), strict=True):
     with column:
         st.subheader(run_name)
         meta = ui_shared.load_meta(run_name)
-        rebalancing_on = meta.get("rebalancing", {}).get("enabled", False)
+        rebalancing_on = ui_shared.rebalancing_settings(meta).enabled
         if rows is None:
             st.info(
                 "This run was saved before truck moves were recorded on the arcs "
@@ -122,7 +82,12 @@ for column, (run_name, rows) in zip(columns, frames.items(), strict=True):
         left.metric("Bikes moved", ui_shared.fmt_int(rows["bikes"].sum()))
         middle.metric("Trucks used", ui_shared.fmt_int(rows["resource_id"].nunique()))
         right.metric("Truck moves", ui_shared.fmt_int(len(rows)))
-        st.pydeck_chart(_deck(rows), height=520)
+        st.pydeck_chart(
+            ui_shared.arc_deck(
+                rows, facilities, "bikes", TOOLTIP, width_min_pixels=2, width_max_pixels=12
+            ),
+            height=520,
+        )
 
 if colors:
     dots = " · ".join(

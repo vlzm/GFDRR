@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 import ui_shared
-from artifacts import PANEL_KEYS, PANEL_VALUES
+from ui_shared import PANEL_KEYS, PANEL_VALUES
 
 st.title("Single facility")
 
@@ -12,8 +12,8 @@ run_a, run_b = ui_shared.pick_scenario_pair()
 if run_a is None:
     st.stop()
 
-facilities = ui_shared.load_table(run_a, "facilities")
-panel_a = ui_shared.load_table(run_a, "panel")
+facilities = ui_shared.load_facilities(run_a)
+panel_a = ui_shared.load_panel(run_a)
 
 left, right = st.columns([2, 1])
 facility_id = left.selectbox("Facility (facility_id)", sorted(facilities["facility_id"]))
@@ -26,7 +26,7 @@ st.caption(f"Dock capacity: {capacity}")
 
 def _facility_rows(run_name: str):
     """Collect the facility's panel rows over periods, summed over commodities if needed."""
-    panel = ui_shared.load_table(run_name, "panel")
+    panel = ui_shared.load_panel(run_name)
     rows = ui_shared.panel_commodity_slice(
         panel[panel["facility_id"] == facility_id], commodity, ["period_id"]
     )
@@ -87,7 +87,7 @@ st.plotly_chart(bars, width="stretch")
 
 with st.expander("Panel rows of this facility"):
     for run_name in filter(None, [run_a, run_b]):
-        panel = ui_shared.load_table(run_name, "panel")
+        panel = ui_shared.load_panel(run_name)
         # PANEL_KEYS keep commodity_category, so this filters without summing.
         rows = ui_shared.panel_commodity_slice(
             panel[panel["facility_id"] == facility_id], commodity, PANEL_KEYS

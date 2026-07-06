@@ -4,7 +4,7 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 import ui_shared
-from artifacts import PANEL_VALUES
+from ui_shared import PANEL_VALUES
 
 st.title("Station map")
 
@@ -14,8 +14,8 @@ if run_a is None:
 
 meta_a = ui_shared.load_meta(run_a)
 meta_b = ui_shared.load_meta(run_b) if run_b else None
-panel_a = ui_shared.load_table(run_a, "panel")
-facilities = ui_shared.load_table(run_a, "facilities")
+panel_a = ui_shared.load_panel(run_a)
+facilities = ui_shared.load_facilities(run_a)
 
 VIEW_A = f"A: {run_a}"
 VIEW_B = f"B: {run_b}" if run_b else None
@@ -47,7 +47,7 @@ if not show_depots:
 data[PANEL_VALUES] = data[PANEL_VALUES].fillna(0)
 
 if run_b:
-    panel_b = ui_shared.load_table(run_b, "panel")
+    panel_b = ui_shared.load_panel(run_b)
     slice_b = ui_shared.panel_slice(panel_b, period, commodity)
     slice_b = slice_b.rename(columns={name: f"{name}_b" for name in PANEL_VALUES})
     data = data.merge(slice_b, on="facility_id", how="left")

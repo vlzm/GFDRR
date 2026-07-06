@@ -22,7 +22,10 @@ fail.
 import pandas as pd
 import pytest
 
-from gbp.consumers.simulator.state import PeriodRow, SimulationState
+from gbp.consumers.simulator.config import EnvironmentConfig
+from gbp.consumers.simulator.engine import Environment
+from gbp.consumers.simulator.phases import DockArrivals, FormDeparturesPhase
+from gbp.consumers.simulator.state import PeriodRow, SimulationState, SimulatorConfigError
 from gbp.consumers.simulator.validation import validate_run
 from gbp.model import flows as J
 from tests import scenarios
@@ -219,27 +222,50 @@ def test_open_step_gives_distinct_numbers_to_separate_opens():
     assert state.next_step_id == 3
 
 
-def _empty_state() -> SimulationState:
+def _state_with(inventory: dict[str, int]) -> SimulationState:
+    inv = pd.DataFrame(
+        {
+            "facility_id": pd.Series(list(inventory), dtype="string"),
+            "commodity_category": pd.Series([scenarios.CLASSIC] * len(inventory), dtype="string"),
+            "quantity": pd.Series(list(inventory.values()), dtype="int64"),
+        }
+    )
     return SimulationState(
         state_period_id_obj=PeriodRow(0, None, None),
-        state_inventory_df=pd.DataFrame(),
+        state_inventory_df=inv,
         state_flows_df=J.empty_flows_journal(),
         state_resources_df=pd.DataFrame(),
     )
+
+
+def _trips(rows: list[tuple[str, str, str, int, int]]) -> pd.DataFrame:
+    # One row per trip: (flow_id, source, target, start_period, end_period).
+    return pd.DataFrame(
+        {
+            "flow_id": [r[0] for r in rows],
+            "source_id": [r[1] for r in rows],
+            "planned_target_id": [r[2] for r in rows],
+            "commodity_category": scenarios.CLASSIC,
+            "start_period": [r[3] for r in rows],
+            "planned_end_period": [r[4] for r in rows],
+        }
+    )
+
+
+def _quantity(state: SimulationState, facility: str) -> int:
+    inv = state.state_inventory_df
+    return int(inv.loc[inv["facility_id"] == facility, "quantity"].sum())
 
 
 def test_apply_step_events_opens_one_step_per_round_and_stamps_all_three_columns():
     # The single write path for a phase: one step per distinct phase_round (rows
     # without a round are round 0), phase_rank on every row, and the rows appended
     # to the journal.
-    events = pd.DataFrame(
-        {
-            "flow_id": ["f0", "f1", "f2"],
-            "event_id": [0, 0, 0],
-            "phase_round": [pd.NA, 1, 1],
-        }
+    departed = J.departed_events(
+        _trips([("f0", "s1", "s2", 0, 1), ("f1", "s1", "s2", 0, 1), ("f2", "s1", "s2", 0, 1)])
     )
-    new_state = _empty_state().apply_step_events(events, phase_rank=2)
+    events = departed.assign(phase_round=[pd.NA, 1, 1])
+    new_state = _state_with({"s1": 3}).apply_step_events(events, phase_rank=2)
     written = new_state.state_flows_df
     assert written["phase_rank"].tolist() == [2, 2, 2]
     assert written["phase_round"].tolist() == [0, 1, 1]
@@ -249,10 +275,84 @@ def test_apply_step_events_opens_one_step_per_round_and_stamps_all_three_columns
 
 def test_apply_step_events_with_no_events_opens_no_step():
     # A step opened for nothing would leave a gap in the numbering.
-    state = _empty_state()
+    state = _state_with({})
     new_state = state.apply_step_events(state.state_flows_df.iloc[:0], phase_rank=1)
     assert new_state.next_step_id == 0
     assert new_state.state_flows_df.empty
+
+
+def test_apply_step_events_moves_departures_out_of_inventory_and_into_in_transit():
+    # Events in, state out: writing a departed batch is enough -- the same call
+    # takes the bikes off the docks and puts the rows into the in-transit set.
+    departed = J.departed_events(_trips([("f0", "s1", "s2", 0, 1), ("f1", "s1", "s3", 0, 2)]))
+    new_state = _state_with({"s1": 3}).apply_step_events(departed, phase_rank=1)
+    assert _quantity(new_state, "s1") == 1
+    assert new_state.in_transit["flow_id"].tolist() == ["f0", "f1"]
+
+
+def test_apply_step_events_docks_arrivals_and_closes_their_in_transit_rows():
+    departed = J.departed_events(_trips([("f0", "s1", "s2", 0, 1)]))
+    state = _state_with({"s1": 1}).apply_step_events(departed, phase_rank=1)
+    arrived = J.arrived_events(state.in_transit, 1)
+    new_state = state.apply_step_events(arrived, phase_rank=0)
+    assert _quantity(new_state, "s2") == 1
+    assert new_state.in_transit.empty
+
+
+def test_apply_step_events_swaps_a_bounced_arc_and_moves_no_inventory():
+    # A redirect bounce closes arc 0 and opens arc 1 in one batch: the in-transit
+    # set swaps the old arc's row for the new leg, and no bike docks or undocks.
+    departed = J.departed_events(_trips([("f0", "s1", "s2", 0, 1)]))
+    state = _state_with({"s1": 1}).apply_step_events(departed, phase_rank=1)
+    due = state.in_transit
+    bounce = J.redirected_events(due, 1)
+    leg = J.redirect_leg_events(due.assign(realized_target_id="s3", leg_end_period=2), 1)
+    new_state = state.apply_step_events(pd.concat([bounce, leg], ignore_index=True), phase_rank=0)
+    assert int(new_state.state_inventory_df["quantity"].sum()) == 0
+    assert new_state.in_transit["move_id"].tolist() == [1]
+    assert new_state.in_transit["planned_target_id"].tolist() == ["s3"]
+
+
+def test_apply_step_events_zero_duration_leg_never_enters_in_transit():
+    # An arc opened and closed inside the same batch (a zero-travel redirect leg)
+    # docks immediately: the bike lands at the leg's target and nothing rides on.
+    departed = J.departed_events(_trips([("f0", "s1", "s2", 0, 1)]))
+    state = _state_with({"s1": 1}).apply_step_events(departed, phase_rank=1)
+    due = state.in_transit
+    bounce = J.redirected_events(due, 1)
+    leg = J.redirect_leg_events(due.assign(realized_target_id="s3", leg_end_period=1), 1)
+    arrived = J.arrived_events(leg, 1)
+    batch = pd.concat([bounce, leg, arrived], ignore_index=True)
+    new_state = state.apply_step_events(batch, phase_rank=0)
+    assert _quantity(new_state, "s3") == 1
+    assert new_state.in_transit.empty
+
+
+def test_engine_rejects_phases_out_of_rank_order():
+    # The list position hands out step_id and the declared phase_rank sorts the
+    # steps, so the two orders must agree. An out-of-order list would write a
+    # journal whose step_id and phase_rank disagree; the engine refuses it.
+    resolved = scenarios.build_resolved([("s1", "s2", 0, 1)])
+    config = EnvironmentConfig(
+        phases=[FormDeparturesPhase(), DockArrivals("previous")],
+        scenario_id="test",
+        number_of_periods=1,
+    )
+    with pytest.raises(SimulatorConfigError, match="ordered by phase_rank"):
+        Environment(resolved, config)
+
+
+def test_apply_step_events_stockout_lost_moves_nothing():
+    # A stockout lost is pure accounting: no flow_id, no inventory move, no
+    # in-transit entry -- only the journal grows.
+    losses = pd.DataFrame(
+        {"source_id": ["s1"], "commodity_category": [scenarios.CLASSIC], "quantity": [2]}
+    )
+    state = _state_with({"s1": 1})
+    new_state = state.apply_step_events(J.lost_events(losses, 0, "stockout"), phase_rank=1)
+    assert _quantity(new_state, "s1") == 1
+    assert new_state.in_transit.empty
+    assert len(new_state.state_flows_df) == 1
 
 
 @pytest.mark.parametrize("name", list(scenarios.ALL_SCENARIOS))

@@ -19,12 +19,9 @@ from typing import Any
 import pandas as pd
 
 from gbp.model import (
-    flows_to_arrivals,
-    flows_to_departures,
-    flows_to_losses,
-    flows_to_redirects,
+    PANEL_KEYS,
+    flows_to_panel,
     flows_with_measures,
-    get_inventory_df,
     is_docking,
 )
 from gbp.routing import Routes
@@ -32,28 +29,32 @@ from gbp.routing import Routes
 #: The parquet tables a run artifact holds, by file stem.
 RUN_TABLES = ("flows", "panel", "arcs", "flow_totals", "facilities")
 
-#: The panel's row key.
-PANEL_KEYS = ["period_id", "facility_id", "commodity_category"]
-
 
 @dataclasses.dataclass(frozen=True)
 class Metric:
     """One value the UI can show, described once (Notations.md §12).
 
-    ``PANEL_VALUES``, the UI label dictionaries, the KPI row and the panel
-    part of ``build_totals`` are all built from the ``METRICS`` list below.
-    Adding a metric there is the only step: it cannot appear in a picker
-    without a label, or miss the KPI row and the totals.
+    ``PANEL_VALUES``, the UI label dictionaries, the KPI row and the whole of
+    ``build_totals`` are all built from the ``METRICS`` list below. Adding a
+    metric there is the only step: it cannot appear in a picker without a
+    label, or miss the KPI row and the totals.
+
+    A metric's whole-run total comes from one of two sources: a panel metric
+    sums its panel column (``panel_total=True``), a flow metric aggregates a
+    ``flow_totals`` column (``flow_value`` names the column, ``flow_agg`` says
+    how).
     """
 
     name: str
     label: str  # full label; the canonical column name is kept in braces
     short: str  # short label for the map hover box
-    unit: str = "count"  # "count", "dollars" or "km" -- picks the KPI format
+    unit: str = "count"  # "count", "dollars", "km" or "periods" -- picks the KPI format
     panel_value: bool = False  # a value column of panel.parquet
     panel_total: bool = False  # summed over the panel into meta["totals"]
     kpi: bool = False  # shown as a tile in the KPI row
     more_is_worse: bool = False  # the KPI delta turns red when it grows
+    flow_value: str | None = None  # flow_totals column its total aggregates
+    flow_agg: str = "sum"  # how that column is aggregated ("sum" or "mean")
 
 
 #: Every metric of a run, in display and storage order.
@@ -102,8 +103,26 @@ METRICS = [
         kpi=True,
         more_is_worse=True,
     ),
-    Metric("cost", "Cost, $", "Cost, $", unit="dollars", kpi=True, more_is_worse=True),
-    Metric("distance_km", "Distance, km", "Distance, km", unit="km", kpi=True),
+    Metric(
+        "cost",
+        "Cost, $",
+        "Cost, $",
+        unit="dollars",
+        kpi=True,
+        more_is_worse=True,
+        flow_value="cost",
+    ),
+    Metric(
+        "distance_km", "Distance, km", "Distance, km", unit="km", kpi=True, flow_value="distance_km"
+    ),
+    Metric(
+        "mean_duration_periods",
+        "Mean trip duration, periods (mean_duration_periods)",
+        "Mean duration",
+        unit="periods",
+        flow_value="duration_periods",
+        flow_agg="mean",
+    ),
 ]
 
 #: The panel's value columns, in storage order (built from ``METRICS``).
@@ -159,50 +178,6 @@ def next_free_run_name(base: str, root: pathlib.Path | None = None) -> str:
 # ---------------------------------------------------------------------------
 # Builders: journal -> the tables the UI reads
 # ---------------------------------------------------------------------------
-def build_panel(flows: pd.DataFrame, initial_inventory: pd.DataFrame) -> pd.DataFrame:
-    """Build the facility period panel from a finalized journal.
-
-    One row per ``(period_id, facility_id, commodity_category)`` with the
-    period's values side by side: start/end inventory (``quantity_sop`` /
-    ``quantity_eop``), ``demand``, ``departed``, ``arrived``, ``redirected``
-    (bounces at this facility as the full planned target), ``lost_demand``
-    (stockout losses at the source) and ``lost_dock_full`` (losses at the full
-    planned target). ``demand = departed + lost_demand``.
-
-    Parameters
-    ----------
-    flows : pandas.DataFrame
-        A finalized flow-event log (it must carry ``step_id``).
-    initial_inventory : pandas.DataFrame
-        Starting inventory: ``facility_id``, ``commodity_category``, ``quantity``.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The panel, keyed by ``PANEL_KEYS`` with ``PANEL_VALUES`` columns.
-    """
-    panel = get_inventory_df(flows, initial_inventory)
-
-    counts: dict[str, pd.DataFrame] = {
-        "departed": flows_to_departures(flows),
-        "arrived": flows_to_arrivals(flows),
-        "redirected": flows_to_redirects(flows),
-        "lost_demand": flows_to_losses(flows, "stockout"),
-        "lost_dock_full": flows_to_losses(flows, "dock_full"),
-    }
-    for name, grouped in counts.items():
-        grouped = grouped.rename(columns={"quantity": name})
-        panel = panel.merge(grouped, on=PANEL_KEYS, how="left")
-        panel[name] = panel[name].fillna(0).astype("int64")
-        # The inventory grid must cover every event; a mismatch means an event
-        # happened at a (facility, commodity) pair the grid does not know.
-        if int(panel[name].sum()) != int(grouped[name].sum()):
-            raise ValueError(f"panel dropped {name} events outside the inventory grid")
-
-    panel["demand"] = panel["departed"] + panel["lost_demand"]
-    return panel[PANEL_KEYS + PANEL_VALUES]
-
-
 def build_arcs(flows: pd.DataFrame, routes: Routes, facilities_geo: pd.DataFrame) -> pd.DataFrame:
     """One row per arc: a ``(flow_id, move_id)`` physical edge of a trip.
 
@@ -382,14 +357,22 @@ def build_facilities(
 
 
 def build_totals(panel: pd.DataFrame, flow_totals: pd.DataFrame) -> dict[str, float]:
-    """Whole-run sums for ``meta.json``: the numbers the KPI row shows."""
+    """Whole-run values for ``meta.json``, one per ``METRICS`` entry that has a total.
+
+    A panel metric (``panel_total=True``) sums its panel column; a flow metric
+    (``flow_value`` set) aggregates its ``flow_totals`` column with
+    ``flow_agg``. No metric total is computed anywhere else.
+    """
     totals: dict[str, float] = {
         metric.name: int(panel[metric.name].sum()) for metric in METRICS if metric.panel_total
     }
-    totals["cost"] = round(float(flow_totals["cost"].sum()), 2)
-    totals["distance_km"] = round(float(flow_totals["distance_km"].sum()), 2)
-    duration = flow_totals["duration_periods"].dropna()
-    totals["mean_duration_periods"] = round(float(duration.mean()), 3) if len(duration) else 0.0
+    for metric in METRICS:
+        if metric.flow_value is None:
+            continue
+        rows = flow_totals[metric.flow_value].dropna()
+        value = float(rows.agg(metric.flow_agg)) if len(rows) else 0.0
+        digits = 3 if metric.flow_agg == "mean" else 2
+        totals[metric.name] = round(value, digits)
     return totals
 
 
@@ -493,9 +476,12 @@ def build_run_tables(
     """
     priced = flows_with_measures(journal, routes=routes, rates=rates, period_len=period_len)
     arcs = build_arcs(journal, routes, facilities_geo)
+    # The panel is the model's read-model; selecting PANEL_VALUES (built from
+    # METRICS) fails loudly at build time if the two ever name different columns.
+    panel = flows_to_panel(journal, initial_inventory)[PANEL_KEYS + PANEL_VALUES]
     return {
         "flows": priced,
-        "panel": build_panel(journal, initial_inventory),
+        "panel": panel,
         "arcs": arcs,
         "flow_totals": build_flow_totals(priced, arcs),
         "facilities": build_facilities(facilities, facilities_geo, facilities_capacities),

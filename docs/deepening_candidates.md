@@ -38,14 +38,14 @@ doing real work.
 
 | # | Candidate | Layer | Status |
 |---|---|---|---|
-| 1 | `apply_step_events` also maintains inventory and `in_transit` | simulator | proposed |
-| 2 | Phases return events; the engine stamps the ordering | simulator | proposed |
-| 3 | `plan_overflow_redirect` returns resolved outcomes | simulator | proposed |
-| 4 | `flows_to_panel` — the panel becomes a journal read-model | model | proposed |
-| 5 | Delete `get_flows_wide` and its `_join_*` helpers | loaders | proposed |
-| 6 | One typed loader for the run artifact in the UI | app | proposed |
-| 7 | One page module for `flow_totals` metrics + one diff helper | app | proposed |
-| 8 | One arc-map module for the two map pages | app | proposed |
+| 1 | `apply_step_events` also maintains inventory and `in_transit` | simulator | done |
+| 2 | Phases return events; the engine stamps the ordering | simulator | done |
+| 3 | `plan_overflow_redirect` returns resolved outcomes | simulator | done |
+| 4 | `flows_to_panel` — the panel becomes a journal read-model | model | done |
+| 5 | Delete `get_flows_wide` and its `_join_*` helpers | loaders | done |
+| 6 | One typed loader for the run artifact in the UI | app | done |
+| 7 | One page module for `flow_totals` metrics + one diff helper | app | done |
+| 8 | One arc-map module for the two map pages | app | done |
 
 Candidates 1–3 are one storyline: the seam between phases and
 `SimulationState`. Candidate 2 builds on candidate 1. Candidate 3 shrinks by
@@ -56,7 +56,15 @@ Candidates 4–8 are independent of each other and of 1–3.
 
 ## 1. `apply_step_events` writes the journal but not the projections it implies
 
-**Status:** proposed.
+**Status:** done (2026-07-06). `apply_step_events` now applies the inventory
+delta and the `in_transit` change implied by the events it writes, through two
+new model-layer functions next to the predicates:
+`inventory_deltas_from_events` and `in_transit_after_events`
+(`gbp/model/flows.py`). Deleted: `departure_deltas_from_counts`,
+`SimulationState.with_inventory`, `SimulationState.with_in_transit`, the three
+reconciliation asserts. `adjust_inventory` and `dock_deltas` stay for the local
+decision copies (the redirect's round loop, the rebalancing rounds). New unit
+tests in `tests/test_scenarios.py` cover "events in, state out" directly.
 
 **Files:**
 - `gbp/consumers/simulator/state.py:203-239` — `apply_step_events`, the
@@ -109,7 +117,15 @@ events and calls one method; it cannot desync the projections.
 
 ## 2. Phases return events; the engine stamps the ordering
 
-**Status:** proposed. Builds on candidate 1.
+**Status:** done (2026-07-06). Each phase class now declares its rank once
+(`Phase.phase_rank`, a class attribute). A normal phase implements only
+`build_events(state, resolved, period, config) -> events`; the base
+`Phase.execute` writes them through `apply_step_events` with the declared
+rank. The two rebalancing phases override `execute` because they also replace
+`rebalance_plan`. The engine (`Environment.__init__`) refuses a phase list not
+ordered by rank with `SimulatorConfigError`. `Phase.name` deleted (never
+read). `phase_rank_by_timing` stays as the historical loader's rule, locked by
+the existing oracle test.
 
 **Files:**
 - `gbp/consumers/simulator/phases.py:49-62` — the `Phase` base class.
@@ -150,7 +166,13 @@ the events it built. The engine (or the state) stamps `phase_rank`,
 
 ## 3. `plan_overflow_redirect` returns resolved outcomes
 
-**Status:** proposed. Shrinks once candidate 1 is done.
+**Status:** done (2026-07-06). `plan_overflow_redirect` now returns one frame,
+one row per overflow flow, with an `outcome` column (`"docked"` / `"riding"` /
+`"lost"`) plus `realized_target_id`, `leg_end_period`, `phase_round`. The
+phase-side re-dock disappeared with candidate 1; `DockArrivals.build_events`
+now only maps outcomes to events (it no longer re-derives "docks now" from
+`planned_end_period == t`). `tests/test_mechanics.py` pins the full outcome,
+including the lost case.
 
 **Files:**
 - `gbp/consumers/simulator/mechanics.py:164-250` — `plan_overflow_redirect`:
@@ -186,7 +208,13 @@ candidate 1 in place, the phase-side re-dock disappears entirely.
 
 ## 4. `flows_to_panel` — the panel becomes a journal read-model
 
-**Status:** proposed.
+**Status:** done (2026-07-06). `flows_to_panel(flows, initial_inventory)`
+added to `gbp/model/flows.py` with the canonical `PANEL_KEYS` /
+`PANEL_VALUES` lists; it owns the grid guard and the demand identity.
+`build_panel` deleted; `build_run_tables` selects
+`flows_to_panel(...)[PANEL_KEYS + PANEL_VALUES]`, so a `METRICS` entry the
+model does not produce fails loudly at build time. The panel tests now run
+against the model interface.
 
 **Files:**
 - `gbp/model/flows.py:698-785` — the existing read-models
@@ -222,7 +250,10 @@ the demand identity. `build_panel` becomes a thin wrapper (or is deleted and
 
 ## 5. Delete `get_flows_wide` and its `_join_*` helpers
 
-**Status:** proposed.
+**Status:** done (2026-07-06). The notebook cell now calls
+`flows_with_inventory` + `flows_with_measures`; `get_flows_wide`,
+`_FLOW_FACILITY_ROLES` and the three `_join_*` helpers are deleted
+(~146 lines). `docs/dataloader.md` documents the two-call replacement.
 
 **Files:**
 - `gbp/loaders/dataloader_graph.py:660-800` — `_FLOW_FACILITY_ROLES`,
@@ -253,7 +284,14 @@ helpers (~140 lines).
 
 ## 6. One typed loader for the run artifact in the UI
 
-**Status:** proposed.
+**Status:** done (2026-07-06). `ui_shared` is the one front door: typed
+accessors `load_panel` / `load_arcs(run, flow_type=...)` / `load_flow_totals`
+/ `load_facilities` / `load_meta`, plus `rebalancing_settings(meta)` for the
+rebalancing block and `table_path` for the downloads page. The old-artifact
+fallbacks (missing `flow_type` column) live inside `load_arcs`. The generic
+`load_table` is private; `downloads.py` no longer builds file paths or calls
+`artifacts.load_run_table`. Views import `PANEL_KEYS` / `PANEL_VALUES` from
+`ui_shared`, not from `artifacts`.
 
 **Files:**
 - `app/ui_shared.py:57-78` — cached `load_table` / `load_meta`.
@@ -291,7 +329,15 @@ rebalancing block of `meta`. Old-artifact fallbacks live inside the loader.
 
 ## 7. One page module for `flow_totals` metrics + one diff helper
 
-**Status:** proposed.
+**Status:** done (2026-07-06). `ui_shared.FlowTotalsView` +
+`flow_totals_page` render the shared four-block page; `costs.py` and
+`distance_duration.py` are configs over it. `delta_b_minus_a` owns the
+comparison direction and the `st.metric` sign at every difference tile
+(KPI row included). `Metric` gained `flow_value` / `flow_agg`, so
+`mean_duration_periods` is a first-class metric and `build_totals` computes
+every total from the `METRICS` table — no hand-added keys. New unit tests
+cover the diff helper, `arc_map_rows`, `rebalancing_settings` and the
+totals coverage.
 
 **Files:**
 - `app/views/costs.py` and `app/views/distance_duration.py` — the same
@@ -329,7 +375,11 @@ from the `METRICS` table.
 
 ## 8. One arc-map module for the two map pages
 
-**Status:** proposed.
+**Status:** done (2026-07-06). `ui_shared.arc_map_rows(arcs, group_keys,
+count_name)` owns the arc-row schema knowledge (endpoint coordinates ride on
+every row); `arc_deck(rows, facilities, width_col, tooltip_html)` owns
+pydeck's `[lng, lat]` order and the tooltip style. Both map pages keep only
+their filter, colors, and tooltip text.
 
 **Files:**
 - `app/views/trips_map.py:41-100` and `app/views/truck_trips.py:22-88`.

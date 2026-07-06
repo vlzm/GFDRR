@@ -18,6 +18,7 @@ sys.path.insert(0, str(_REPO_ROOT / "app"))
 
 import artifacts  # noqa: E402  (needs the app folder on sys.path)
 
+from gbp.model import flows_to_panel  # noqa: E402
 from tests import scenarios  # noqa: E402
 
 RATES = pd.DataFrame({"commodity_category": [scenarios.CLASSIC], "rate": [3.0]})
@@ -67,7 +68,7 @@ def _save_run(name, resolved, journal, root):
 def test_panel_counts_match_the_journal():
     resolved = scenarios.overflow()
     journal, _ = scenarios.run(resolved)
-    panel = artifacts.build_panel(journal, resolved.initial_inventory_df)
+    panel = flows_to_panel(journal, resolved.initial_inventory_df)
 
     from gbp.model import is_docking, is_user_departure
 
@@ -81,7 +82,7 @@ def test_panel_counts_match_the_journal():
 def test_stockout_shows_up_as_lost_demand():
     resolved = scenarios.stockout()
     journal, _ = scenarios.run(resolved)
-    panel = artifacts.build_panel(journal, resolved.initial_inventory_df)
+    panel = flows_to_panel(journal, resolved.initial_inventory_df)
     assert panel["lost_demand"].sum() > 0
     assert (panel["demand"] == panel["departed"] + panel["lost_demand"]).all()
 
@@ -300,3 +301,58 @@ def _run_page(page, runs_root, monkeypatch, compare):
 def test_page_renders_without_exception(page, compare, runs_root, monkeypatch):
     at = _run_page(page, runs_root, monkeypatch, compare)
     assert not at.exception, at.exception[0].value if at.exception else None
+
+
+# ---------------------------------------------------------------------------
+# ui_shared helpers (pure functions, tested without a page render)
+# ---------------------------------------------------------------------------
+def test_delta_b_minus_a_owns_direction_and_sign():
+    import ui_shared
+
+    assert ui_shared.delta_b_minus_a(10, 12) == "+2"
+    assert ui_shared.delta_b_minus_a(12, 10) == "-2"
+    assert ui_shared.delta_b_minus_a(5, 5) == "+0"
+
+
+def test_rebalancing_settings_reads_the_block_and_falls_back():
+    import ui_shared
+
+    old_run = ui_shared.rebalancing_settings({})
+    assert old_run.enabled is False and old_run.truck_homes == []
+    meta = {"rebalancing": {"enabled": True, "truck_homes": ["depot_1", "depot_1"]}}
+    settings = ui_shared.rebalancing_settings(meta)
+    assert settings.enabled is True
+    assert len(settings.truck_homes) == 2
+
+
+def test_arc_map_rows_sums_quantity_and_keeps_endpoints():
+    import ui_shared
+
+    arcs = pd.DataFrame(
+        {
+            "source_id": ["s1", "s1", "s1"],
+            "target_id": ["s2", "s2", "s3"],
+            "event_type": ["arrived", "arrived", "arrived"],
+            "quantity": [1, 1, 1],
+            "distance_km": [2.0, 2.0, 4.0],
+            "source_lat": [40.0, 40.0, 40.0],
+            "source_lng": [-74.0, -74.0, -74.0],
+            "target_lat": [40.1, 40.1, 40.2],
+            "target_lng": [-74.1, -74.1, -74.2],
+        }
+    )
+    rows = ui_shared.arc_map_rows(arcs, ["source_id", "target_id", "event_type"], "trips")
+    assert rows["trips"].tolist() == [2, 1]
+    assert rows["target_lat"].tolist() == [40.1, 40.2]
+    assert rows["distance_km"].tolist() == [2.0, 4.0]
+
+
+def test_build_totals_covers_every_metric_with_a_total():
+    # Every METRICS entry that declares a total (panel or flow) must land in
+    # meta["totals"] -- no metric total is computed anywhere else.
+    resolved = scenarios.overflow()
+    journal, _ = scenarios.run(resolved)
+    tables = _build_tables(resolved, journal)
+    totals = artifacts.build_totals(tables["panel"], tables["flow_totals"])
+    expected = {m.name for m in artifacts.METRICS if m.panel_total or m.flow_value}
+    assert expected <= set(totals)

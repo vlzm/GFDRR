@@ -149,8 +149,21 @@ This method does the same work for every phase:
 4. Open one `step_id` per distinct `phase_round`, in round order.
 5. Stamp `step_id` on the rows.
 6. Append the rows to `state_flows_df`.
+7. Move `state_inventory_df` by exactly what the events imply: `-1` at
+   `source_id` per undocking `departed`, `+1` at `realized_target_id` per
+   `arrived` (`inventory_deltas_from_events`).
+8. Update `in_transit`: a `departed` row enters the set; the `arrived`,
+   `redirected`, or `lost` event that ends the same arc removes it
+   (`in_transit_after_events`).
 
-Empty `new_flows` opens no step. This keeps the step numbers continuous.
+A phase never edits the inventory or `in_transit` on the state directly. It
+builds events and hands them to this one call, so the journal and the two
+values derived from it cannot disagree. When a phase needs to see the effect of
+an earlier batch inside the same period (a redirect round, a truck pickup after
+a dropoff), it keeps a local inventory copy for that decision only.
+
+Empty `new_flows` opens no step and changes nothing. This keeps the step
+numbers continuous.
 
 ## How A Run Starts
 
@@ -192,16 +205,26 @@ rebalancing_phases(params) == [
 
 So one full period can have five phases:
 
-| Order | Phase | Journal rank | Always active? |
+| Order | Phase | `phase_rank` | Always active? |
 |---|---|---:|---|
 | 1 | `DockArrivals("previous")` | 0 | Yes |
 | 2 | `FormDeparturesPhase()` | 1 | Yes |
 | 3 | `DockArrivals("same")` | 2 | Yes |
-| 4 | `PlanRebalancingPhase(params)` | None | Only at `window_start_hour` |
+| 4 | `PlanRebalancingPhase(params)` | 3 | Only at `window_start_hour` |
 | 5 | `ApplyRebalancingPhase()` | 3 | Only when rebalancing is enabled and work exists |
 
-`PlanRebalancingPhase` has no journal rank because it writes no flow events. It
-only stores a plan on the state.
+Each phase class declares its `phase_rank` once, as a class attribute. A normal
+phase implements one method, `build_events`: it reads the state and returns
+this period's events. The base class writes them through `apply_step_events`
+with the declared rank. The two rebalancing phases override `execute` instead,
+because they also replace `rebalance_plan` on the state.
+`PlanRebalancingPhase` writes no flow events, so no journal row carries its
+rank; the rank only places it in the list.
+
+The engine checks at construction time that the phase list is ordered by
+`phase_rank`. The list position hands out `step_id` and the rank sorts the
+steps, so the two orders must agree; a list out of rank order is refused with
+`SimulatorConfigError`.
 
 ## One Period At A Glance
 
@@ -259,12 +282,13 @@ It does this:
 1. Select due user trips.
 2. Try to dock each bike at its `planned_target_id`.
 3. Split the due rows into `fits` and `overflow` with `dock_up_to_capacity()`.
-4. Add `+1` inventory for rows that fit.
-5. Redirect overflow bikes to the nearest facility with a free dock.
-6. Dock zero-period redirect legs in redirect rounds.
-7. Put longer redirect legs back into `in_transit`.
-8. Mark a bike `lost` with `reason = "dock_full"` only when no facility has a
+4. Redirect overflow bikes to the nearest facility with a free dock.
+5. Dock zero-period redirect legs in redirect rounds.
+6. Mark a bike `lost` with `reason = "dock_full"` only when no facility has a
    free dock.
+7. Write all events in one `apply_step_events` call. That call adds the `+1`
+   inventory for every docked bike, removes the due rows from `in_transit`,
+   and puts the longer redirect legs in.
 
 It writes:
 
@@ -309,11 +333,12 @@ It does this:
    lost = demand - departed
    ```
 
-4. Remove the departed bikes from inventory.
-5. Spread departed bikes across targets with OD probabilities.
-6. Round target counts with the largest-remainder method, so the source total is
+4. Spread departed bikes across targets with OD probabilities.
+5. Round target counts with the largest-remainder method, so the source total is
    preserved exactly.
-7. Expand aggregate rows into one `flow_id` per bike.
+6. Expand aggregate rows into one `flow_id` per bike.
+7. Write the events in one `apply_step_events` call. That call removes the
+   departed bikes from inventory and puts the new trips into `in_transit`.
 
 It writes:
 
@@ -425,8 +450,9 @@ A rebalance dropoff does not become `lost`.
 
 Mechanics functions do not touch `SimulationState`.
 
-They take plain tables and return decisions. Phases apply those decisions to the
-state and write events to the journal.
+They take plain tables and return decisions. Phases turn those decisions into
+events and write them through `apply_step_events`, which applies them to the
+state.
 
 ### Free Docks
 
@@ -463,16 +489,27 @@ The same rule is used for:
 
 ### Redirect
 
-`plan_overflow_redirect(...)` handles user-trip overflow.
+`plan_overflow_redirect(...)` resolves user-trip overflow. It returns one row
+per overflow bike with an `outcome` column:
 
-It plans rounds:
+| `outcome` | Meaning |
+|---|---|
+| `docked` | The new leg had zero travel time and a dock was taken for it now. |
+| `riding` | The new leg takes time; whether it fits is decided when it arrives. |
+| `lost` | No facility in the network has a free dock. |
+
+The phase only turns these outcomes into events, so the docking decision for a
+redirect runs once per bike, here.
+
+It resolves in rounds:
 
 1. Find the nearest other facility with a free dock.
 2. Create a redirect leg to that facility.
 3. If the leg has zero-period travel time, try to dock it now.
 4. If it does not fit, it enters the next redirect round.
-5. If the leg takes time, put it back into `in_transit`.
-6. If no facility has a free dock, write `lost` with `reason = "dock_full"`.
+5. If the leg takes time, it rides in `in_transit` and docks when it arrives.
+6. If no facility has a free dock, the outcome is `lost`; the phase writes the
+   `lost` event with `reason = "dock_full"`.
 
 The nearest facility is ranked by `neighbor_distance_sq`. Travel time comes from
 the OD matrix when that pair exists there. Otherwise it comes from `routes`.

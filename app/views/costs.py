@@ -9,44 +9,17 @@ run_a, run_b = ui_shared.pick_scenario_pair()
 if run_a is None:
     st.stop()
 
+COST_VIEW = ui_shared.FlowTotalsView(
+    value="cost",
+    agg="sum",
+    tile_label="Cost, $",
+    y_title="Cost per period, $",
+    totals_key="cost",
+    fmt=lambda v: f"${ui_shared.fmt_int(v)}",
+)
+
 level = st.selectbox("Detail level", ui_shared.LEVELS)
-
-frames = {run_a: ui_shared.load_table(run_a, "flow_totals")}
-if run_b:
-    frames[run_b] = ui_shared.load_table(run_b, "flow_totals")
-
-if level == ui_shared.LEVEL_GLOBAL:
-    # The whole-run sum is precomputed once (build_totals) and read from meta.
-    columns = st.columns(len(frames) + 1)
-    values = {}
-    for column, run_name in zip(columns, frames, strict=False):
-        values[run_name] = float(ui_shared.load_meta(run_name)["totals"]["cost"])
-        column.metric(f"Cost, $ — {run_name}", f"${ui_shared.fmt_int(values[run_name])}")
-    if run_b:
-        diff = values[run_b] - values[run_a]
-        columns[-1].metric(
-            "Difference (B − A)",
-            f"{'+' if diff >= 0 else '-'}${ui_shared.fmt_int(abs(diff))}",
-        )
-else:
-    facilities = None
-    if level == ui_shared.LEVEL_FACILITY:
-        options = sorted(frames[run_a]["source_id"].dropna().unique())
-        facilities = st.multiselect(
-            "Origin facilities (source_id)",
-            options,
-            default=ui_shared.top_facilities(frames[run_a], "cost"),
-        )
-        if not facilities:
-            st.info("Pick at least one facility.")
-            st.stop()
-    data = ui_shared.aggregate_flow_totals(frames, "cost", "sum", level, facilities)
-    fig = ui_shared.level_line_chart(
-        data, "cost", "Cost per period, $", ui_shared.scenario_color_map(run_a, run_b)
-    )
-    st.plotly_chart(fig, width="stretch")
-    with st.expander("Data table"):
-        st.dataframe(data, hide_index=True, width="stretch")
+ui_shared.flow_totals_page(run_a, run_b, COST_VIEW, level)
 
 st.caption(
     "A trip's cost is rate × elapsed_periods × hours per period (flows_with_costs); the trip "

@@ -88,9 +88,11 @@ def _check_projection_consistency(
 ) -> list[str]:
     """I3 -- the live final inventory equals the inventory recomputed from the journal.
 
-    Catches a docking event type the projection forgets to count (e.g. redirects):
-    the live state would apply it, the journal projection would not, and the two
-    inventories would diverge above the baseline.
+    A safety check: since ``apply_step_events`` derives the live inventory from
+    the events themselves (``inventory_deltas_from_events``), the two sides can
+    only diverge if the incremental per-batch arithmetic and the full journal
+    recomputation (``get_inventory_df``) disagree -- or if something writes the
+    inventory outside the single write path.
     """
     if flows.empty:
         return []

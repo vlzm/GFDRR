@@ -23,7 +23,7 @@ functions used here are explained in [flow_journal.md](flow_journal.md).
 | File | Main role |
 |---|---|
 | `dataloader_raw.py` | Reads the trip CSV, derives raw entity tables, and owns `RawModelData`. |
-| `dataloader_graph.py` | Builds `ResolvedModelData` from `RawModelData`; also owns `apply_truck_fleet`, `attach_simulation`, and `get_flows_wide`. |
+| `dataloader_graph.py` | Builds `ResolvedModelData` from `RawModelData`; also owns `apply_truck_fleet` and `attach_simulation`. |
 
 One scenario flows through the two files like this:
 
@@ -35,7 +35,6 @@ raw trip CSV
                             base replay initial inventory, routes)
   -> the simulator runs
   -> attach_simulation()   (fills the simulated_* marginals)
-  -> get_flows_wide()      (the wide journal, for notebooks and artifacts)
 ```
 
 ## Step 1: `RawModelData` (`dataloader_raw.py`)
@@ -286,30 +285,26 @@ Every simulated marginal is derived with the same read-model function as its
 historical twin. That makes the two sets directly comparable: in a base replay
 they are equal, table by table.
 
-## The Wide Journal: `get_flows_wide`
+## The Wide Journal
 
-`get_flows_wide(graph_data, flows_df)` widens a flow journal for analysis.
-For each of the three facility roles an event names (`source`,
-`planned_target`, `realized_target`), every event row gains that facility's
-capacity, coordinates, and end-of-period inventory before and after the event's
-period:
+Widening a journal for analysis is done by two model-layer read-models, not by
+the loader:
 
 ```python
-for role in _FLOW_FACILITY_ROLES:
-    wide = _join_capacity(wide, graph_data.facilities_capacities_df, role)
-    wide = _join_geo(wide, graph_data.facilities_geo_df, role)
-    wide = _join_inventory(wide, inventory, role)
-
+wide = flows_with_inventory(flows_df, initial_inventory_df)
 wide = flows_with_measures(wide, routes=..., rates=..., period_len=...)
 ```
 
-The per-period inventory is rebuilt from the journal being widened, so the
-wide table is self-consistent with whichever journal is passed. The last line
-adds the measures: durations, distances, `rate`, `elapsed_periods`, and
-`cost`. It uses the same `flows_with_measures` call as the artifact builder.
+`flows_with_inventory` adds each event's own facility inventory just before
+and just after its step (`inventory_before` / `inventory_after`, step-level).
+`flows_with_measures` adds the durations, distances, `rate`,
+`elapsed_periods`, and `cost` — the same call the artifact builder uses.
 
-The canonical notebook (`notebooks/test_pipeline.ipynb`) reads this table.
+The canonical notebook (`notebooks/test_pipeline.ipynb`) builds this table.
 The UI does not read it. Its tables are precomputed by `app/artifacts.py`.
+An older loader-layer widening (`get_flows_wide`) rebuilt inventory at period
+level and disagreed with the step-level read-model; it was deleted in favour
+of the two calls above.
 
 ## Why It Is Built This Way
 

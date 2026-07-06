@@ -1,7 +1,6 @@
 """Trips map: arcs of the flows riding in the chosen period, colored by outcome."""
 
 import pandas as pd
-import pydeck as pdk
 import streamlit as st
 import ui_shared
 
@@ -13,7 +12,7 @@ if run_a is None:
 
 meta_a = ui_shared.load_meta(run_a)
 meta_b = ui_shared.load_meta(run_b) if run_b else None
-facilities = ui_shared.load_table(run_a, "facilities")
+facilities = ui_shared.load_facilities(run_a)
 
 OUTCOME_LABELS = {
     "arrived": "Arrived (arrived)",
@@ -25,7 +24,7 @@ OUTCOME_LABELS = {
 left, right = st.columns([1, 2])
 commodity_pick = left.selectbox(
     "Bike type",
-    ui_shared.commodity_options(ui_shared.load_table(run_a, "panel")),
+    ui_shared.commodity_options(ui_shared.load_panel(run_a)),
 )
 commodity = None if commodity_pick == ui_shared.COMMODITY_ALL else commodity_pick
 outcomes = right.multiselect(
@@ -38,66 +37,27 @@ period = st.slider("Period (period_id)", 0, ui_shared.slider_max_period(meta_a, 
 ui_shared.slider_time_caption(period, meta_a, meta_b)
 
 
+TOOLTIP = (
+    "<b>{source_id} → {target_id}</b><br/>"
+    "Trips: {trips}<br/>Outcome: {outcome_label}<br/>Distance: {distance_km} km"
+)
+
+
 def _arc_rows(run_name: str) -> pd.DataFrame:
     """Bike-trip arcs riding in the chosen period, grouped by (source, target, outcome)."""
-    arcs = ui_shared.load_table(run_name, "arcs")
-    # Truck moves (flow_type == "rebalance") have their own page. Artifacts
-    # saved before the column existed hold user trips only.
-    if "flow_type" in arcs.columns:
-        arcs = arcs[arcs["flow_type"] == "user_trip"]
+    # Truck moves (flow_type == "rebalance") have their own page.
+    arcs = ui_shared.load_arcs(run_name, flow_type="user_trip")
     active = arcs[(arcs["start_period"] <= period) & (arcs["end_period"] >= period)]
     if commodity is not None:
         active = active[active["commodity_category"] == commodity]
     active = active[active["event_type"].isin(outcomes)]
-    # The endpoint coordinates are saved on every arc row, so grouping keeps them.
-    grouped = active.groupby(["source_id", "target_id", "event_type"], as_index=False).agg(
-        trips=("quantity", "sum"),
-        distance_km=("distance_km", "mean"),
-        source_lat=("source_lat", "first"),
-        source_lng=("source_lng", "first"),
-        target_lat=("target_lat", "first"),
-        target_lng=("target_lng", "first"),
-    )
+    grouped = ui_shared.arc_map_rows(active, ["source_id", "target_id", "event_type"], "trips")
     grouped["color"] = grouped["event_type"].map(
         lambda outcome: [*ui_shared.hex_to_rgb(ui_shared.OUTCOME_COLORS[outcome]), 190]
     )
     grouped["outcome_label"] = grouped["event_type"].map(OUTCOME_LABELS)
     grouped["distance_km"] = grouped["distance_km"].round(2)
     return grouped
-
-
-def _deck(rows: pd.DataFrame) -> pdk.Deck:
-    """Build the arc map of one scenario's rows."""
-    layer = pdk.Layer(
-        "ArcLayer",
-        data=rows,
-        get_source_position="[source_lng, source_lat]",
-        get_target_position="[target_lng, target_lat]",
-        get_source_color="color",
-        get_target_color="color",
-        get_width="trips",
-        width_scale=1,
-        width_min_pixels=1.5,
-        width_max_pixels=10,
-        pickable=True,
-    )
-    view_state = pdk.ViewState(
-        latitude=float(facilities["lat"].mean()),
-        longitude=float(facilities["lng"].mean()),
-        zoom=11,
-    )
-    return pdk.Deck(
-        layers=[layer],
-        initial_view_state=view_state,
-        map_style=None,
-        tooltip={
-            "html": (
-                "<b>{source_id} → {target_id}</b><br/>"
-                "Trips: {trips}<br/>Outcome: {outcome_label}<br/>Distance: {distance_km} km"
-            ),
-            "style": {"backgroundColor": "#1a1a19", "color": "#ffffff", "fontSize": "12px"},
-        },
-    )
 
 
 def _legend() -> None:
@@ -118,7 +78,10 @@ for column, (run_name, rows) in zip(columns, frames.items(), strict=True):
     with column:
         st.subheader(run_name)
         st.caption(f"Arcs riding in period {period}: {ui_shared.fmt_int(rows['trips'].sum())}")
-        st.pydeck_chart(_deck(rows), height=560)
+        st.pydeck_chart(
+            ui_shared.arc_deck(rows, facilities, "trips", TOOLTIP),
+            height=560,
+        )
 
 _legend()
 st.caption(

@@ -3,9 +3,10 @@
 ``dock_up_to_capacity`` is the single "dock in row order up to free capacity"
 rule for both docking sites -- arrivals at their planned station and a redirect
 round at the station chosen for it -- so its tests cover both target columns
-without a full engine run. The ``plan_overflow_redirect`` tests pin down where
-a redirect leg's travel time comes from: the OD matrix when the pair has an
-entry, the ``Routes`` estimate (distance over speed) when it does not.
+without a full engine run. The ``plan_overflow_redirect`` tests pin the full
+resolved outcome per bike (docked / riding / lost) and where a redirect leg's
+travel time comes from: the OD matrix when the pair has an entry, the
+``Routes`` estimate (distance over speed) when it does not.
 """
 
 import pandas as pd
@@ -95,31 +96,49 @@ def test_redirect_pair_missing_from_od_estimates_travel_time_from_distance():
     # No historical trip ever rode A -> B. B is 0.2 degrees north (~22.2 km);
     # at 10 km per period the leg takes round(2.22) = 2 periods.
     inventory, capacities, geo, overflow = _redirect_setup(lat_b=40.2)
-    redirects, lost = plan_overflow_redirect(
+    outcomes = plan_overflow_redirect(
         inventory, capacities, geo, _od([]), _routes(geo), overflow, period_id=5
     )
-    assert lost.empty
-    assert redirects["realized_target_id"].tolist() == ["B"]
-    assert redirects["leg_end_period"].tolist() == [7]
+    assert outcomes["outcome"].tolist() == ["riding"]
+    assert outcomes["realized_target_id"].tolist() == ["B"]
+    assert outcomes["leg_end_period"].tolist() == [7]
 
 
 def test_redirect_pair_present_in_od_keeps_the_historical_duration():
     # The OD matrix knows A -> B takes one period, so the distance estimate
     # (2 periods, as above) is not used.
     inventory, capacities, geo, overflow = _redirect_setup(lat_b=40.2)
-    redirects, lost = plan_overflow_redirect(
+    outcomes = plan_overflow_redirect(
         inventory, capacities, geo, _od([("A", "B", 1)]), _routes(geo), overflow, period_id=5
     )
-    assert lost.empty
-    assert redirects["leg_end_period"].tolist() == [6]
+    assert outcomes["outcome"].tolist() == ["riding"]
+    assert outcomes["leg_end_period"].tolist() == [6]
 
 
-def test_redirect_to_a_nearby_station_still_docks_in_the_same_period():
+def test_redirect_to_a_nearby_station_docks_within_the_same_period():
     # B is ~0.11 km away; the estimate rounds to zero periods, so the bike
-    # docks in the bounce period, as before the fallback existed.
+    # docks in the bounce period and the outcome is already "docked".
     inventory, capacities, geo, overflow = _redirect_setup(lat_b=40.001)
-    redirects, lost = plan_overflow_redirect(
+    outcomes = plan_overflow_redirect(
         inventory, capacities, geo, _od([]), _routes(geo), overflow, period_id=5
     )
-    assert lost.empty
-    assert redirects["leg_end_period"].tolist() == [5]
+    assert outcomes["outcome"].tolist() == ["docked"]
+    assert outcomes["realized_target_id"].tolist() == ["B"]
+    assert outcomes["leg_end_period"].tolist() == [5]
+
+
+def test_no_free_dock_anywhere_resolves_the_bike_as_lost():
+    # Both stations are full, so the redirect finds no target: the outcome is
+    # "lost" and the planning columns stay NA.
+    inventory = pd.DataFrame(
+        {"facility_id": ["A", "B"], "commodity_category": CLASSIC, "quantity": [1, 1]}
+    )
+    capacities = pd.DataFrame({"facility_id": ["A", "B"], "capacity": [1, 1]})
+    geo = pd.DataFrame({"facility_id": ["A", "B"], "lat": [40.0, 40.001], "lng": [-74.0, -74.0]})
+    overflow = pd.DataFrame({"planned_target_id": ["A"], "commodity_category": CLASSIC})
+    outcomes = plan_overflow_redirect(
+        inventory, capacities, geo, _od([]), _routes(geo), overflow, period_id=5
+    )
+    assert outcomes["outcome"].tolist() == ["lost"]
+    assert outcomes["realized_target_id"].isna().all()
+    assert outcomes["leg_end_period"].isna().all()

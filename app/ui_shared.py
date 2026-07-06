@@ -7,12 +7,18 @@ ramp, and the difference view uses the blue-gray-red diverging pair.
 
 from __future__ import annotations
 
+import dataclasses
+import pathlib
+from collections.abc import Callable
+from typing import NamedTuple
+
 import artifacts
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import pydeck as pdk
 import streamlit as st
-from artifacts import METRICS, PANEL_VALUES
+from artifacts import METRICS, PANEL_KEYS, PANEL_VALUES  # noqa: F401  (re-exported to pages)
 
 # --- Palette (validated with the data-viz checks) --------------------------
 SCENARIO_A_COLOR = "#2a78d6"
@@ -53,17 +59,57 @@ LEVEL_FACILITY = "Per period, bike type and facility"
 LEVELS = [LEVEL_GLOBAL, LEVEL_PERIOD, LEVEL_COMMODITY, LEVEL_FACILITY]
 
 
-# --- Cached loaders ---------------------------------------------------------
+# --- The run-artifact loader --------------------------------------------------
+# The one front door to a saved run (Notations.md §12). A page asks for a table
+# through the typed accessors below; the file layout, the caching, and the
+# old-artifact fallbacks all live here, so a page never names a parquet file or
+# re-checks which columns an older artifact carries.
 @st.cache_data(show_spinner=False)
 def _table_cached(run_name: str, table: str, mtime: float) -> pd.DataFrame:
     """Cache one parquet table; ``mtime`` invalidates the entry on rewrite."""
     return artifacts.load_run_table(run_name, table)
 
 
-def load_table(run_name: str, table: str) -> pd.DataFrame:
+def table_path(run_name: str, table: str) -> pathlib.Path:
+    """Path of one saved table (the downloads page needs the file itself)."""
+    return artifacts.run_dir(run_name) / f"{table}.parquet"
+
+
+def _load_table(run_name: str, table: str) -> pd.DataFrame:
     """Read one table of a saved run through the Streamlit cache."""
-    path = artifacts.run_dir(run_name) / f"{table}.parquet"
-    return _table_cached(run_name, table, path.stat().st_mtime)
+    return _table_cached(run_name, table, table_path(run_name, table).stat().st_mtime)
+
+
+def load_panel(run_name: str) -> pd.DataFrame:
+    """Load the facility period panel: one row per (period, facility, commodity)."""
+    return _load_table(run_name, "panel")
+
+
+def load_flow_totals(run_name: str) -> pd.DataFrame:
+    """One row per flow with its whole-trip values (origin, outcome, cost, ...)."""
+    return _load_table(run_name, "flow_totals")
+
+
+def load_facilities(run_name: str) -> pd.DataFrame:
+    """Load the facility attributes: id, category, coordinates, capacity."""
+    return _load_table(run_name, "facilities")
+
+
+def load_arcs(run_name: str, flow_type: str | None = None) -> pd.DataFrame | None:
+    """Load the arcs of a run, optionally only one ``flow_type``.
+
+    ``flow_type`` is ``"user_trip"`` (bike rides) or ``"rebalance"`` (truck
+    moves); ``None`` returns the whole table. The old-artifact fallback lives
+    here: arcs saved before the ``flow_type`` column existed hold user trips
+    only, so asking such a run for user trips returns the whole table, and
+    asking it for truck moves returns ``None`` (they cannot be told apart).
+    """
+    arcs = _load_table(run_name, "arcs")
+    if flow_type is None:
+        return arcs
+    if "flow_type" not in arcs.columns:
+        return arcs if flow_type == "user_trip" else None
+    return arcs[arcs["flow_type"] == flow_type]
 
 
 @st.cache_data(show_spinner=False)
@@ -76,6 +122,23 @@ def load_meta(run_name: str) -> dict:
     """Read a saved run's meta.json through the Streamlit cache."""
     path = artifacts.run_dir(run_name) / "meta.json"
     return _meta_cached(run_name, path.stat().st_mtime)
+
+
+class RebalancingSettings(NamedTuple):
+    """The rebalancing block of one run's meta.json."""
+
+    enabled: bool
+    truck_homes: list[str]
+
+
+def rebalancing_settings(meta: dict) -> RebalancingSettings:
+    """Read the rebalancing block of ``meta.json`` (one place for the fallback).
+
+    Runs saved before the rebalancing feature have no such block; they read as
+    rebalancing off with no trucks.
+    """
+    block = meta.get("rebalancing", {})
+    return RebalancingSettings(block.get("enabled", False), block.get("truck_homes", []))
 
 
 # --- Scenario picking -------------------------------------------------------
@@ -108,10 +171,9 @@ def pick_scenario_pair() -> tuple[str | None, str | None]:
         for label, name in [("A", run_a), ("B", run_b)]:
             if name is not None:
                 meta = load_meta(name)
-                # Runs saved before the rebalancing feature have no such key.
-                rebalancing = meta.get("rebalancing", {}).get("enabled", False)
-                trucks = meta.get("rebalancing", {}).get("truck_homes", [])
-                suffix = f", rebalancing on ({len(trucks)} trucks)" if rebalancing else ""
+                settings = rebalancing_settings(meta)
+                trucks = len(settings.truck_homes)
+                suffix = f", rebalancing on ({trucks} trucks)" if settings.enabled else ""
                 st.caption(
                     f"{label}: demand scale {meta['demand_scale_factor']}, "
                     f"{meta['number_of_periods']} periods{suffix}"
@@ -163,7 +225,19 @@ _KPI_FORMATS = {
     "count": fmt_int,
     "dollars": lambda v: f"${fmt_int(v)}",
     "km": lambda v: f"{fmt_int(v)} km",
+    "periods": lambda v: f"{v:.2f} periods",
 }
+
+
+def delta_b_minus_a(value_a: float, value_b: float, fmt: Callable[[float], str] = fmt_int) -> str:
+    """Format the one comparison convention: the difference is always B − A.
+
+    Returns the signed text for ``st.metric``: an ASCII leading ``-`` is what
+    ``st.metric`` reads as "went down", so the sign is put on by hand and the
+    unit format is applied to the absolute value.
+    """
+    diff = value_b - value_a
+    return f"{'+' if diff >= 0 else '-'}{fmt(abs(diff))}"
 
 
 def kpi_row(meta_a: dict, meta_b: dict | None = None) -> None:
@@ -184,8 +258,7 @@ def kpi_row(meta_a: dict, meta_b: dict | None = None) -> None:
         color = "off"
         if totals_b is not None:
             diff = totals_b[metric.name] - totals_a[metric.name]
-            # ASCII sign: st.metric reads the arrow direction from a leading "-".
-            delta = f"{'+' if diff >= 0 else '-'}{fmt(abs(diff))} (B − A)"
+            delta = f"{delta_b_minus_a(totals_a[metric.name], totals_b[metric.name], fmt)} (B − A)"
             # ``inverse`` marks "more is worse" numbers (losses, redirects, cost).
             color = ("inverse" if metric.more_is_worse else "off") if diff != 0 else "off"
         label = metric.label.split(" (")[0]
@@ -394,3 +467,138 @@ def top_facilities(flow_totals: pd.DataFrame, value: str, n: int = 6) -> list[st
         .head(n)
         .index.tolist()
     )
+
+
+# --- Arc maps -------------------------------------------------------------------
+def arc_map_rows(arcs: pd.DataFrame, group_keys: list[str], count_name: str) -> pd.DataFrame:
+    """Group arc rows into one map row per ``group_keys``: the count and the endpoints.
+
+    Owns the arc-row schema knowledge: every arc row carries its endpoint
+    coordinates (``source_lat`` .. ``target_lng``), so grouping keeps them with
+    ``"first"`` and the map needs no join. ``count_name`` names the summed
+    ``quantity`` column ("trips" on the trips map, "bikes" on the truck map);
+    ``distance_km`` comes back as the group mean (constant within a real group).
+    """
+    return arcs.groupby(group_keys, as_index=False).agg(
+        **{count_name: ("quantity", "sum")},
+        distance_km=("distance_km", "mean"),
+        source_lat=("source_lat", "first"),
+        source_lng=("source_lng", "first"),
+        target_lat=("target_lat", "first"),
+        target_lng=("target_lng", "first"),
+    )
+
+
+def arc_deck(
+    rows: pd.DataFrame,
+    facilities: pd.DataFrame,
+    width_col: str,
+    tooltip_html: str,
+    width_min_pixels: float = 1.5,
+    width_max_pixels: float = 10,
+) -> pdk.Deck:
+    """Build an arc map over the city: one pydeck ``ArcLayer`` with the house tooltip.
+
+    Owns pydeck's ``[lng, lat]`` coordinate order and the tooltip style. The
+    rows come from :func:`arc_map_rows` plus a per-row ``color`` (an RGBA
+    list) the page chose; ``width_col`` scales the arc width.
+    """
+    layer = pdk.Layer(
+        "ArcLayer",
+        data=rows,
+        get_source_position="[source_lng, source_lat]",
+        get_target_position="[target_lng, target_lat]",
+        get_source_color="color",
+        get_target_color="color",
+        get_width=width_col,
+        width_scale=1,
+        width_min_pixels=width_min_pixels,
+        width_max_pixels=width_max_pixels,
+        pickable=True,
+    )
+    view_state = pdk.ViewState(
+        latitude=float(facilities["lat"].mean()),
+        longitude=float(facilities["lng"].mean()),
+        zoom=11,
+    )
+    return pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        map_style=None,
+        tooltip={
+            "html": tooltip_html,
+            "style": {"backgroundColor": "#1a1a19", "color": "#ffffff", "fontSize": "12px"},
+        },
+    )
+
+
+# --- The flow_totals metric page ----------------------------------------------
+@dataclasses.dataclass(frozen=True)
+class FlowTotalsView:
+    """One ``flow_totals`` chart page, described once.
+
+    The Costs and Distance & duration pages are the same four-block page over
+    a different measure; this config names the differences and
+    :func:`flow_totals_page` renders the shared body. A new metric page is a
+    new ``FlowTotalsView``, not a copied page.
+    """
+
+    value: str  # flow_totals column to aggregate
+    agg: str  # "sum" or "mean"
+    tile_label: str  # label of the whole-run metric tile
+    y_title: str  # y-axis title of the per-period chart
+    totals_key: str  # METRICS name of the precomputed total in meta["totals"]
+    fmt: Callable[[float], str]  # one value with its unit
+    # Tile text for the whole-run view; gets the run's meta (for period length).
+    fmt_global: Callable[[float, dict], str] | None = None
+    global_note: str | None = None  # caption under the whole-run tiles
+
+
+def flow_totals_page(run_a: str, run_b: str | None, view: FlowTotalsView, level: str) -> None:
+    """Render the shared body of a ``flow_totals`` metric page at one detail level.
+
+    The whole-run level shows one tile per scenario (the precomputed total
+    from ``meta["totals"]``) and the B − A difference; every other level
+    aggregates with :func:`aggregate_flow_totals` and draws
+    :func:`level_line_chart` plus the data table.
+    """
+    frames = {run_a: load_flow_totals(run_a)}
+    if run_b:
+        frames[run_b] = load_flow_totals(run_b)
+
+    if level == LEVEL_GLOBAL:
+        columns = st.columns(len(frames) + 1)
+        values: dict[str, float] = {}
+        for column, run_name in zip(columns, frames, strict=False):
+            meta = load_meta(run_name)
+            values[run_name] = float(meta["totals"][view.totals_key])
+            text = (
+                view.fmt_global(values[run_name], meta)
+                if view.fmt_global
+                else view.fmt(values[run_name])
+            )
+            column.metric(f"{view.tile_label} — {run_name}", text)
+        if run_b:
+            columns[-1].metric(
+                "Difference (B − A)", delta_b_minus_a(values[run_a], values[run_b], view.fmt)
+            )
+        if view.global_note:
+            st.caption(view.global_note)
+        return
+
+    facilities = None
+    if level == LEVEL_FACILITY:
+        options = sorted(frames[run_a]["source_id"].dropna().unique())
+        facilities = st.multiselect(
+            "Origin facilities (source_id)",
+            options,
+            default=top_facilities(frames[run_a], view.value),
+        )
+        if not facilities:
+            st.info("Pick at least one facility.")
+            st.stop()
+    data = aggregate_flow_totals(frames, view.value, view.agg, level, facilities)
+    fig = level_line_chart(data, view.value, view.y_title, scenario_color_map(run_a, run_b))
+    st.plotly_chart(fig, width="stretch")
+    with st.expander("Data table"):
+        st.dataframe(data, hide_index=True, width="stretch")

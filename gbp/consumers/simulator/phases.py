@@ -1,10 +1,11 @@
 """Simulation phases.
 
-Each phase reads the state, applies its inventory changes, writes its events to
-the journal through :meth:`SimulationState.apply_step_events`, and returns the
-new state. The three phases split one period into these steps: dock earlier
-arrivals -> form departures (and build the trips) -> dock arrivals from this
-same period.
+Each phase reads the state, builds this period's events, and writes them
+through :meth:`SimulationState.apply_step_events` -- the one call that appends
+the events to the journal and moves the projections (inventory, ``in_transit``)
+by exactly what the events imply. The three phases split one period into these
+steps: dock earlier arrivals -> form departures (and build the trips) -> dock
+arrivals from this same period.
 
 :class:`DockArrivals` parks the bikes that arrive this period. It fills the free
 dock slots first, then sends any extra bikes on a new leg to the nearest station
@@ -23,6 +24,8 @@ from gbp.model import (
     PERIOD_OWN_RANK,
     arrived_events,
     departed_events,
+    empty_flows_journal,
+    inventory_deltas_from_events,
     lost_events,
     redirect_leg_events,
     redirected_events,
@@ -37,19 +40,26 @@ from .mechanics import (
     plan_overflow_redirect,
     realize_departures,
 )
-from .state import (
-    PeriodRow,
-    SimulationState,
-    adjust_inventory,
-    departure_deltas_from_counts,
-    dock_deltas,
-)
+from .state import PeriodRow, SimulationState, adjust_inventory
 
 
 class Phase:
-    """Base class for one phase: a single step of a period, run every period."""
+    """Base class for one phase: a single step of a period, run every period.
 
-    name = "phase"
+    A phase declares where its events sort inside a period once
+    (:attr:`phase_rank`) and builds this period's events
+    (:meth:`build_events`). :meth:`execute` writes them through
+    :meth:`SimulationState.apply_step_events`, which stamps the ordering
+    columns and moves the projections -- so a normal phase implements only
+    ``build_events``. The engine checks at construction time that the phase
+    list is ordered by ``phase_rank``, so the list position and the stamped
+    rank cannot disagree. A phase that also replaces a named state field (the
+    rebalancing plan) overrides ``execute`` and writes its events through the
+    same call.
+    """
+
+    #: Where this phase's events sort inside a period (Notations.md §0.1).
+    phase_rank: int
 
     def execute(
         self,
@@ -58,7 +68,19 @@ class Phase:
         period: PeriodRow,
         config: EnvironmentConfig,
     ) -> SimulationState:
-        """Apply the phase to the state; return the next state (events appended)."""
+        """Run the phase: build this period's events and write them as one batch."""
+        return state.apply_step_events(
+            self.build_events(state, resolved, period, config), self.phase_rank
+        )
+
+    def build_events(
+        self,
+        state: SimulationState,
+        resolved: ResolvedModelData,
+        period: PeriodRow,
+        config: EnvironmentConfig,
+    ) -> pd.DataFrame:
+        """Build this period's events; an empty frame means nothing happened."""
         raise NotImplementedError
 
 
@@ -83,7 +105,7 @@ class DockArrivals(Phase):
         if when not in ("previous", "same"):
             raise ValueError(f"when must be 'previous' or 'same', got {when!r}")
         self.when = when
-        self.name = f"dock_arrivals_{when}"
+        self.phase_rank = DOCK_PREVIOUS_RANK if when == "previous" else DOCK_SAME_RANK
 
     def _due_arrivals(self, in_transit: pd.DataFrame, t: int) -> pd.DataFrame:
         """Select the in-transit flows this phase docks at period ``t`` (picked by ``when``).
@@ -97,31 +119,35 @@ class DockArrivals(Phase):
             return in_transit[due_now & (in_transit["start_period"] < t)]
         return in_transit[due_now & (in_transit["start_period"] == t)]
 
-    def execute(
+    def build_events(
         self,
         state: SimulationState,
         resolved: ResolvedModelData,
         period: PeriodRow,
         config: EnvironmentConfig,
-    ) -> SimulationState:
+    ) -> pd.DataFrame:
         """Dock this period's due arrivals, redirect the overflow, lose what fits nowhere."""
         t = period.period_id
         due = self._due_arrivals(state.in_transit, t)
         if due.empty:
-            return state
-        inventory = state.state_inventory_df
-        inventory_before = int(inventory["quantity"].sum())
+            return empty_flows_journal()
 
         # Dock at the planned station while free docks last.
         docked, overflow = dock_up_to_capacity(
-            due, free_docks(inventory, resolved.facilities_capacities_df)
+            due, free_docks(state.state_inventory_df, resolved.facilities_capacities_df)
         )
-        inventory = adjust_inventory(inventory, dock_deltas(docked))
+        arrivals_docked = arrived_events(docked, t)
 
-        # Plan a new leg for each bike that did not fit. Legs with zero travel
-        # time dock right now; the others dock when they arrive.
-        redirects, lost = plan_overflow_redirect(
-            inventory,
+        # Resolve every bike that did not fit: docked at a redirect target,
+        # riding a new leg, or lost. The redirect must see the docks the
+        # planned dockings just took, so it gets a local copy of the inventory
+        # with those dockings applied (a decision input; the real inventory is
+        # written when the events are applied).
+        after_docked = adjust_inventory(
+            state.state_inventory_df, inventory_deltas_from_events(arrivals_docked)
+        )
+        outcomes = plan_overflow_redirect(
+            after_docked,
             resolved.facilities_capacities_df,
             resolved.facilities_geo_df,
             resolved.historical_od_matrix_df,
@@ -129,37 +155,25 @@ class DockArrivals(Phase):
             overflow,
             t,
         )
+        # Check -- each due bike docked, left on a new leg, or was lost, exactly once.
+        assert len(docked) + len(outcomes) == len(due), "due flows not conserved"
+
+        # Turn the outcomes into events. A redirected bike always bounces and
+        # opens a new leg; an outcome "docked" also arrives within this period.
+        redirects = outcomes[outcomes["outcome"] != "lost"]
+        lost = outcomes[outcomes["outcome"] == "lost"]
         bounces = redirected_events(redirects, t).assign(phase_round=redirects["phase_round"])
         legs = redirect_leg_events(redirects, t).assign(phase_round=redirects["phase_round"])
-        legs_now = legs[legs["planned_end_period"] == t]
-        legs_later = legs[legs["planned_end_period"] > t]
+        legs_now = legs[redirects["outcome"] == "docked"]
         arrivals_now = arrived_events(legs_now, t).assign(phase_round=legs_now["phase_round"])
-        inventory = adjust_inventory(inventory, dock_deltas(legs_now))
 
         lost_dock_full = lost_events(lost, t, "dock_full")
-        new_flows = pd.concat(
-            [arrived_events(docked, t), lost_dock_full, bounces, legs, arrivals_now],
-            ignore_index=True,
-        )
         # One inventory step per phase_round, in apply order: the planned
         # dockings (round 0), then each redirect round (Notations.md §0.1).
-        phase_rank = DOCK_PREVIOUS_RANK if self.when == "previous" else DOCK_SAME_RANK
-        new_state = state.apply_step_events(new_flows, phase_rank)
-
-        # The due bikes leave the in-transit set; legs that take time join it.
-        in_transit = pd.concat(
-            [state.in_transit.drop(due.index), legs_later.drop(columns="phase_round")],
+        return pd.concat(
+            [arrivals_docked, lost_dock_full, bounces, legs, arrivals_now],
             ignore_index=True,
         )
-        new_state = new_state.with_inventory(inventory).with_in_transit(in_transit)
-
-        # Check -- each due bike docked, left on a new leg, or was lost, exactly
-        # once; only the bikes that docked now moved inventory.
-        assert len(docked) + len(redirects) + len(lost) == len(due), "due flows not conserved"
-        assert int(inventory["quantity"].sum()) - inventory_before == len(docked) + len(legs_now), (
-            "docked count and inventory moved disagree"
-        )
-        return new_state
 
 
 class FormDeparturesPhase(Phase):
@@ -182,15 +196,15 @@ class FormDeparturesPhase(Phase):
     ``lost`` events share one ``step_id`` (Notations.md §0.1).
     """
 
-    name = "form_departures"
+    phase_rank = PERIOD_OWN_RANK
 
-    def execute(
+    def build_events(
         self,
         state: SimulationState,
         resolved: ResolvedModelData,
         period: PeriodRow,
         config: EnvironmentConfig,
-    ) -> SimulationState:
+    ) -> pd.DataFrame:
         """Split this period's demand into departed flows and stockout losses."""
         t = period.period_id
         demand = resolved.historical_demand_df
@@ -199,16 +213,12 @@ class FormDeparturesPhase(Phase):
             (demand_now["quantity"] * config.demand_scale_factor).round().astype("Int64")
         )
         if demand_now.empty:
-            return state
-        inventory_before = int(state.state_inventory_df["quantity"].sum())
+            return empty_flows_journal()
 
         # Mechanics -- bound the demand by the inventory, then spread each
         # source's departures over the targets with the OD matrix and split
         # the totals into one departed flow per bike.
         departures = realize_departures(demand_now, state.state_inventory_df)
-        inventory = adjust_inventory(
-            state.state_inventory_df, departure_deltas_from_counts(departures)
-        )
         lost_demand = departures[departures["lost"] > 0]
         departed_counts = departures.rename(
             columns={"facility_id": "source_id", "departed": "quantity"}
@@ -217,7 +227,8 @@ class FormDeparturesPhase(Phase):
         trips_now = expand_potential_trips(potential, t)
 
         # Events -- the departures and the stockout losses are one batch, so
-        # apply_step_events gives them one shared step_id.
+        # apply_step_events gives them one shared step_id. It also takes the
+        # departed bikes out of the inventory and puts them into in_transit.
         new_departed = departed_events(trips_now)
         batches = [] if new_departed.empty else [new_departed]
         if not lost_demand.empty:
@@ -226,16 +237,5 @@ class FormDeparturesPhase(Phase):
             )
             batches.append(lost_events(lost_demand, t, "stockout"))
         if not batches:
-            return state.with_inventory(inventory)
-        new_flows = pd.concat(batches, ignore_index=True)
-        new_state = state.apply_step_events(new_flows, PERIOD_OWN_RANK)
-
-        # Writes -- the new departed flows enter the in-transit working set.
-        if not new_departed.empty:
-            in_transit = pd.concat([state.in_transit, new_departed], ignore_index=True)
-            new_state = new_state.with_in_transit(in_transit)
-        new_state = new_state.with_inventory(inventory)
-
-        departed_total = inventory_before - int(inventory["quantity"].sum())
-        assert departed_total == int(departures["departed"].sum()), "stockout moves no inventory"
-        return new_state
+            return empty_flows_journal()
+        return pd.concat(batches, ignore_index=True)

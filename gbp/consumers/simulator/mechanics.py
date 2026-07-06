@@ -6,11 +6,12 @@ and overflow redirect (the dock side) and demand realization plus OD expansion
 holds the rules themselves.
 
 Mechanics never touch :class:`SimulationState` or the event journal: they take
-plain frames and return *decisions* (what fits, what overflows, where each
-overflow flow docks). Applying those decisions to the live state and writing the
-events is the phase's job. So this module depends only on :mod:`state` for the
-inventory arithmetic, :mod:`gbp.routing` for travel times, and on nothing above
-it: ``journal <- state <- mechanics <- phases <- engine``.
+plain frames and return *decisions* (what fits, what overflows, how each
+overflow flow resolves). Turning those decisions into events is the phase's
+job; writing the events applies them to the state. So this module depends only
+on :mod:`state` for the inventory arithmetic, :mod:`gbp.routing` for travel
+times, and on nothing above it:
+``journal <- state <- mechanics <- phases <- engine``.
 """
 
 import numpy as np
@@ -169,21 +170,26 @@ def plan_overflow_redirect(
     routes: Routes,
     overflow: pd.DataFrame,
     period_id: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Plan a new leg for each overflow flow: to the nearest station with a free dock.
+) -> pd.DataFrame:
+    """Resolve each overflow flow: docked at a redirect target, riding a new leg, or lost.
 
-    A decision, not a state change: applying it (inventory, events) is the
-    phase's job. Each planned leg gets three columns: ``realized_target_id``
-    (the station it heads to), ``leg_end_period`` (``period_id`` plus the
-    pair's travel time from the OD matrix, see :func:`_leg_durations`) and
-    ``phase_round`` (the round that planned it, 1-based).
+    A decision, not a state change: turning the outcomes into events is the
+    phase's job. Returns one row per overflow flow with four added columns:
+
+    - ``outcome`` -- how the flow resolved this period:
+      ``"docked"`` (its new leg had zero travel time and a dock was taken for
+      it now), ``"riding"`` (its new leg takes time; whether it fits is
+      decided when it arrives, so it may bounce again there) or ``"lost"``
+      (no station in the network has a free dock);
+    - ``realized_target_id`` -- the station chosen for the new leg (NA when
+      lost);
+    - ``leg_end_period`` -- ``period_id`` plus the pair's travel time from the
+      OD matrix (see :func:`_leg_durations`; NA when lost);
+    - ``phase_round`` -- the round that resolved it, 1-based (NA when lost).
 
     Legs that dock in this same period (zero travel time) fill docks in rounds:
     each round docks up to the free capacity, and the next round sees those
-    docks taken -- a running local copy of inventory tracks them. A leg that
-    takes time holds no dock now: whether it fits is decided when it arrives,
-    so it may bounce again there. A flow is lost only when no station in the
-    network has a free dock.
+    docks taken -- a running local copy of inventory tracks them.
 
     Parameters
     ----------
@@ -205,11 +211,11 @@ def plan_overflow_redirect(
 
     Returns
     -------
-    tuple of (pandas.DataFrame, pandas.DataFrame)
-        ``redirects`` -- the overflow flows with the three planning columns --
-        and the flows that found no free dock anywhere (lost).
+    pandas.DataFrame
+        One row per overflow flow, with ``outcome``, ``realized_target_id``,
+        ``leg_end_period`` and ``phase_round``.
     """
-    planned = []
+    resolved = []
     remaining = overflow
     running = inventory
     round_no = 0
@@ -233,21 +239,29 @@ def plan_overflow_redirect(
         now = found[found["leg_end_period"] == period_id]
         # The same docking rule as the planned dockings, at the redirect's target.
         docked_now, bounced = dock_up_to_capacity(now, free, "realized_target_id")
-        planned += [later, docked_now]
+        resolved += [later.assign(outcome="riding"), docked_now.assign(outcome="docked")]
         running = adjust_inventory(running, dock_deltas(docked_now, "realized_target_id"))
         remaining = bounced.drop(columns=["realized_target_id", "leg_end_period", "phase_round"])
 
-    if planned:
-        redirects = pd.concat(planned, ignore_index=True)
+    lost = remaining.assign(
+        outcome="lost",
+        realized_target_id=pd.Series(pd.NA, index=remaining.index, dtype="string"),
+        leg_end_period=pd.Series(pd.NA, index=remaining.index, dtype="Int64"),
+        phase_round=pd.Series(pd.NA, index=remaining.index, dtype="Int64"),
+    )
+    parts = [part for part in [*resolved, lost] if not part.empty]
+    if parts:
+        outcomes = pd.concat(parts, ignore_index=True)
     else:
-        redirects = overflow.iloc[:0].assign(
+        outcomes = overflow.iloc[:0].assign(
+            outcome=pd.Series(dtype="string"),
             realized_target_id=pd.Series(dtype="string"),
-            leg_end_period=pd.Series(dtype="int64"),
-            phase_round=pd.Series(dtype="int64"),
+            leg_end_period=pd.Series(dtype="Int64"),
+            phase_round=pd.Series(dtype="Int64"),
         )
-    # Tier-1 contract: every overflow flow either gets a leg or is lost, never both.
-    assert len(redirects) + len(remaining) == len(overflow), "overflow flows not conserved"
-    return redirects, remaining
+    # Tier-1 contract: every overflow flow is resolved exactly once.
+    assert len(outcomes) == len(overflow), "overflow flows not conserved"
+    return outcomes
 
 
 # ---------------------------------------------------------------------------

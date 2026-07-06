@@ -31,7 +31,7 @@ Everything lives in one file, `gbp/model/flows.py`. Its parts, top to bottom:
 | Event builders | `departed_events`, `arrived_events`, `redirected_events`, `redirect_leg_events`, `lost_events`, `rebalance_departed_events`, `rebalance_arrived_events` |
 | Empty frames | `empty_in_transit`, `empty_flows_journal` |
 | Finalizing | `phase_rank_by_timing`, `finalize_flows` (with the helper `_assign_step_id`) |
-| Marginals | `flows_to_departures`, `flows_to_arrivals`, `flows_to_redirects`, `flows_to_losses`, `flows_to_od_matrix`, `get_inventory_df`, `inventory_at_moments` |
+| Marginals | `flows_to_departures`, `flows_to_arrivals`, `flows_to_redirects`, `flows_to_losses`, `flows_to_od_matrix`, `flows_to_panel`, `get_inventory_df`, `inventory_at_moments` |
 | Wide views | `flows_with_inventory`, `flows_with_costs`, `flows_with_measures` |
 | Geometry helpers | `haversine_km`, `neighbor_distance_sq` |
 | Redirect explainer | `redirect_neighbor_table` |
@@ -283,7 +283,7 @@ Three functions widen the journal — same rows, more columns:
 
 `flows_with_measures` is the one place a journal gains its measure columns
 ([Notations.md §6.1](../Notations.md#61-rate-and-cost-money)). The wide
-journal (`get_flows_wide` in the loader) and the artifact builder
+journal (the canonical notebook) and the artifact builder
 (`app/artifacts.py`) both call it, so `flows.parquet` and a notebook's wide
 journal price a trip identically.
 

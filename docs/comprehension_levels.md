@@ -96,8 +96,8 @@ phases (`phases.py`), the loop (`engine.py`), and rebalancing
 return decisions — which flows fit into the docks and which overflow; phases
 apply those decisions to the state and write events into the journal; the
 engine runs the phases in a fixed order once per period. Knows the artifact
-builder has one build function per saved table (`build_panel`, `build_arcs`,
-`build_flow_totals`). Can draw the full module diagram with labeled arrows. But
+builder has one build function per saved table (`build_arcs`,
+`build_flow_totals`; the panel comes from the model read-model `flows_to_panel`). Can draw the full module diagram with labeled arrows. But
 which columns the flow journal has and what their types are — at this level
 still unknown.
 

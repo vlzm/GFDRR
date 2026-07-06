@@ -48,6 +48,7 @@ from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import (
     REBALANCE_RANK,
     haversine_km,
+    inventory_deltas_from_events,
     rebalance_arrived_events,
     rebalance_departed_events,
 )
@@ -55,7 +56,7 @@ from gbp.model import (
 from .config import EnvironmentConfig
 from .mechanics import dock_up_to_capacity, free_docks
 from .phases import Phase
-from .state import PeriodRow, SimulationState, SimulatorConfigError, adjust_inventory, dock_deltas
+from .state import PeriodRow, SimulationState, SimulatorConfigError, adjust_inventory
 
 # ---------------------------------------------------------------------------
 # Table schemas (Notations.md §14)
@@ -631,7 +632,8 @@ class PlanRebalancingPhase(Phase):
         inject a hand-written stand-in here.
     """
 
-    name = "plan_rebalancing"
+    # Writes no events; the rank only places the phase in the ordered list.
+    phase_rank = REBALANCE_RANK
 
     def __init__(self, params: RebalancingParams, solver: SolverFn = solve_rebalance_vrp) -> None:
         self.params = params
@@ -709,7 +711,7 @@ class ApplyRebalancingPhase(Phase):
     is the parking of last resort.
     """
 
-    name = "apply_rebalancing"
+    phase_rank = REBALANCE_RANK
 
     def execute(
         self,
@@ -726,31 +728,28 @@ class ApplyRebalancingPhase(Phase):
         if plan.empty and not on_truck.any():
             return state
 
+        # `inventory` is a local decision copy: each round's docking and pickup
+        # decisions must see the docks the earlier rounds took or freed. The
+        # real inventory and in_transit are written by apply_step_events below.
         inventory = state.state_inventory_df
-        inventory_before = int(inventory["quantity"].sum())
         home_by_resource = resolved.resources_df.set_index("resource_id")["home_facility_id"]
         capacities = resolved.facilities_capacities_df
         batches: list[pd.DataFrame] = []
-        docked_n = 0
 
         # Round 0 -- dropoffs due now for bikes picked up in an earlier period.
         due_previous = in_transit[on_truck & (in_transit["planned_end_period"] == t)]
-        in_transit = in_transit.drop(due_previous.index)
         if not due_previous.empty:
             arrived, inventory = _dock_dropoffs(
                 due_previous, inventory, capacities, home_by_resource, t
             )
             batches.append(arrived.assign(phase_round=0))
-            docked_n += len(arrived)
 
         # Round 1 -- this period's pickups, cut to the bikes actually on hand.
         due_same = None
-        picked_n = 0
         if not plan.empty:
             due_pickups = plan[plan["pickup_period"] == t]
             plan = plan[plan["pickup_period"] > t]
             executed = _pickups_up_to_inventory(due_pickups, inventory)
-            picked_n = len(executed)
             if not executed.empty:
                 departed = rebalance_departed_events(
                     pd.DataFrame(
@@ -766,17 +765,8 @@ class ApplyRebalancingPhase(Phase):
                     )
                 )
                 batches.append(departed.assign(phase_round=1))
-                undocked = (
-                    departed.groupby(["source_id", "commodity_category"])
-                    .size()
-                    .mul(-1)
-                    .reset_index(name="delta")
-                    .rename(columns={"source_id": "facility_id"})
-                )
-                inventory = adjust_inventory(inventory, undocked)
+                inventory = adjust_inventory(inventory, inventory_deltas_from_events(departed))
                 due_same = departed[departed["planned_end_period"] == t]
-                later = departed[departed["planned_end_period"] > t]
-                in_transit = pd.concat([in_transit, later], ignore_index=True)
 
         # Round 2 -- dock the dropoffs of bikes picked up within this period.
         if due_same is not None and not due_same.empty:
@@ -784,22 +774,12 @@ class ApplyRebalancingPhase(Phase):
                 due_same, inventory, capacities, home_by_resource, t
             )
             batches.append(arrived.assign(phase_round=2))
-            docked_n += len(arrived)
 
         new_state = state
         if batches:
             new_flows = pd.concat(batches, ignore_index=True)
-            new_state = new_state.apply_step_events(new_flows, REBALANCE_RANK)
-        new_state = (
-            new_state.with_inventory(inventory)
-            .with_in_transit(in_transit)
-            .with_rebalance_plan(plan)
-        )
-
-        # Check -- only the executed pickups and dockings moved inventory.
-        moved = int(inventory["quantity"].sum()) - inventory_before
-        assert moved == docked_n - picked_n, "rebalance events and inventory moved disagree"
-        return new_state
+            new_state = new_state.apply_step_events(new_flows, self.phase_rank)
+        return new_state.with_rebalance_plan(plan)
 
 
 def _dock_dropoffs(
@@ -813,15 +793,15 @@ def _dock_dropoffs(
 
     The same docking rule as the user phases (:func:`dock_up_to_capacity`) at
     the planned station; the overflow's ``realized_target_id`` becomes the
-    truck's home depot. Returns the ``arrived`` events and the adjusted
-    inventory.
+    truck's home depot. Returns the ``arrived`` events and the adjusted local
+    inventory copy (a decision input for the caller's later rounds).
     """
     fits, overflow = dock_up_to_capacity(due, free_docks(inventory, capacities))
     fits = fits.assign(realized_target_id=fits["planned_target_id"])
     overflow = overflow.assign(realized_target_id=overflow["resource_id"].map(home_by_resource))
     landed = pd.concat([fits, overflow], ignore_index=True)
     events = rebalance_arrived_events(landed, period_id)
-    inventory = adjust_inventory(inventory, dock_deltas(events, "realized_target_id"))
+    inventory = adjust_inventory(inventory, inventory_deltas_from_events(events))
     return events, inventory
 
 
