@@ -39,14 +39,16 @@ One saved run is a folder `data/runs/<run_name>/` with six files:
 | `flow_totals.parquet` | flow, with its whole-trip values | `build_flow_totals` |
 | `facilities.parquet` | facility, with coordinates and capacity | `build_facilities` |
 
-The UI reads these files and nothing else. `DATA_DIR` moves the data folder;
-without it, `data/` at the repository root is used (`artifacts.data_dir`).
+Saved-run pages read these files. They do not read the raw CSV. The Run
+scenario page reads the raw CSV only when it creates a new artifact. `DATA_DIR`
+moves the data folder; without it, `data/` at the repository root is used
+(`artifacts.data_dir`).
 
 ## Step 1: `runner.py` — Run And Save
 
-Two functions split the work by cost.
+Two functions split the work by runtime.
 
-`build_graph_data(trips_path, ...)` is the heavy step: it loads the raw CSV
+`build_graph_data(trips_path, ...)` is the slow step: it loads the raw CSV
 into `RawModelData` and resolves it into `ResolvedModelData`
 (see [dataloader.md](dataloader.md)). It takes minutes and is independent of
 the run parameters, so callers run it once and reuse the result.
@@ -144,17 +146,21 @@ Metric("lost_demand", "Lost demand (lost_demand)", "Lost (stockout)",
 ```
 
 `PANEL_VALUES`, the UI label dictionaries, the KPI row and the totals in
-`meta.json` are all built from this one list. Adding a metric to `METRICS` is
-the only step: it cannot appear in a picker without a label, or miss the KPI
-row.
+`meta.json` are all built from this one list. A metric with `panel_value=True`,
+`panel_total=True`, or `kpi=True` is used in the matching place. Adding a metric
+does not require separate label, picker, KPI and totals lists.
 
 ### Save And Load
 
 `save_run` writes the five parquet files first and `meta.json` last, so a
 folder with a `meta.json` is always a complete artifact — `list_runs` keys on
-that file. `next_free_run_name` gives a taken name a `_version_2`,
-`_version_3`, … suffix, so a saved run is never overwritten. `load_run_table`
-and `load_run_meta` are the only read paths.
+that file. `load_run_table` and `load_run_meta` are the only artifact read
+paths.
+
+The Run scenario page calls `next_free_run_name` before it runs. A taken name
+gets a `_version_2`, `_version_3`, … suffix there, so that page does not
+overwrite a saved run. A caller that passes an existing `run_name` directly to
+`save_run` replaces the files in that folder.
 
 ## Step 3: The Streamlit App
 
@@ -188,9 +194,9 @@ The pages, and which artifact tables each reads:
 | Costs | `views/costs.py` | `flow_totals` |
 | Distance & duration | `views/distance_duration.py` | `flow_totals` |
 | Single facility | `views/facility_detail.py` | `panel`, `facilities` |
-| Download data | `views/downloads.py` | every table, as CSV downloads |
+| Download data | `views/downloads.py` | `flow_totals`, `panel` as CSV downloads |
 
-"Run scenario" is the one page that computes anything heavy: it caches
+"Run scenario" is the one page that computes anything slow: it caches
 `build_graph_data` with `st.cache_resource` (one load per CSV path) and calls
 `runner.run_scenario` with `on_progress=st.write`, so the stages appear in a
 status box. Every other page follows one pattern: pick the scenario pair,
@@ -198,7 +204,7 @@ load its tables through the cache, slice, draw.
 
 ## Why It Is Built This Way
 
-### The UI Is A Pure Reader
+### Saved-Run Pages Read Saved Files
 
 Every journal-level computation happens once, in `build_run_tables`, when the
 run is saved. Pages only load parquet files, slice them, and draw. This keeps
@@ -216,8 +222,8 @@ leaves a folder the UI never lists, instead of a half-readable run.
 
 Labels, KPI tiles, panel columns and `meta["totals"]` used to be four lists
 to keep in sync. Describing each metric once and deriving the four from the
-one list removes the drift: a metric cannot be shown without a label or
-summed without a tile.
+one list keeps them consistent. A metric marked with `panel_value=True`,
+`panel_total=True`, or `kpi=True` is used in the matching UI or totals output.
 
 ### The Fleet And The Sized State Never Touch `graph_data`
 

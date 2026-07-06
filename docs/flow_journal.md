@@ -83,8 +83,9 @@ event 1). Each redirect bounce closes the current arc and opens the next one.
 Row uniqueness is the pair `(flow_id, event_id)`.
 
 The builders set `move_id` and `event_id` at emit time. The three order
-columns are stamped later, by whoever applies the events (see
-"Finalizing The Journal" below).
+columns are set after builder output. The simulator stamps all three in
+`SimulationState.apply_step_events`; the historical loader stamps
+`phase_rank`, and `finalize_flows` fills the remaining order columns.
 
 ## Which Events Move Inventory
 
@@ -164,9 +165,8 @@ events that created it).
 
 ## Finalizing The Journal
 
-While a run is going, events are appended in whatever batches the producer
-works in. `finalize_flows` turns the accumulated journal into the finished
-one:
+Before a journal is read, `finalize_flows` turns the appended event batches
+into the finished table:
 
 ```python
 def finalize_flows(journal):
@@ -177,10 +177,10 @@ def finalize_flows(journal):
     return flows[FLOW_EVENT_COLUMNS]
 ```
 
-It casts the types, settles the three order columns, sorts by
+It casts the types, settles the order columns, sorts by
 `(step_id, flow_id, event_id)`, and cuts the frame to exactly
-`FLOW_EVENT_COLUMNS`. It assigns no trip ids — `move_id` and `event_id` were
-set by the builders.
+`FLOW_EVENT_COLUMNS`. It does not assign trip ids. The builders already set
+`move_id` and `event_id`.
 
 The work is in `_assign_step_id`. A step is one batch of `+1`/`-1` inventory
 changes applied together; `step_id` is its run-global ordinal
@@ -215,8 +215,8 @@ A real departure or a stockout loss is the period's own activity (rank 1). Any
 other event is a docking-phase event: rank 0 when the flow opened in an
 earlier period, rank 2 when it opened in this one. The rule matches the
 simulator's phase order by construction, and the scenario test
-`test_step_id_is_a_pure_function_of_the_journal` uses it as the independent
-oracle that locks the agreement.
+`test_step_id_is_a_pure_function_of_the_journal` uses it to check that the
+historical order and the simulator order agree.
 
 ## The Marginals (Reading The Journal Back)
 
@@ -279,7 +279,7 @@ Three functions widen the journal — same rows, more columns:
 |---|---|---|
 | `flows_with_inventory` | `facility_id` (the event's own facility), `inventory_before`, `inventory_after` | initial inventory |
 | `flows_with_costs` | `rate`, `elapsed_periods`, `cost` | rates, `period_len` |
-| `flows_with_measures` | the two above's money columns plus `planned_duration_periods`, `realized_duration_periods`, `planned_distance_km`, `realized_distance_km` | `routes`, rates, `period_len` |
+| `flows_with_measures` | the money columns from `flows_with_costs` plus `planned_duration_periods`, `realized_duration_periods`, `planned_distance_km`, `realized_distance_km` | `routes`, rates, `period_len` |
 
 `flows_with_measures` is the one place a journal gains its measure columns
 ([Notations.md §6.1](../Notations.md#61-rate-and-cost-money)). The wide
@@ -295,10 +295,11 @@ final `arrived` is the whole trip's duration and cost.
 
 `redirect_neighbor_table(flows, initial_inventory, geo, flow_id, ...)` answers
 one question after a run: was this bike's redirect the right choice? A bike
-bounced off its full station B and was sent to station C. The function returns
-B's neighbour stations in distance order out to C, each with its dock
-occupancy just before and just after the redirect step. The nearer neighbours
-should show no free dock, and C should be the first with room.
+bounced off a full station and was sent to another station. The function
+returns the full station's neighbours in distance order, up to the station the
+bike was sent to. Each row shows dock occupancy just before and just after the
+redirect step. The nearer neighbours should show no free dock, and the chosen
+station should be the first one with room.
 
 It ranks neighbours with `neighbor_distance_sq` — the same squared-distance
 metric the redirect mechanics use to make the decision — so the order the
@@ -351,18 +352,18 @@ in `gbp/consumers/simulator/validation.py` and are described in
 
 ### Write And Read Live In One Module
 
-The module owns one secret — the shape of a flow event — on both sides: the
-builders that write events and the read-models that read them back. Splitting
-them into a "writers" module and a "readers" module would leak the column
-layout across two files, and every schema change would have to be made twice.
+The module owns one internal detail on both sides: the shape of a flow event.
+The builders write events, and the read-models read them back. Splitting them
+into a "writers" module and a "readers" module would spread the column layout
+across two files, and every schema change would have to be made twice.
 
-### The Model Layer Is The Bottom
+### The Model Layer Has No Loader Or Simulator Imports
 
 `flows.py` imports nothing from the loaders or the simulator (the one `Routes`
 import is type-checking only). Both of them import from it. This direction is
 what makes the historical and simulated views comparable: `get_inventory_df`
-is one function, so "historical inventory" and "simulated inventory" cannot
-drift apart — there is no second definition to drift.
+is one function, so "historical inventory" and "simulated inventory" use the
+same definition.
 
 ### One Inventory Delta Rule
 
@@ -390,4 +391,4 @@ sides need them: the loaders (trip distances) and the simulator (redirect
 decisions). The import direction only allows sharing at the bottom.
 `neighbor_distance_sq` in particular is shared between the redirect decision
 and the redirect explainer on purpose: the explanation must rank stations
-exactly the way the decision did, or the explainer would lie.
+exactly the way the decision did, or the explanation would be wrong.
