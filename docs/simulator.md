@@ -15,7 +15,7 @@ The code lives in `gbp/consumers/simulator/`:
 | `state.py` | `SimulationState` — the live facts of the run, plus the inventory arithmetic. |
 | `phases.py` | The three user-trip phases. |
 | `mechanics.py` | The rules the phases apply: docking, redirect, demand realization. |
-| `rebalancing.py` | The two truck phases: planning and execution ([Notations.md §14](../Notations.md#14-rebalancing-moving-bikes-by-truck)). |
+| `rebalancing.py` | The two truck phases: planning and execution — the subject of [`rebalancing.md`](rebalancing.md). |
 | `scenario.py` | `canonical_phases()` and `run_sized_scenario` — how a run is launched. |
 | `sizing.py` | `size_state_for_demand` — measures the initial inventory and capacities a demand needs. |
 | `validation.py` | The run-level invariants I1–I5. |
