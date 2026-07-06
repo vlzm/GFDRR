@@ -27,6 +27,24 @@ python app/runner.py --run-name demo --demand-scale 1.5 --periods 50   # one sce
 A finished run is saved as a folder under `<data dir>/runs/<run_name>/`;
 the web interface lists every saved run.
 
+## Run with Docker
+
+One command starts the web interface and the OSRM routing server together.
+Requires Docker with the compose plugin and a `data/` folder next to the
+repository files (see "Data layout" below).
+
+```bash
+docker compose up --build
+```
+
+The web interface is at http://localhost:8501. The `data/` folder is mounted
+into the app container as `/data`, so finished runs land in `data/runs/` on
+the host as usual. To run one scenario inside the container:
+
+```bash
+docker compose exec app python app/runner.py --run-name demo --demand-scale 1.5 --periods 50
+```
+
 ## Configuration (environment variables)
 
 Both variables are optional; without them the app runs against the local

@@ -1,0 +1,20 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      OSRM_URL: http://osrm:5000
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    depends_on:
+      - osrm
+
+  osrm:
+    # Same image, command, and flags as scripts/osrm/serve.sh (bike profile),
+    # so the server behaves the same in compose and in the local script.
+    image: ghcr.io/project-osrm/osrm-backend
+    command: osrm-routed --max-table-size 10000 /data/NewYork.osrm
+    volumes:
+      - ./data/osrm/bike:/data
