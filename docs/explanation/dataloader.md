@@ -5,14 +5,14 @@ trip CSV into `ResolvedModelData`, the input tables the simulator reads.
 
 The loaders do three things:
 
-1. They read the raw trip CSV and derive the entity tables from it:
-   stations, depots, trucks, and bike categories, with their capacities, costs,
-   and rates.
+1. They read one raw trip CSV, keep a processed copy, and build the raw tables:
+   stations and trips from the CSV, plus generated depots, trucks, and bike
+   rates.
 2. They rename the raw columns to the canonical schema and build the
    historical flow journal and its marginals. A marginal is a table computed
    from the journal, such as inventory, departures, arrivals, or the OD matrix.
-3. They compute the initial inventory for the base replay and provide the
-   sizing helpers used by `size_state_for_demand`.
+3. They compute `initial_inventory_df` for the base replay and provide the
+   sizing helpers that `size_state_for_demand` uses for scaled runs.
 
 The terms are the same as in [`Notations.md`](../../Notations.md). What the
 simulator does with these tables is [simulator.md](simulator.md). The journal
@@ -22,8 +22,8 @@ functions used here are explained in [flow_journal.md](flow_journal.md).
 
 | File | Main role |
 |---|---|
-| `dataloader_raw.py` | Reads the trip CSV, derives raw entity tables, and owns `RawModelData`. |
-| `dataloader_graph.py` | Builds `ResolvedModelData` from `RawModelData`; also owns `apply_truck_fleet` and `attach_simulation`. |
+| `dataloader_raw.py` | Reads the trip CSV, builds raw tables, and owns `RawModelData`. |
+| `dataloader_graph.py` | Builds `ResolvedModelData` from `RawModelData`; owns `apply_truck_fleet` and `attach_simulation`. |
 
 One scenario flows through the two files like this:
 
@@ -101,9 +101,11 @@ names exist.
 | 7 | Riding speed and routes | `trip_speed_km_per_period`, `routing_mode`, `routes` |
 | 8 | Empty simulated attributes | `simulated_flows_df = None` and the other `simulated_*` |
 
-The simulator reads this subset: `periods_df`, `initial_inventory_df`,
-`historical_demand_df`, `historical_od_matrix_df`,
-`facilities_capacities_df`, `facilities_geo_df`, and `routes`.
+The three user-trip phases read this subset: `periods_df`,
+`initial_inventory_df`, `historical_demand_df`, `historical_od_matrix_df`,
+`facilities_capacities_df`, `facilities_geo_df`, and `routes`. A run with
+rebalancing also reads `historical_arrivals_df`, `resources_df`, and
+`resources_capacities_df`.
 
 ### The Time Grid
 
@@ -138,7 +140,7 @@ return flows
 ```
 
 The finished journal is checked against the journal schema before it is
-returned, so bad input data fails at load time instead of surfacing later as
+returned, so bad input data fails at load time instead of appearing later as
 a run-end violation.
 
 The rows are built with the same builders the simulator uses, and ordered by
@@ -175,10 +177,11 @@ A replay needs two state tables before the simulator starts:
 - `facilities_capacities_df`: dock capacity at each facility.
 
 `ResolvedModelData.__init__` computes `initial_inventory_df` for the base
-replay. It leaves `facilities_capacities_df` as the capacity table derived from
-the raw data.
-A sized run later replaces both tables with the output of
-`size_state_for_demand`.
+replay. It leaves `facilities_capacities_df` as the raw capacity table: 100 for
+each station, plus the generated depot capacities.
+
+Most callers use `run_sized_scenario`. It replaces both tables with the output
+of `size_state_for_demand` before it builds the real `Environment`.
 
 `get_replay_initial_inventory_df` sizes the initial inventory:
 
@@ -199,13 +202,15 @@ The start quantity is the positive amount needed to bring that lowest value up
 to zero. Then every historical departure finds a bike, with no extra bikes
 added.
 
-Important: the low point is taken per step, not per period. A stockout is checked
-inside a period, during the departures phase, before that period's same-period
-arrivals dock. The end-of-period value already counts those late arrivals, so
-it overstates what is on hand at the moment of departure. Sizing against the
-per-period low point would leave real stockouts.
+Important: the low point is taken per step, not per period. A stockout is
+checked inside a period, during the departures phase, before that period's
+same-period arrivals dock. The end-of-period value already counts those late
+arrivals, so it overstates what is on hand at the moment of departure. Sizing
+against end-of-period values would leave real stockouts.
 
-`get_replay_capacities_df` sizes dock capacity for a journal:
+`get_replay_capacities_df` sizes dock capacity for a journal. The loader defines
+this helper, but `ResolvedModelData.__init__` does not call it.
+`size_state_for_demand` calls it after a sizing run.
 
 ```python
 moments = inventory_at_moments(historical_flows_df, initial_inventory_df)
@@ -213,14 +218,21 @@ facility_total = moments.groupby(["step_id", "facility_id"], as_index=False)[
     "inventory_after"
 ].sum()
 step_peak = facility_total.groupby("facility_id")["inventory_after"].max()
+initial_total = initial_inventory_df.groupby("facility_id")["quantity"].sum()
+idx = step_peak.index.union(initial_total.index)
+peak = pd.concat(
+    [step_peak.reindex(idx, fill_value=0), initial_total.reindex(idx, fill_value=0)],
+    axis=1,
+).max(axis=1)
 ```
 
-With the initial inventory fixed, it finds each facility's peak total
-occupancy across every step. The capacity becomes that peak, with
-`min_capacity = 10` as a floor for facilities with no replay traffic.
+With the initial inventory fixed, it finds each facility's peak total occupancy
+after every step. It also compares that with the initial occupancy, the moment
+before the first step. A station whose inventory only drains has its highest
+occupancy at the start.
 
-The peak includes the initial occupancy: the moment before the first step. A
-station whose inventory only drains has its highest occupancy at the start.
+The capacity becomes that peak, with `min_capacity = 10` as a floor for
+facilities with no replay traffic.
 
 For scaled demand, `run_sized_scenario` calls `size_state_for_demand`. That
 function first runs the scenario with saturated inventory and saturated
@@ -231,7 +243,8 @@ dock-full can happen. It then calls `get_replay_initial_inventory_df` and
 
 `get_saturated_inventory_df` builds the artificial saturated inventory table:
 one million bikes per station and commodity. `size_state_for_demand` builds the
-matching saturated capacity table itself.
+matching saturated capacity table itself: `(n_commodities + 1) * 1_000_000`
+docks per facility.
 
 ### Riding Speed And Routes
 
@@ -274,11 +287,10 @@ cannot express.
 
 ### The Schema Checks At The Load Boundary
 
-The loaders are the pipeline's fail-fast layer: each table is checked once,
-when it is built, so a wrong shape fails at load time instead of as a pandas
-error in the middle of a run. Three checks cover the boundary. All three use
-pandera schemas and report every violation at once (through
-`schema_violations`).
+The loaders check tables as soon as they build them. A table with wrong
+columns, types, values, or keys fails at load time instead of later in the
+middle of a run. Three checks cover the boundary. All three use pandera schemas
+and report every violation at once through `schema_violations`.
 
 1. The raw trips. `load_trips_raw_df` checks the trip table against
    `TRIPS_SCHEMA` (`dataloader_raw.py`) on every load: required columns and
@@ -315,9 +327,10 @@ out.resources_rates_df = ...
 ```
 
 `truck_homes` lists the home depot of each truck, one entry per truck. The
-large graph tables are shared with the original object, so changing the fleet
-does not rebuild them. The Run page of the UI and the `--truck-homes` runner
-flag call this function.
+function rejects an empty list and any home that is not a depot facility. Other
+resolved tables are shared with the original object, so changing the fleet does
+not rebuild them. The Run page of the UI and the `--truck-homes` runner flag
+call this function.
 
 ## After A Run: `attach_simulation`
 
@@ -380,10 +393,13 @@ Today's real station inventory is a current observation. It is unrelated to
 the historical month being replayed. Limiting demand against it would create
 stockouts that never happened in history.
 
-The loader instead computes the smallest state under which history replays
-cleanly. The computation is a pure function of the journal. It uses the floor
-at zero for inventory and the peak occupancy for capacity, not a guessed safety
-margin.
+The loader instead computes the smallest starting inventory under which history
+replays cleanly. The computation is a pure function of the journal: it raises
+the lowest step-level inventory value to zero.
+
+For scaled runs, `size_state_for_demand` uses the loader's two sizing helpers
+on the sizing run's journal. It computes starting inventory from the floor at
+zero and dock capacity from peak occupancy, not from a guessed safety margin.
 
 ### One Read-Model, Two Views
 

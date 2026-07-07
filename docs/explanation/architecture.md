@@ -1,21 +1,23 @@
 # Architecture — the system in diagrams
 
-This page is the map of the system: three diagrams, one per level of
+This page is a guide to the system: three diagrams, one per level of
 understanding from [comprehension_levels.md](../method/comprehension_levels.md), and a
-module depth table. The diagrams stay coarse on purpose: every arrow is a
-contract in domain words ("hands over the flow journal"), never a signature.
-Exact contracts live in [`Notations.md`](../../Notations.md) and in the
+module depth table. The diagrams stay high-level on purpose: every arrow names
+what one block gives another, such as "passes the flow journal". It is not a
+function signature. Exact names and table contracts live in `[Notations.md](../../Notations.md)` and in the
 per-module documents linked below.
 
 How the sections map to the levels:
 
 - [Level 1](#level-1--the-system-and-the-outside-world) — the system as one
-  box: who uses it, what goes in, what comes out.
-- [Level 2](#level-2--the-big-blocks) — the big blocks and what each hands to
-  the next.
+box: who uses it, what goes in, what comes out.
+- [Level 2](#level-2--the-big-blocks) — the big blocks and what each gives to
+the next.
 - [Level 3](#level-3--every-module) — every module, with labeled arrows.
 - [Module depth](#module-depth--small-interface-big-module) — each module's
-  interface in one line next to what it hides.
+interface in one line next to what it hides.
+
+
 
 ## Level 1 — the system and the outside world
 
@@ -28,8 +30,10 @@ flowchart LR
 
     user -->|"starts a run; browses finished runs"| system
     csv -->|"one month of historical trips"| system
-    system -.->|"asks once per scenario for the<br/>facility-to-facility distance table"| osrm
+    system -.->|"in osrm mode, asks once per scenario for the<br/>facility-to-facility distance table"| osrm
 ```
+
+
 
 The platform takes one month of published Citi Bike trips and replays that
 demand period by period, with optional changes (scaled demand, overnight
@@ -42,7 +46,7 @@ points on the globe).
 
 ## Level 2 — the big blocks
 
-One run flows left to right through five blocks:
+One run passes left to right through five blocks:
 
 ```mermaid
 flowchart LR
@@ -63,29 +67,32 @@ flowchart LR
     api -.->|"the same tables over HTTP,<br/>when API_URL is set"| ui
 ```
 
-- The **loaders** ([dataloader.md](dataloader.md)) read the raw trip CSV and
-  resolve it into `ResolvedModelData` — the input tables of one scenario:
-  stations, the period grid, the demand, the OD matrix, the initial
-  inventory.
-- The **simulator** ([simulator.md](simulator.md)) plays the scenario period
-  by period and produces the flow journal
-  ([Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
-  an append-only table of everything that happened to every bike. Overnight
-  rebalancing ([rebalancing.md](rebalancing.md)) is an opt-in part of the
-  simulator.
-- The **artifact builder** ([app.md](app.md)) turns a finished run into a run
-  artifact: a folder of tables plus `meta.json`.
-- The **web interface** ([app.md](app.md)) is a pure reader of run artifacts:
-  it loads saved tables and draws them, it never simulates.
-- The **run-artifact API** ([api.md](api.md)) serves the same folders over
-  HTTP and can start new runs.
 
-Two shared libraries sit under this chain and are not boxes of their own
-here: `gbp/model/` ([flow_journal.md](flow_journal.md)), which owns the
+
+- The **loaders** ([dataloader.md](dataloader.md)) read the raw trip CSV and
+resolve it into `ResolvedModelData` — the input tables of one scenario:
+facilities, the period grid, the demand, the OD matrix, the initial
+inventory.
+- The **simulator** ([simulator.md](simulator.md)) plays the scenario period
+by period and produces the flow journal
+([Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
+an append-only table of everything that happened to every bike. Overnight
+rebalancing ([rebalancing.md](rebalancing.md)) is an opt-in part of the
+simulator.
+- The **artifact builder** ([app.md](app.md)) turns a finished run into a run
+artifact: a folder of tables plus `meta.json`.
+- The **web interface** ([app.md](app.md)) has two jobs. Saved-run pages load
+saved tables and draw them. The `Run scenario` page starts a run and saves a
+new artifact.
+- The **run-artifact API** ([api.md](api.md)) serves the same folders over
+HTTP and can start new runs.
+
+Two shared libraries are used by several blocks in this chain, so they are not
+separate blocks here: `gbp/model/` ([flow_journal.md](flow_journal.md)), which owns the
 journal's event schema, its builders and its read-models (tables computed
 from the journal), and `gbp/routing.py`, which answers distance and
-travel-time questions for facility pairs. `app/runner.py` drives the whole
-chain from CSV to saved folder; the terminal, the API and the "Run scenario"
+travel-time questions for facility pairs. `app/runner.py` runs the full
+sequence from CSV to saved folder; the terminal, the API and the "Run scenario"
 page all go through it.
 
 ## Level 3 — every module
@@ -120,14 +127,15 @@ flowchart TB
     raw -->|"clean source tables"| resolved
     resolved -->|"builds Routes once per scenario"| routing
     resolved -->|"builds the historical journal with"| flows
+    resolved -->|"ResolvedModelData"| scenario
     scenario -->|"step 1: size the state"| sizing
     sizing -->|"sizing run, saturated state"| engine
     scenario -->|"step 2: the real run"| engine
     scenario -->|"step 3: check the run"| validation
     engine -->|"runs the phase list, once per period"| phases
-    rebalancing -->|"adds two opt-in phases"| phases
+    rebalancing -->|"provides two opt-in phases"| phases
     phases -->|"asks for decisions"| mechanics
-    phases -->|"appends events"| state
+    phases -->|"writes events through"| state
     phases -->|"event rows built by"| flows
     validation -->|"reads the journal through read-models"| flows
     mechanics -.->|"travel-time fallback"| routing
@@ -166,12 +174,14 @@ flowchart TB
     shared -->|"local backend"| artifacts
     shared -->|"HTTP backend, when API_URL is set"| client
     main -->|"registers"| views
-    views -->|"ask for tables"| shared
+    views -->|"saved-run pages ask for tables"| shared
     views -.->|"Run scenario page only"| runner
 ```
 
-`runner.py` is the bridge to the previous picture: `build_graph_data` calls
-the loaders, and `run_scenario` calls `run_sized_scenario`, then hands the
+
+
+`runner.py` connects this picture to the previous one: `build_graph_data` calls
+the loaders, and `run_scenario` calls `run_sized_scenario`, then passes the
 result to the artifact builder. The "Run scenario" page starts a run through
 `runner.py` when it works with local files, and through `api_client.py` when
 `API_URL` is set — the same switch `ui_shared.py` uses for reading.
@@ -182,51 +192,60 @@ The design rule this project follows (from John Ousterhout, "A Philosophy of
 Software Design"): a module is good when its interface is short and the work
 hidden behind it is large. The table states, for each module, the interface
 in one line and what a caller never has to know. When a change makes an
-interface column longer, that is the signal to stop and rethink.
+interface column longer, review the design.
 
 ### gbp/
 
-| Module | Interface in one line | What it hides |
-|---|---|---|
-| `loaders/dataloader_raw.py` | `RawModelData(trips_path, seed, fleet sizes, rates)` | CSV cleaning, the processed-parquet cache (`data/processed/`), the synthetic depots, trucks and price tables |
-| `loaders/dataloader_graph.py` | `ResolvedModelData(raw, period_len, routing_mode)` | the period grid, the historical journal, the OD matrix, trip speeds, the replay sizing helpers, schema checks on every output table |
-| `routing.py` | `routes.distance_km(source, target)`, `routes.duration_periods(source, target)` | haversine vs OSRM, the one-shot `/table` fetch, the fallback for pairs OSRM cannot route |
-| `model/flows.py` | plain functions: journal-shaped table in, table out | `step_id` assignment, phase ordering, inventory reconstruction at any moment, the measure columns |
-| `model/journal_schema.py` | `check_journal_schema(flows) -> list[str]` | the pandera schema and the row-level rules of the event table |
-| `simulator/scenario.py` | `run_sized_scenario(resolved, ...) -> ScenarioRun` | the fixed order: size, schema-check, copy, run, validate |
-| `simulator/sizing.py` | `size_state_for_demand(resolved, config) -> two tables` | the saturated run and why its journal is the right thing to measure |
-| `simulator/engine.py` | `Environment(resolved, config).run() -> SimulationState` | the period loop, the phase-order guard, finalizing the journal on read |
-| `simulator/state.py` | `SimulationState`: append events, advance the clock | step bookkeeping, in-transit tracking, inventory updates |
-| `simulator/phases.py` | `Phase.execute(state, resolved, period, config) -> state` | which events each phase writes, and in what order inside one period |
-| `simulator/mechanics.py` | plain tables in, decision tables out | the redirect rounds, capacity fitting, demand realization |
-| `simulator/rebalancing.py` | `rebalancing_phases(params)` -> the two truck phases | target inventory, imbalance, node splitting, the OR-Tools VRP, minute-to-period mapping |
-| `simulator/validation.py` | `validate_run(...) -> list[str]` | the run invariants I1–I5 and how each is computed from the journal |
-| `simulator/config.py` | `EnvironmentConfig` — the run settings | nothing; a plain settings record, and that is fine — not every module needs depth |
+
+| Module                        | Interface in one line                                                           | What it hides                                                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `loaders/dataloader_raw.py`   | `RawModelData(trips_path, seed, fleet sizes, rates)`                            | CSV cleaning, the processed-parquet cache (`data/processed/`), the synthetic depots, trucks and price tables                               |
+| `loaders/dataloader_graph.py` | `ResolvedModelData(raw, period_len, routing_mode)`                              | the period grid, the historical journal, the OD matrix, trip speeds, the replay sizing helpers, schema checks for the engine-facing tables |
+| `routing.py`                  | `routes.distance_km(source, target)`, `routes.duration_periods(source, target)` | haversine vs OSRM, the one-shot `/table` fetch, the fallback for pairs OSRM cannot route                                                   |
+| `model/flows.py`              | plain functions: journal-shaped table in, table out                             | `step_id` assignment, phase ordering, inventory reconstruction at any moment, the measure columns                                          |
+| `model/journal_schema.py`     | `check_journal_schema(flows) -> list[str]`                                      | the pandera schema and the row-level rules of the event table                                                                              |
+| `simulator/scenario.py`       | `run_sized_scenario(resolved, ...) -> ScenarioRun`                              | the fixed order: size, schema-check, copy, run, validate                                                                                   |
+| `simulator/sizing.py`         | `size_state_for_demand(resolved, config) -> two tables`                         | the saturated run and why its journal is the right thing to measure                                                                        |
+| `simulator/engine.py`         | `Environment(resolved, config).run() -> SimulationState`                        | the period loop, the phase-order guard, finalizing the journal on read                                                                     |
+| `simulator/state.py`          | `SimulationState`: append events, advance the clock                             | step bookkeeping, in-transit tracking, inventory updates                                                                                   |
+| `simulator/phases.py`         | `Phase.execute(state, resolved, period, config) -> state`                       | which events each phase writes, and in what order inside one period                                                                        |
+| `simulator/mechanics.py`      | plain tables in, decision tables out                                            | the redirect rounds, capacity fitting, demand realization                                                                                  |
+| `simulator/rebalancing.py`    | `rebalancing_phases(params)` -> the two truck phases                            | target inventory, imbalance, node splitting, the OR-Tools VRP, minute-to-period mapping                                                    |
+| `simulator/validation.py`     | `validate_run(...) -> list[str]`                                                | the run invariants I1–I5 and how each is computed from the journal                                                                         |
+| `simulator/config.py`         | `EnvironmentConfig` — the run settings                                          | nothing; a plain settings record, and that is fine — not every module needs depth                                                          |
+
+
+
 
 ### app/
 
-| Module | Interface in one line | What it hides |
-|---|---|---|
-| `runner.py` | `build_graph_data(...)`, `run_scenario(graph_data, ...) -> saved folder` | the stage order and the progress reporting |
-| `artifacts.py` | `build_run_tables`, `save_run`, `load_run_table`, `load_run_meta` | one build function per saved table, the artifact's pandera schemas, the `METRICS` registry, run naming |
-| `api.py` | six HTTP endpoints ([api.md](api.md)) | the single worker thread, the run queue, the disk fallback after a restart |
-| `api_client.py` | `list_runs`, `load_table`, `start_run`, `run_status` | URL building, the API-key header, response decoding |
-| `ui_shared.py` | typed loaders: `load_panel(run_name)`, `load_meta(run_name)`, ... | the two backends (disk or API), caching, old-artifact fallbacks |
-| `main.py` + `views/` | one Streamlit page per view | only drawing; every number a page shows was precomputed by the artifact builder |
+
+| Module               | Interface in one line                                                    | What it hides                                                                                          |
+| -------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `runner.py`          | `build_graph_data(...)`, `run_scenario(graph_data, ...) -> saved folder` | the stage order and the progress reporting                                                             |
+| `artifacts.py`       | `build_run_tables`, `save_run`, `load_run_table`, `load_run_meta`        | one build function per saved table, the artifact's pandera schemas, the `METRICS` registry, run naming |
+| `api.py`             | six HTTP endpoints ([api.md](api.md))                                    | the single worker thread, the run queue, the disk fallback after a restart                             |
+| `api_client.py`      | `list_runs`, `load_table`, `start_run`, `run_status`                     | URL building, the API-key header, response decoding                                                    |
+| `ui_shared.py`       | typed loaders: `load_panel(run_name)`, `load_meta(run_name)`, ...        | the two backends (disk or API), caching, old-artifact fallbacks                                        |
+| `main.py` + `views/` | one Streamlit page per view                                              | saved-run pages only draw precomputed artifact values; `Run scenario` starts a local or API run        |
+
+
+
 
 ## Keeping this page true
 
-Diagrams drift from code silently — no test catches a stale arrow. Three
-rules keep the drift slow:
+Diagrams can become stale when code changes. No test catches a stale arrow.
+Three rules reduce that risk:
 
-- Every arrow stays coarse: domain words, no signatures, no column names.
-  A coarse arrow goes stale only when a module's input or output changes,
-  which is rare.
+- Every arrow stays high-level: domain words, no signatures, no column names.
+A high-level arrow becomes stale only when a module's input or output changes,
+which is rare.
 - Update this page only when a module appears, disappears, or changes what
-  it takes or gives. A renamed function inside a module does not touch this
-  page.
+it takes or gives. A renamed function inside a module does not touch this
+page.
 - This page never explains how a module works inside. That belongs to the
-  per-module documents ([dataloader.md](dataloader.md),
-  [simulator.md](simulator.md), [rebalancing.md](rebalancing.md),
-  [flow_journal.md](flow_journal.md), [app.md](app.md), [api.md](api.md)) —
-  if an explanation wants to live here, it is in the wrong file.
+per-module documents ([dataloader.md](dataloader.md),
+[simulator.md](simulator.md), [rebalancing.md](rebalancing.md),
+[flow_journal.md](flow_journal.md), [app.md](app.md), [api.md](api.md)) —
+if a section starts explaining internals, move it to one of those documents.
+
