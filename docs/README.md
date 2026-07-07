@@ -54,6 +54,10 @@ One run flows through the repository like this:
 raw trip CSVs → `RawModelData` → `ResolvedModelData` → simulator → flow
 journal → run artifact → web interface
 
+The same map as diagrams: [architecture.md](architecture.md) — the system and
+the outside world (level 1), the big blocks (level 2), the full module map
+with a depth table (level 3).
+
 - **`gbp/`** — the library; nothing in it runs by itself. `gbp/loaders/` reads
   the raw trip CSVs into `RawModelData` and resolves them into
   `ResolvedModelData` — the input tables of the simulator (stations, demand,
@@ -82,7 +86,9 @@ journal → run artifact → web interface
 
 ## Where to go next (levels 3–5)
 
-Level 3 — every module and its contract, in coarse words. Five documents
+Level 3 — every module and its contract, in coarse words. The module
+diagrams and the module depth table are in
+[architecture.md](architecture.md). Five documents
 cover the run chain from the map above. [dataloader.md](dataloader.md): how
 the raw trip CSV becomes `ResolvedModelData` — the entities, the historical
 journal, the sized initial state. [simulator.md](simulator.md): what a period
