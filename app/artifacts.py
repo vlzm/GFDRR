@@ -13,6 +13,7 @@ import dataclasses
 import datetime
 import os
 import pathlib
+import subprocess
 from typing import Any
 
 import pandas as pd
@@ -532,9 +533,46 @@ class RunMeta(pydantic.BaseModel):
     routing_mode: str
     t0: str
     created_at: str
+    #: File names of the raw source files the run was built from (for the
+    #: canonical pipeline: the trip CSV). Empty for runs built from a
+    #: synthetic journal, like the test fixtures.
+    inputs: list[str]
+    #: Git commit of the code that produced the run, ``-dirty`` appended when
+    #: the working tree had uncommitted changes; ``unknown`` outside git.
+    code_version: str
     violations: list[str]
     rebalancing: RebalancingMeta
     totals: dict[str, float]
+
+
+def code_version() -> str:
+    """Short git commit of the codebase, for the ``code_version`` of ``meta.json``.
+
+    ``-dirty`` is appended when the working tree has uncommitted changes, so
+    a run saved mid-edit is never mistaken for the committed code. Returns
+    ``"unknown"`` when git is unavailable or the code is not a git checkout.
+    """
+    repo = pathlib.Path(__file__).resolve().parent
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout.strip()
+        changes = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return f"{commit}-dirty" if changes else commit
 
 
 def build_meta(
@@ -547,6 +585,7 @@ def build_meta(
     period_len_hours: float,
     routing_mode: str,
     t0: Any,
+    inputs: list[str],
     violations: list[str],
     rebalancing: dict[str, Any] | None = None,
 ) -> RunMeta:
@@ -574,6 +613,11 @@ def build_meta(
     t0 : timestamp-like
         Wall-clock start of period 0; the UI turns period ids into times with
         it. Anything ``pandas.Timestamp`` accepts.
+    inputs : list of str
+        File names of the raw source files the run was built from. Pass an
+        empty list for runs built from a synthetic journal (the test
+        fixtures). The code version is not a parameter: :func:`code_version`
+        reads it from git here, so every artifact records it the same way.
     violations : list of str
         Run-invariant violations (empty = valid).
     rebalancing : dict, optional
@@ -596,6 +640,8 @@ def build_meta(
         routing_mode=routing_mode,
         t0=pd.Timestamp(t0).isoformat(),
         created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+        inputs=list(inputs),
+        code_version=code_version(),
         violations=violations,
         rebalancing=RebalancingMeta.model_validate(
             rebalancing if rebalancing is not None else {"enabled": False}

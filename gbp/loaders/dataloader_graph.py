@@ -626,6 +626,10 @@ class ResolvedModelData:
         routing_mode: RoutingMode = "haversine",
         osrm_url: str = DEFAULT_OSRM_URL,
     ) -> None:
+        # Where the raw data came from, so a saved run can record it in the
+        # ``inputs`` field of ``meta.json``.
+        self.trips_path = raw.trips_path
+
         # Entities
         self.facilities_df = get_facilities_df(raw.stations_df, raw.depots_df)
         self.resources_df = get_resources_df(raw.trucks_df)

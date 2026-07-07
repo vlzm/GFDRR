@@ -31,7 +31,7 @@ from gbp.loaders.dataloader_graph import ResolvedModelData, apply_truck_fleet
 from gbp.loaders.dataloader_raw import RawModelData
 from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
 
-DEFAULT_TRIPS_PATH = str(artifacts.data_dir() / "raw" / "202602-citibike-tripdata_1.csv")
+DEFAULT_TRIPS_PATH = str(artifacts.data_dir() / "raw" / "202601-citibike-tripdata_1.csv")
 DEFAULT_NUMBER_OF_PERIODS = 50
 
 # The synthetic depot and truck fleet (see gbp/loaders/dataloader_raw.py).
@@ -191,6 +191,7 @@ def run_scenario(
         period_len_hours=graph_data.period_len / pd.Timedelta(hours=1),
         routing_mode=graph_data.routing_mode,
         t0=graph_data.t0,
+        inputs=[pathlib.Path(graph_data.trips_path).name],
         violations=result.violations,
         rebalancing=rebalancing_meta,
     )

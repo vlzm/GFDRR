@@ -56,6 +56,9 @@ def _save_run(name, resolved, journal, root):
         period_len_hours=1.0,
         routing_mode="haversine",
         t0=resolved.periods_df["start_timestamp"].iloc[0],
+        # Synthetic scenarios are built from hand-written trips, not a raw
+        # file, so there is nothing to record here.
+        inputs=[],
         violations=[],
     )
     artifacts.save_run(name, tables, meta, root)
@@ -244,11 +247,16 @@ def test_meta_carries_t0_and_the_run_parameters():
         period_len_hours=1.0,
         routing_mode="haversine",
         t0=resolved.periods_df["start_timestamp"].iloc[0],
+        inputs=["202601-citibike-tripdata_1.csv"],
         violations=[],
     )
     assert meta.t0 == "2026-01-01T00:00:00"
     assert meta.routing_mode == "haversine"
     assert meta.scenario_id == "canonical"
+    assert meta.inputs == ["202601-citibike-tripdata_1.csv"]
+    # build_meta reads the code version from git itself; in a git checkout it
+    # is a commit hash, outside git it is "unknown" -- never empty.
+    assert meta.code_version
     assert meta.totals == artifacts.build_totals(tables["panel"], tables["flow_totals"])
     # t0 + period * period_len is what the pages show on the time axis.
     t0 = pd.Timestamp(meta.t0)
@@ -324,6 +332,8 @@ def _meta_with_rebalancing(rebalancing: dict) -> artifacts.RunMeta:
         routing_mode="haversine",
         t0="2026-01-01T00:00:00",
         created_at="2026-01-01T00:00:00",
+        inputs=[],
+        code_version="unknown",
         violations=[],
         rebalancing=artifacts.RebalancingMeta.model_validate(rebalancing),
         totals={},

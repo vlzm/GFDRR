@@ -42,8 +42,13 @@ raw trip CSV
 `RawModelData.__init__` loads everything once and stores the results as
 attributes. In order:
 
-1. `load_trips_raw_df(trips_path)` reads the CSV and drops rows with a missing
-   start time, end time, station id, or coordinate.
+1. `load_trips_raw_df(trips_path)` loads the trips. The first load parses the
+   CSV, drops rows with a missing start time, end time, station id, or
+   coordinate, and writes the cleaned table to
+   `data/processed/<csv name>.parquet` (Notations.md §15). Later loads read
+   that parquet copy instead, which is much faster. The copy counts as fresh
+   only while it is newer than its CSV; delete the `processed` folder to force
+   a rebuild — for example after changing the cleaning code.
 2. `get_stations(trips_raw_df)` builds the station table from the trips
    themselves: every distinct `start_station_id` or `end_station_id` becomes
    one station, with its coordinates. There is no separate station registry.

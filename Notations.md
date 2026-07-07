@@ -440,7 +440,7 @@ happens while a page renders. One saved run is a **run artifact**: a folder
 
 | Canonical | Meaning |
 |---|---|
-| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6, `routing_mode` — see §13, `rebalancing` — see §14: `enabled`, and when on also `truck_homes` and `truck_capacity_bikes`), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). |
+| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6, `routing_mode` — see §13, `rebalancing` — see §14: `enabled`, and when on also `truck_homes` and `truck_capacity_bikes`), the run's origin (`inputs` — file names of the raw source files the run was built from; `code_version` — the git commit of the code, with `-dirty` appended when there were uncommitted changes), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). Parameters + `inputs` + `code_version` together make a run reproducible: they name what was computed, from which data, by which code. |
 | `flows.parquet` | The finalized journal of the run, widened by `flows_with_measures` with the measures (§6.1): `rate`, `elapsed_periods`, `cost`, the planned/realized `duration_periods` and `distance_km` pairs. |
 | `panel.parquet` | The **facility period panel**: one row per `(period_id, facility_id, commodity_category)` with that period's values side by side — `quantity_sop`, `quantity_eop` (§9 inventory), `demand`, `departed`, `arrived`, `redirected` (bounces at this facility as the full planned target), `lost_demand`, `lost_dock_full`. Every map view and hover box is a slice of this one table. |
 | `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `flow_type` (`user_trip` or `rebalance` — §14) and `resource_id` (the truck on a rebalance arc, NA otherwise), `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, `distance_km` (measured by the run's `routing_mode` — §13), and the endpoint coordinates (`source_lat`, `source_lng`, `target_lat`, `target_lng`), so the trips map draws arcs without joining another table. |
@@ -533,6 +533,24 @@ like any riding bike; `DockArrivals` skips them (it docks user trips only). A
 dropoff that finds the station full docks at the truck's home depot instead —
 the `planned_*` / `realized_*` split (§5) records the difference. A run opts
 in by appending `rebalancing_phases(params)` to `canonical_phases()`.
+
+---
+
+## 15. Data folders (raw → processed → runs)
+
+The `data/` folder has three subfolders, one per stage of the data on disk:
+
+| Canonical | Meaning | Instead of |
+|---|---|---|
+| `data/raw/` | The downloaded Citi Bike trip CSVs, exactly as published. Code never edits this folder. | "source data", "input folder", "bronze" |
+| `data/processed/` | The processed copy of each trip CSV, written by `load_trips_raw_df` (`gbp/loaders/dataloader_raw.py`) on the first load: rows with missing key fields dropped, dtypes fixed, the trips schema checked, saved as parquet. Later loads read this copy instead of parsing the CSV, which is much faster. It is a cache: a copy counts as fresh only while it is newer than its CSV, and deleting the folder is always safe — the next load rebuilds it. Delete it after changing the cleaning code in `load_trips_raw_df`. | "preprocessed layer", "intermediate data", "silver" |
+| `data/runs/` | One folder per saved run — the run artifacts the UI reads (§12). | "output layer", "results", "gold" |
+
+Everything between `processed` and `runs` — `RawModelData`,
+`ResolvedModelData`, the flow journal of a run — lives in memory for one run
+and is not saved on its own. Those tables depend on the run's parameters, so
+their only form on disk is the run artifact (§12), which records the
+parameters, `inputs` and `code_version` next to the tables.
 
 ---
 

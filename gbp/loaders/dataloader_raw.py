@@ -9,7 +9,14 @@ The trip CSV is the only external data in the project, so it gets an explicit
 schema (:data:`TRIPS_SCHEMA`): the loaded table is checked once, at load time,
 and a bad CSV fails here with a full list of violations instead of surfacing
 later as an unrelated pandas error or a run-end invariant violation.
+
+Loading keeps a processed copy of each CSV in ``data/processed/`` (Notations.md
+§15): the first load parses and cleans the CSV and writes the result as
+parquet; later loads read the parquet, which is much faster. The folder is a
+cache — deleting it is always safe, the next load rebuilds it.
 """
+
+import pathlib
 
 import numpy as np
 import pandas as pd
@@ -60,48 +67,78 @@ TRIPS_SCHEMA = pa.DataFrameSchema(
 # ---------------------------------------------------------------------------
 # Raw loaders
 # ---------------------------------------------------------------------------
-def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
-    """Load the raw Citi Bike trip CSV, drop rows with missing key fields, check the schema.
+def processed_trips_path(trips_path: str) -> pathlib.Path:
+    """Where the processed copy of one trip CSV lives.
 
-    The schema check (:data:`TRIPS_SCHEMA`) runs once here, at the load
-    boundary; it raises ``ValueError`` with every violation found.
+    ``<data folder>/processed/<csv name>.parquet`` — the ``processed`` folder
+    sits next to the folder the CSV is in, so ``data/raw/x.csv`` maps to
+    ``data/processed/x.parquet``.
     """
-    trips_dtypes = {
-        "ride_id": "string",
-        "rideable_type": "string",
-        "start_station_name": "string",
-        "start_station_id": "string",
-        "end_station_name": "string",
-        "end_station_id": "string",
-        "start_lat": "float64",
-        "start_lng": "float64",
-        "end_lat": "float64",
-        "end_lng": "float64",
-        "member_casual": "string",
-    }
-    trips_df = pd.read_csv(
-        trips_path,
-        dtype=trips_dtypes,
-        parse_dates=["started_at", "ended_at"],
-    )
-    trips_df = trips_df.dropna(
-        subset=[
-            "started_at",
-            "ended_at",
-            "start_station_id",
-            "end_station_id",
-            "start_lat",
-            "start_lng",
-            "end_lat",
-            "end_lng",
-        ]
-    )
-    trips_df = trips_df.reset_index(drop=True)
+    csv = pathlib.Path(trips_path).resolve()
+    return csv.parent.parent / "processed" / (csv.stem + ".parquet")
+
+
+def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
+    """Load one raw trip CSV, using its processed parquet copy when it is fresh.
+
+    The first load parses the CSV, drops rows with missing key fields, and
+    writes the cleaned table to ``data/processed/<csv name>.parquet``
+    (see :func:`processed_trips_path`). Later loads read that parquet copy
+    instead, which is much faster than parsing the CSV. The copy counts as
+    fresh while it is newer than its CSV; delete the ``processed`` folder to
+    force a rebuild — for example after changing the cleaning code here.
+
+    The schema check (:data:`TRIPS_SCHEMA`) runs on every load, whichever
+    file was read; it raises ``ValueError`` with every violation found. The
+    processed copy is written only after the check passes, so a bad table is
+    never cached.
+    """
+    csv = pathlib.Path(trips_path)
+    processed = processed_trips_path(trips_path)
+    processed_is_fresh = processed.exists() and processed.stat().st_mtime >= csv.stat().st_mtime
+    if processed_is_fresh:
+        trips_df = pd.read_parquet(processed)
+    else:
+        trips_dtypes = {
+            "ride_id": "string",
+            "rideable_type": "string",
+            "start_station_name": "string",
+            "start_station_id": "string",
+            "end_station_name": "string",
+            "end_station_id": "string",
+            "start_lat": "float64",
+            "start_lng": "float64",
+            "end_lat": "float64",
+            "end_lng": "float64",
+            "member_casual": "string",
+        }
+        trips_df = pd.read_csv(
+            trips_path,
+            dtype=trips_dtypes,
+            parse_dates=["started_at", "ended_at"],
+        )
+        trips_df = trips_df.dropna(
+            subset=[
+                "started_at",
+                "ended_at",
+                "start_station_id",
+                "end_station_id",
+                "start_lat",
+                "start_lng",
+                "end_lat",
+                "end_lng",
+            ]
+        )
+        trips_df = trips_df.reset_index(drop=True)
     violations = schema_violations(TRIPS_SCHEMA, trips_df)
     if violations:
+        read_from = processed if processed_is_fresh else csv
         raise ValueError(
-            f"trips CSV {trips_path} breaks the trips schema:\n" + "\n".join(violations)
+            f"trips table {read_from} breaks the trips schema:\n" + "\n".join(violations)
         )
+    if not processed_is_fresh:
+        processed.parent.mkdir(parents=True, exist_ok=True)
+        trips_df.to_parquet(processed, index=False)
     return trips_df
 
 
@@ -232,7 +269,9 @@ class RawModelData:
     ) -> None:
         self.rng = np.random.default_rng(seed=seed)
 
-        # Raw sources
+        # Raw sources. The path is kept so a saved run can record which raw
+        # file it was built from (the ``inputs`` field of ``meta.json``).
+        self.trips_path = trips_path
         self.trips_raw_df = load_trips_raw_df(trips_path)
 
         # Stations. Real dock capacities are not loaded; every station gets the
