@@ -556,7 +556,7 @@ parameters, `inputs` and `code_version` next to the tables.
 
 ## 16. The run-artifact API (serving runs over HTTP)
 
-The API (`app/api.py`, design: `docs/api.md`) serves run artifacts (§12) over
+The API (`app/api.py`, described in `docs/api.md`) serves run artifacts (§12) over
 HTTP and starts runs through the same `runner.run_scenario` the Run scenario
 page calls. It is a reader and a saver of run artifacts: it never computes
 what `build_run_tables` can precompute, and the artifact contract (§12) **is**

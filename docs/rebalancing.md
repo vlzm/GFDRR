@@ -71,8 +71,9 @@ facility. Each row moves at most `portion_size` bikes.
 one minute and either picks up or drops off bikes.
 
 `rebalance_plan` is the table stored on `SimulationState`. It has one row per
-bike, with `flow_id`, `resource_id`, `source_id`, `planned_target_id`,
-`pickup_period`, and `dropoff_period`.
+bike, with `flow_id`, `resource_id`, `commodity_category`, `source_id`,
+`planned_target_id`, `pickup_period`, `dropoff_period`, `pickup_minute`, and
+`dropoff_minute`.
 
 `flows` is the journal. A moved bike becomes one `rebalance` flow with two
 events: `departed` for the pickup and `arrived` for the dropoff.
@@ -174,6 +175,17 @@ This lets the solver serve part of a large imbalance when the window or truck
 capacity is too small for all of it.
 
 ### Step 5: Route the Trucks
+
+Before calling the solver, `PlanRebalancingPhase.execute` checks the truck
+configuration. It raises `SimulatorConfigError`, which aborts the run, in
+three cases:
+
+- there is no truck at all;
+- a truck has no `home_facility_id`;
+- a truck's home depot is missing from the facility tables.
+
+A broken truck setup is a configuration error, so the run stops instead of
+planning around it.
 
 `solve_rebalance_vrp` is the default routing solver. It uses OR-Tools.
 
@@ -304,27 +316,35 @@ Rebalance pickups are not demand. They do remove inventory because they are
 `departed` events with `move_id == 0`, but demand read-models filter them out
 with `is_user_departure`.
 
-## What Execution Checks
+## What Is Checked
 
-At the end of each period, `ApplyRebalancingPhase` checks that the inventory
-change matches the events it executed:
+Execution itself asserts nothing. `ApplyRebalancingPhase.execute` builds the
+pickup and dropoff events and applies them through `apply_step_events`, the
+same write path as the user phases. Inventory is derived from the events by
+`inventory_deltas_from_events`, so the inventory change always equals the
+executed dropoffs minus pickups by construction — there is nothing separate to
+compare it against.
+
+Planning has the only two asserts in the module, both in
+`assign_bikes_to_stops`:
 
 ```python
-moved = int(inventory["quantity"].sum()) - inventory_before
-assert moved == docked_n - picked_n
+assert len(loaded) >= int(stop.quantity), "dropoff exceeds the bikes on the truck"
+...
+assert not any(on_truck.values()), "bikes left on a truck at the end of its route"
 ```
 
-Only two things can change inventory in this phase:
+They reject a malformed `stops` table: a truck cannot drop off more bikes than
+it carries, and every route must end with an empty truck.
 
-- a pickup removes one bike;
-- a dropoff docks one bike.
+Correctness of the executed flows is enforced after the run by `validate_run`
+(`gbp/consumers/simulator/validation.py`). Its invariants also cover rebalance
+flows: every pickup must close with one arrival (I2), bikes on trucks are
+counted through `in_transit` until they dock (I4), and no inventory step takes
+a station below zero (I5).
 
 A dropoff never leaves the system. If it does not fit at the planned station,
 it docks at the truck's home depot.
-
-The normal run checks also cover rebalance flows. Every pickup must close with
-one arrival. Bikes on trucks are counted through `in_transit` until they dock.
-Inventory must never go below zero.
 
 ## Why It Is Built This Way
 

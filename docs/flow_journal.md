@@ -28,8 +28,10 @@ Everything lives in one file, `gbp/model/flows.py`. Its parts, top to bottom:
 |---|---|
 | Schema | `FLOW_EVENT_COLUMNS`, `FLOW_EVENT_DTYPES`, the `*_RANK` constants, `DOCKING_EVENT_TYPES` |
 | Inventory predicates | `is_undocking`, `is_user_departure`, `is_docking` |
+| Inventory delta rule | `_event_deltas` (the one `+1`/`-1` rule), `inventory_deltas_from_events` (the write-time batch form, used by `SimulationState.apply_step_events`) |
 | Event builders | `departed_events`, `arrived_events`, `redirected_events`, `redirect_leg_events`, `lost_events`, `rebalance_departed_events`, `rebalance_arrived_events` |
 | Empty frames | `empty_in_transit`, `empty_flows_journal` |
+| In-transit set | `in_transit_after_events` (the working set after one event batch) |
 | Finalizing | `phase_rank_by_timing`, `finalize_flows` (with the helper `_assign_step_id`) |
 | Marginals | `flows_to_departures`, `flows_to_arrivals`, `flows_to_redirects`, `flows_to_losses`, `flows_to_od_matrix`, `flows_to_panel`, `get_inventory_df`, `inventory_at_moments` |
 | Wide views | `flows_with_inventory`, `flows_with_costs`, `flows_with_measures` |
@@ -233,7 +235,10 @@ marginals are the per-period read-models
 | `flows_to_losses(flows, reason)` | `lost` events with that `reason` | `source_id` for `stockout`, `planned_target_id` for `dock_full` |
 | `flows_to_od_matrix` | user departures, into `count`, `probability`, mean `duration` per (source, target) | — |
 
-Each returns one row per `(period_id, facility_id, commodity_category)`.
+Each of the first four returns one row per
+`(period_id, facility_id, commodity_category)`. `flows_to_od_matrix` compares
+pairs of facilities, so its key is
+`(source_id, planned_target_id, period_id, commodity_category)` instead.
 Because both the historical and the simulated journal go through these same
 functions, an exact replay produces equal historical and simulated marginals
 by construction.
@@ -241,23 +246,31 @@ by construction.
 ### Inventory
 
 Inventory is not stored per period anywhere. It is computed from the journal
-plus the initial inventory. One helper defines the delta of every
-inventory-moving event:
+plus the initial inventory. One helper, `_event_deltas`, defines the delta of
+every inventory-moving event:
+
+```python
+def _event_deltas(events, extra_cols=()):
+    cols = [*extra_cols, "facility_id", "commodity_category", "delta"]
+    dock = events[is_docking(events)].copy()
+    dock["facility_id"] = dock["realized_target_id"]
+    dock["delta"] = dock["quantity"].astype("int64")
+    undock = events[is_undocking(events)].copy()
+    undock["facility_id"] = undock["source_id"]
+    undock["delta"] = -undock["quantity"].astype("int64")
+    return pd.concat([dock[cols], undock[cols]], ignore_index=True)
+```
+
+Every other event is dropped: it moves no inventory. The read side reaches
+this rule through a one-line delegator:
 
 ```python
 def _inventory_deltas(flows):
-    dock = flows[is_docking(flows)].copy()
-    dock["facility_id"] = dock["realized_target_id"]
-    dock["delta"] = dock["quantity"].astype("int64")
-    dep = flows[is_undocking(flows)].copy()
-    dep["facility_id"] = dep["source_id"]
-    dep["delta"] = -dep["quantity"].astype("int64")
-    return pd.concat([dock[cols], dep[cols]], ignore_index=True)
+    return _event_deltas(flows, ("step_id", "period_id"))
 ```
 
-Every other event is dropped: it moves no inventory. Each delta row keeps its
-`step_id` and `period_id`, so the same deltas can be added up on either time
-axis:
+Each delta row keeps its `step_id` and `period_id`, so the same deltas can be
+added up on either time axis:
 
 - `get_inventory_df(flows, initial_inventory)` — the coarse view: one row per
   `(period_id, facility_id, commodity_category)` with `quantity_sop`
@@ -270,6 +283,12 @@ axis:
   the table answers "what did any station hold at the moment of step s".
 
 Both need a finalized journal: the deltas are ordered by `step_id`.
+
+The write side reaches the same rule through `inventory_deltas_from_events`:
+the deltas of one event batch, summed per `(facility_id, commodity_category)`.
+`SimulationState.apply_step_events` uses it to move the live inventory by
+exactly what the events it writes imply, so the live inventory and the journal
+cannot state the rule differently.
 
 ## The Wide Views
 
@@ -343,7 +362,7 @@ in `gbp/consumers/simulator/validation.py` and are described in
 
 | Caller | Uses |
 |---|---|
-| `gbp/loaders/dataloader_graph.py` | builders and `finalize_flows` to build the historical journal; the marginals for the historical tables; `inventory_at_moments` for the replay sizing; `flows_with_measures` for the wide journal |
+| `gbp/loaders/dataloader_graph.py` | builders and `finalize_flows` to build the historical journal; the marginals for the historical tables; `inventory_at_moments` for the replay sizing |
 | `gbp/consumers/simulator/` | builders inside the phases; `flows_to_departures` and friends as the live read-models on the state; `neighbor_distance_sq` in the redirect mechanics; `finalize_flows` at run end |
 | `gbp/consumers/simulator/validation.py` | `check_demand_split`, `check_flow_closure`, `get_inventory_df`, `inventory_at_moments` |
 | `app/artifacts.py` | `flows_with_measures`, `get_inventory_df`, the marginals — to build the saved run tables |
@@ -367,8 +386,10 @@ same definition.
 
 ### One Inventory Delta Rule
 
-`_inventory_deltas` is the only place that says which event moves inventory
-and by how much. The per-period view (`get_inventory_df`) and the per-step
+`_event_deltas` is the only place that says which event moves inventory and
+by how much. The read-time `_inventory_deltas` and the write-time
+`inventory_deltas_from_events` (used by `SimulationState.apply_step_events`)
+both delegate to it. The per-period view (`get_inventory_df`) and the per-step
 view (`inventory_at_moments`) both add up the same deltas, only along
 different time axes. The per-period deltas are literally the per-step deltas
 aggregated by period, so the coarse and the fine view cannot disagree.

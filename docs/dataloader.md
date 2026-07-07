@@ -56,8 +56,10 @@ attributes. In order:
    The real capacities are not loaded. A sized run replaces this capacity table
    before the simulator starts.
 4. `get_depots(rng, n)` synthesizes depots at random coordinates inside the
-   city box, with random capacities and fixed costs. The Citi Bike data has no
-   depots, so they are generated from the seed.
+   city box — one row per depot with `depot_id`, `lat`, `lng`. Their random
+   capacities come from `get_depots_capacities` and their random fixed costs
+   from `get_depots_costs`. The Citi Bike data has no depots, so all three
+   tables are generated from the seed.
 5. `get_trips_df` keeps only the trip columns the rest of the pipeline needs.
 6. `get_trucks_df(n_trucks)` builds the truck table. Every truck starts at
    `depot_1`; a run can replace the fleet later with `apply_truck_fleet`.
@@ -91,12 +93,12 @@ names exist.
 | Order | What is built | Names |
 |---|---|---|
 | 1 | Entities | `facilities_df`, `resources_df`, `commodities_categories_df` |
-| 2 | Attributes | `facilities_geo_df`, `facilities_capacities_df`, `facilities_costs_df`, `resources_capacities_df`, `resources_rates_df`, `commodities_categories_rates_df` |
-| 3 | The time grid | `t0`, `period_len`, `periods_df` |
+| 2 | Attributes | `facilities_geo_df`, `facilities_capacities_df`, `resources_capacities_df`, `facilities_costs_df`, `resources_rates_df`, `commodities_categories_rates_df` |
+| 3 | The time grid | `period_len`, `t0`, `periods_df` |
 | 4 | The historical journal and empty resource observations | `historical_flows_df`, `historical_resources_df` |
 | 5 | The base replay initial inventory | `initial_inventory_df` |
 | 6 | The historical marginals | `historical_inventory_df`, `historical_demand_df`, `historical_departures_df`, `historical_arrivals_df`, `historical_od_matrix_df` |
-| 7 | Riding speed and routes | `trip_speed_km_per_period`, `routes`, `routing_mode` |
+| 7 | Riding speed and routes | `trip_speed_km_per_period`, `routing_mode`, `routes` |
 | 8 | Empty simulated attributes | `simulated_flows_df = None` and the other `simulated_*` |
 
 The simulator reads this subset: `periods_df`, `initial_inventory_df`,
@@ -126,8 +128,18 @@ departed = departed_events(trips)
 arrived = arrived_events(trips, trips["planned_end_period"])
 journal = pd.concat([departed, arrived], ignore_index=True)
 journal["phase_rank"] = phase_rank_by_timing(journal)
-return finalize_flows(journal)
+flows = finalize_flows(journal)
+violations = check_journal_schema(flows)
+if violations:
+    raise ValueError(
+        "historical flow journal breaks the journal schema:\n" + "\n".join(violations)
+    )
+return flows
 ```
+
+The finished journal is checked against the journal schema before it is
+returned, so bad input data fails at load time instead of surfacing later as
+a run-end violation.
 
 The rows are built with the same builders the simulator uses, and ordered by
 the same `finalize_flows`. History contains only trips that actually happened,
@@ -250,10 +262,43 @@ In `osrm` mode the full facility-to-facility table is fetched here, once.
 
 ### The Consistency Check
 
-`__init__` ends with an assert: the start-of-period inventory at period 0,
-summed per commodity, must equal the initial inventory. The two are built by
-different code paths, so a mistake in either one is caught at load time, not
-in the middle of a run.
+Near its end, `__init__` asserts that the start-of-period inventory at
+period 0, summed per commodity, equals the initial inventory. The two are
+built by different code paths, so a mistake in either one is caught at load
+time, not in the middle of a run.
+
+After the assert, `__init__` ends with `check_engine_tables(self)` — the
+schema check described in the next section. The assert stays separate
+because it is a cross-table consistency check, which a per-table schema
+cannot express.
+
+### The Schema Checks At The Load Boundary
+
+The loaders are the pipeline's fail-fast layer: each table is checked once,
+when it is built, so a wrong shape fails at load time instead of as a pandas
+error in the middle of a run. Three checks cover the boundary. All three use
+pandera schemas and report every violation at once (through
+`schema_violations`).
+
+1. The raw trips. `load_trips_raw_df` checks the trip table against
+   `TRIPS_SCHEMA` (`dataloader_raw.py`) on every load: required columns and
+   dtypes, coordinates inside the service area, and
+   `started_at <= ended_at`. A violation raises `ValueError`. The processed
+   parquet copy is written only after the check passes, so a bad table is
+   never cached.
+
+2. The historical journal. `get_historical_flows_df` runs
+   `check_journal_schema(flows)` on the finished journal and raises on
+   violations (the snippet above).
+
+3. The engine tables. `ResolvedModelData.__init__` ends with
+   `check_engine_tables(self)`: each of the six tables the engine reads
+   (`periods_df`, `initial_inventory_df`, `historical_demand_df`,
+   `historical_od_matrix_df`, `facilities_capacities_df`,
+   `facilities_geo_df`) is checked against its schema in
+   `ENGINE_TABLE_SCHEMAS` (`dataloader_graph.py`). The two sized-state
+   tables are checked again in `run_sized_scenario`, right after sizing
+   replaces them.
 
 ## Changing The Truck Fleet
 

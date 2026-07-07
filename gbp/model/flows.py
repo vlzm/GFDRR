@@ -1435,7 +1435,7 @@ def redirect_neighbor_table(
 # ---------------------------------------------------------------------------
 # I1 and I2 of the loss-logging design: whole-journal properties, returned as a
 # list of human-readable violations (empty == holds) rather than raised, so the
-# simulator-layer ``validate_run`` can collect I1-I4 together and report once.
+# simulator-layer ``validate_run`` can collect I1-I5 together and report once.
 def check_demand_split(flows: pd.DataFrame, demand: pd.DataFrame) -> list[str]:
     """I1 -- demand splits exactly into served departures and stockout losses.
 

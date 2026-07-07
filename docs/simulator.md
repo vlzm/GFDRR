@@ -178,6 +178,22 @@ It owns the safe order:
 5. Run the periods.
 6. Validate the finished journal with I1-I5.
 
+The sizing run and the real run use two independent demand multipliers
+(`gbp/consumers/simulator/scenario.py`):
+
+```python
+sizing_config = EnvironmentConfig(..., demand_scale_factor=sizing_scale_factor, ...)
+run_config = EnvironmentConfig(..., demand_scale_factor=demand_scale_factor, ...)
+```
+
+The state is sized to survive `sizing_scale_factor` with no loss. The run
+itself faces `demand_scale_factor`. Equal values give a clean run with no
+losses. A `demand_scale_factor` above `sizing_scale_factor` is what makes
+`stockout` and `dock_full` events appear at all: the run faces more demand
+than the state was sized for. Both factors are runner flags
+(`--demand-scale` and `--sizing-scale` in `app/runner.py`) and are saved in
+`meta.json`.
+
 The sizing run always uses the canonical three user-trip phases. If the real run
 uses rebalancing, the rebalancing effect is measured against the sized user-trip
 state instead of being hidden by the sizing step.
@@ -225,6 +241,13 @@ The engine checks at construction time that the phase list is ordered by
 `phase_rank`. The list position hands out `step_id` and the rank sorts the
 steps, so the two orders must agree; a list out of rank order is refused with
 `SimulatorConfigError`.
+
+Three more guards reject a run that cannot execute. `Environment.__init__`
+raises `SimulatorConfigError` when `number_of_periods` is larger than the
+period grid (the run would silently step fewer periods), and when both
+`historical_demand_df` and `initial_inventory_df` are empty.
+`EnvironmentConfig` raises `ValueError` at construction for
+`number_of_periods < 1` or `demand_scale_factor <= 0`.
 
 ## One Period At A Glance
 
@@ -577,12 +600,27 @@ These checks run inside mechanics and phases:
 | `plan_overflow_redirect()` | Every overflow flow is either redirected or lost. |
 | `realize_departures()` | Departures never exceed available inventory. |
 | `DockArrivals` | Every due flow docks, redirects, or is lost exactly once. |
-| `FormDeparturesPhase` | Stockout losses do not move inventory. |
-| `ApplyRebalancingPhase` | Inventory change equals docked dropoffs minus pickups. |
+
+Two more properties hold by construction, with no runtime check:
+
+- Stockout losses do not move inventory. `_event_deltas` gives a delta only
+  to docking and undocking events; a `lost` row is neither, so it never
+  produces one.
+- In `ApplyRebalancingPhase`, the inventory change equals docked dropoffs
+  minus pickups. The inventory is derived from the events themselves
+  (`inventory_deltas_from_events`), so there is no second value that could
+  disagree.
 
 ### Run Checks
 
-`validate_run()` checks the finished run.
+`validate_run()` checks the finished run. It first runs
+`check_journal_schema(flows)` (`gbp/model/journal_schema.py`), so the
+journal's shape is checked on every run, not only in tests. The schema check
+enforces the exact column list, order, and dtypes, the legal `event_type`,
+`flow_type`, and `reason` values, the rule `move_id == event_id // 2`, and
+the rule "`realized_target_id` is set exactly on `arrived` rows".
+
+Then come the five invariants:
 
 | Id | Statement |
 |---|---|
@@ -597,7 +635,8 @@ them itself so it can return the violation list to the caller.
 
 ### Journal Shape In Tests
 
-Tests also check the structure of finalized journals:
+One structural rule is checked only in tests: the order of events inside one
+flow.
 
 ```python
 departed(,redirected,departed)*(,(arrived|lost))?

@@ -1,33 +1,44 @@
-# API design: serving run artifacts over HTTP
+# The run-artifact API
 
-## Why an API
+This document describes `app/api.py` — the HTTP service over the run
+artifacts — and `app/api_client.py`, the client the Streamlit app uses when
+`API_URL` is set. The service starts with:
 
-Today the UI and the data live on one machine. Streamlit reads the parquet
-files of `data/runs/<run_name>/` directly, so nothing sits between the pages
-and the disk, and nothing needs to.
+```bash
+uvicorn api:app --app-dir app
+```
 
-On a shared server this changes. The users' browsers talk to Streamlit, but a
-future non-Streamlit frontend, a script, or a second service would each need
-its own way to reach the saved runs. The API gives them one: a small HTTP
-service that serves the run artifacts. It is the network form of the same
-contract the UI already reads — Notations.md §12.
+Server settings are environment variables: `DATA_DIR` (the data folder),
+`TRIPS_PATH` and `ROUTING_MODE` (the one dataset runs are built from), and
+`API_KEY` (the shared access key; unset means the check is off, for local
+development).
 
-The API stays a **reader and a saver of run artifacts**. It serves saved
-files, and it starts runs by calling the same `runner.run_scenario` the Run
-scenario page calls today. It never computes anything
-`artifacts.build_run_tables` can precompute, and it adds nothing to `gbp/`.
+## Why The API Exists
 
-## What does not change
+On one machine the UI and the data live together: Streamlit reads the parquet
+files of `data/runs/<run_name>/` directly, and nothing sits between the pages
+and the disk. On a shared server the saved runs live on the server's disk, so
+every client — the Streamlit app, a script, a second service — needs one way
+to reach them. The API is that way: a small HTTP service that serves the run
+artifacts. It is the network form of the same contract the UI reads locally —
+[Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads).
 
-| Piece | Stays as is because |
+The API is a reader and a saver of run artifacts. It serves saved files, and
+it starts runs by calling the same `runner.run_scenario` the Run scenario
+page calls. It never computes anything `artifacts.build_run_tables` can
+precompute, and it adds nothing to `gbp/`.
+
+## The Pieces Around It
+
+| Piece | Role |
 |---|---|
-| `gbp/` | The API is a consumer, like the UI. No new abstractions. |
-| `app/artifacts.py` | Still the one place that builds, saves, and loads artifacts. The API calls `list_runs`, `load_run_meta`, `next_free_run_name`; it serves the parquet files as they are. |
-| `app/runner.py` | Still owns `build_graph_data` and `run_scenario`. The API's worker calls them unchanged. |
+| `gbp/` | Untouched. The API is a consumer, like the UI. |
+| `app/artifacts.py` | The one place that builds, saves, and loads artifacts. The API calls `list_runs`, `load_run_meta`, `next_free_run_name`; the parquet files are served as saved. |
+| `app/runner.py` | Owns `build_graph_data` and `run_scenario`. The API's worker calls them unchanged. |
 | The artifact contract | `meta.json` + five parquet tables per run (Notations.md §12). The API exposes this contract; it does not define a second one. |
-| `views/*` pages | Pages keep reading through the `ui_shared` typed accessors. Only the loader behind those accessors changes (see below). |
+| `views/*` pages | Pages read through the `ui_shared` typed accessors; only the loader behind those accessors switches backends (see "The Two Backends"). |
 
-## The service map
+## The Service Map
 
 Two processes on the server, one shared `data/` folder:
 
@@ -39,33 +50,37 @@ data/runs/  ◄── reads ──  FastAPI (app/api.py)  ◄── HTTP ── 
                                                   ◄── HTTP ──  any other client
 ```
 
-- The API process is the **only writer** of `data/runs/` on the server.
-- Streamlit becomes a client: its loader fetches tables over HTTP instead of
-  opening files. Locally, without a server, it keeps reading the disk
-  directly (see "Changes in the Streamlit app").
-- `DATA_DIR` already moves the data folder (`artifacts.data_dir`), so the
-  server can mount shared storage without code changes.
+- The API process is the only writer of `data/runs/` on the server.
+- Streamlit is a client: with `API_URL` set its loader fetches tables over
+  HTTP instead of opening files. Locally, without `API_URL`, it reads the
+  disk directly.
+- `DATA_DIR` moves the data folder (`artifacts.data_dir`), so the server can
+  mount shared storage without code changes.
 
-The server holds one dataset: `build_graph_data` takes minutes, so the API
-builds one `ResolvedModelData` from its configured trip CSV (env vars
-`TRIPS_PATH`, `ROUTING_MODE`) on the first `POST /runs` and keeps it for every
-later run — the same reuse the Run scenario page gets from
-`st.cache_resource` today. Clients cannot pass a trips path; which data the
-server runs on is a server setting, not a request field.
+The server holds one dataset. `build_graph_data` takes minutes, so the worker
+thread builds one `ResolvedModelData` from the configured trip CSV (env vars
+`TRIPS_PATH`, `ROUTING_MODE`) when it executes its first run, and keeps it
+for every later run — the same reuse the Run scenario page gets from
+`st.cache_resource`. A `POST /runs` request itself only queues the run: the
+loading happens later, in the worker, and the first run's `progress` shows a
+"Loading the server dataset" line. Clients cannot pass a trips path: which
+data the server runs on is a server setting, not a request field.
 
 ## Endpoints
 
-| Method and path | Returns | Mirrors |
-|---|---|---|
-| `GET /health` | `{"status": "ok"}` | — (for the Azure health probe) |
-| `GET /runs` | `list[RunMeta]` — the `meta.json` of every saved run | `list_runs` + `load_run_meta` |
-| `GET /runs/{run_name}` | one `RunMeta` | `load_run_meta` |
-| `GET /runs/{run_name}/tables/{table}` | the parquet file bytes | `load_run_table` |
-| `POST /runs` | `202` + the final `run_name` | the Run scenario page |
-| `GET /runs/{run_name}/status` | the state of a started run | the page's progress box |
+All endpoints live in `app/api.py`.
+
+| Method and path | Returns |
+|---|---|
+| `GET /health` | `{"status": "ok"}` — the platform health probe; needs no key |
+| `GET /runs` | `list[RunMeta]` — the `meta.json` of every saved run |
+| `GET /runs/{run_name}` | one `RunMeta`; `404` for an unknown run |
+| `GET /runs/{run_name}/tables/{table}` | the saved parquet bytes; `404` for an unknown run or table |
+| `POST /runs` | `202` + the final `run_name` to poll |
+| `GET /runs/{run_name}/status` | the state of a started run |
 
 There is no version prefix and no delete endpoint: one client and one server
-ship from one repository, and the UI has no delete today.
+ship from one repository, and the UI has no delete.
 
 ### `GET /runs`
 
@@ -73,14 +88,20 @@ The list the Overview & compare page needs: the `meta.json` of every complete
 artifact, as JSON. A folder counts as a run only when its `meta.json` exists —
 the same rule `list_runs` uses, so a run being written is not listed.
 
-`RunMeta` is already a pydantic model (`app/artifacts.py`), so FastAPI returns
-it directly. The `meta.json` contract stays defined in that one place.
+`RunMeta` is a pydantic model (`app/artifacts.py`), so FastAPI returns it
+directly. The `meta.json` contract stays defined in that one place.
+
+### `GET /runs/{run_name}`
+
+One saved run's `meta.json`, loaded with `load_run_meta`. An unknown
+`run_name` answers `404`.
 
 ### `GET /runs/{run_name}/tables/{table}`
 
 `table` is one of the `RUN_TABLES` stems: `flows`, `panel`, `arcs`,
-`flow_totals`, `facilities`. The response body is the parquet file as saved,
-media type `application/vnd.apache.parquet`; the client reads it with
+`flow_totals`, `facilities`. The endpoint reads the saved file bytes directly
+(`path.read_bytes()`) and returns them with media type
+`application/vnd.apache.parquet`; the client reads the body with
 `pd.read_parquet(io.BytesIO(response.content))`.
 
 Parquet bytes, not JSON, on purpose: `flows.parquet` can hold millions of
@@ -108,16 +129,22 @@ Starts one run. The body mirrors the keyword parameters of
 }
 ```
 
-The server passes `run_name` through `next_free_run_name` and answers `202`
-with the final name:
+`run_name` must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` — plain file-name
+characters, so it always names a folder inside the runs root. A name outside
+the pattern is rejected with a validation error before anything is queued.
+
+The server resolves the final name itself and answers `202` with it:
 
 ```json
 {"run_name": "demand_x2_version_2", "status": "queued"}
 ```
 
-The client polls `GET /runs/{run_name}/status` with that name. Because every
-started run goes through `next_free_run_name`, a saved artifact on the server
-is **never overwritten** — see "Artifacts are immutable" below.
+The name goes through `next_free_run_name`, and the names of queued or
+running runs are skipped as well (they have no folder yet), so two quick
+`POST`s with the same name never write into one folder. The client polls
+`GET /runs/{run_name}/status` with the returned name. Because every started
+run gets a free name, a saved artifact on the server is never overwritten —
+see "Artifacts Are Immutable" below.
 
 A second `POST` while a run is executing is accepted and queued; the worker
 runs one scenario at a time (a single-thread worker), because one run uses
@@ -138,7 +165,8 @@ The state of a started run:
 
 `status` is one of `queued`, `running`, `done`, `failed`. `progress` collects
 the `on_progress` messages `run_scenario` emits — the same lines the Run
-scenario page prints today. `error` carries the exception text when `failed`.
+scenario page prints locally. `error` carries the exception text when
+`failed`.
 
 The run states live in the API process memory, not on disk. If the process
 restarts, that record is gone; the endpoint then falls back to the disk: an
@@ -147,10 +175,10 @@ executing during the restart is lost — its folder has no `meta.json`, so
 `GET /runs` never lists the half-written result (the write-`meta.json`-last
 rule of `save_run`).
 
-## Artifacts are immutable
+## Artifacts Are Immutable
 
-On the server, the API is the only writer, and every write goes through
-`next_free_run_name`. So once a run's `meta.json` exists, that folder never
+On the server, the API is the only writer, and every write goes through the
+free-name rule. So once a run's `meta.json` exists, that folder never
 changes.
 
 This rule replaces the mtime cache key. The local loader caches a table with
@@ -158,54 +186,72 @@ the file's modification time in the key; over HTTP the client caches by
 `(run_name, table)` alone, with no expiry, because an existing artifact
 cannot change. No cache invalidation protocol is needed.
 
-## Changes in the Streamlit app
+## The Two Backends Of The Streamlit App
 
 The loader in `ui_shared.py` is the one front door to a saved run, and that
-is the payoff here: the pages, pickers, KPI row, and charts do not change.
-Two files change:
+is the payoff: the pages, pickers, KPI row, and charts are the same in both
+backends. Two files branch on `API_URL`:
 
-- `ui_shared.py` — `_load_table`, the meta loader, and the run list get two
-  backends behind the same functions: the local file reads (today's code)
-  when `API_URL` is unset, HTTP calls to the API when it is set. The typed
-  accessors (`load_panel`, `load_arcs`, `load_flow_totals`,
-  `load_facilities`, `load_meta`) keep their signatures.
+- `ui_shared.py` — `list_runs`, the table loader, and the meta loader have
+  two backends behind the same functions: local file reads when `API_URL` is
+  unset, HTTP calls through `api_client` when it is set. The typed accessors
+  (`load_panel`, `load_arcs`, `load_flow_totals`, `load_facilities`,
+  `load_meta`) keep their signatures either way. The cache key is the file's
+  modification time locally and a constant over HTTP (see "Artifacts Are
+  Immutable").
 - `views/run_scenario.py` — with `API_URL` set, the page sends `POST /runs`
   and polls `GET /runs/{run_name}/status`, showing the `progress` lines in
-  the status box instead of receiving them through `on_progress`. Without
-  `API_URL` it keeps calling `runner.run_scenario` directly.
-
-The HTTP client is a small module of plain functions (`app/api_client.py`),
-so the API-side code and the client-side code never import each other's
-frameworks: `api.py` never imports streamlit, `api_client.py` never imports
-fastapi.
+  its status box; the server resolves the final run name. Without `API_URL`
+  it calls `runner.run_scenario` in the Streamlit process and resolves the
+  name itself with `next_free_run_name`.
 
 Local development stays a one-process command: `streamlit run app/main.py`
-with no `API_URL` behaves exactly as today. The server runs both processes
-and sets `API_URL=http://localhost:8000` for Streamlit.
+with no `API_URL` reads the disk directly. The server runs both processes and
+sets `API_URL=http://localhost:8000` for Streamlit.
 
-## Access control
+## The HTTP Client (`app/api_client.py`)
 
-Up to ten known users, one shared server. The first version uses one shared
-key: the server reads `API_KEY` from the environment and a FastAPI dependency
-checks the `X-API-Key` header on every endpoint except `/health`; with
-`API_KEY` unset (local development) the check is off. Per-user accounts,
-if ever needed, would come from the platform in front (Azure App Service
-authentication), not from this codebase.
+`app/api_client.py` is a small module of plain functions. It never imports
+fastapi or streamlit — the API side and the client side meet only at the HTTP
+contract. Every call raises on connection errors and on 4xx/5xx answers; the
+timeout is 120 seconds, sized for a table download of millions of rows.
 
-## Non-goals
+| Function | Endpoint | Returns |
+|---|---|---|
+| `api_url()` | — | The base URL from the `API_URL` env var; `None` means read local files. This is the loader's backend switch. |
+| `list_runs()` | `GET /runs` | `list[RunMeta]` |
+| `load_meta(run_name)` | `GET /runs/{run_name}` | one `RunMeta` |
+| `load_table(run_name, table)` | `GET /runs/{run_name}/tables/{table}` | the table as a `pandas.DataFrame` |
+| `start_run(request)` | `POST /runs` | `{"run_name": ..., "status": "queued"}` |
+| `run_status(run_name)` | `GET /runs/{run_name}/status` | the run-state dict: `status`, `progress`, `error` |
+
+`RunMeta` (`app/artifacts.py`) stays the one definition of `meta.json`: the
+client validates every fetched meta back into that model. When `API_KEY` is
+set, every call sends it in the `X-API-Key` header.
+
+## Access Control
+
+Up to ten known users, one shared server. One shared key: the server reads
+`API_KEY` from the environment, and a FastAPI dependency checks the
+`X-API-Key` header on every endpoint except `/health`. With `API_KEY` unset
+(local development) the check is off. Per-user accounts, if ever needed,
+would come from the platform in front (Azure App Service authentication),
+not from this codebase.
+
+## Non-Goals
 
 - **No database.** The runs folder is the storage; `meta.json` presence marks
   a complete run. The API adds no state of its own beyond the in-memory run
   states.
 - **No computation in the API.** No filtering, aggregation, or slicing
-  endpoints. Pages slice tables after loading, exactly as they do now; every
-  precomputable value already lives in the artifact.
+  endpoints. Pages slice tables after loading; every precomputable value
+  already lives in the artifact.
 - **No JSON form of the tables.** Parquet is the one wire format for tables;
   `RunMeta` is the one JSON payload.
 - **No parallel runs.** One worker, one run at a time.
 - **No per-user runs.** Every user sees every run.
 
-## Why it is built this way
+## Why It Is Built This Way
 
 **The artifact contract is the API contract.** The folder layout of
 Notations.md §12 already is a complete, versioned-by-`code_version`,

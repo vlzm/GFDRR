@@ -34,10 +34,11 @@ concept, one word; every document here uses its vocabulary.
 
 ```bash
 uv venv
-uv pip install -e ".[dev,ui]"      # simulator + web interface + dev tools
+uv pip install -e ".[dev,ui,api]"  # simulator + web interface + API + dev tools
 
 python app/runner.py --run-name demo   # run one scenario with default settings
 streamlit run app/main.py              # browse saved runs in the browser
+uvicorn api:app --app-dir app          # serve the run-artifact API (api.md)
 pytest                                 # run the tests
 ```
 
@@ -72,12 +73,17 @@ with a depth table (level 3).
   ([Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads)).
   `app/main.py` and `app/views/` are the Streamlit web interface — a pure
   reader of saved artifacts: it never simulates and never recomputes what the
-  artifact builder has already computed.
+  artifact builder has already computed. `app/ui_shared.py` holds the pages'
+  shared helpers, including the loader with its two backends: local files,
+  or HTTP calls through `app/api_client.py` when `API_URL` is set.
+  `app/api.py` is the run-artifact API — an HTTP service that serves saved
+  runs and starts new ones ([api.md](api.md)).
 - **`notebooks/`** — `test_pipeline.ipynb`, the canonical scenario: the whole
   pipeline in one notebook, from raw CSV to validated run. The other notebooks
   are working notebooks around specific parts of the code.
 - **`data/`** — `raw/` (source trip CSVs), `osrm/` (road graph files for the
-  routing server), `runs/` (saved run artifacts, one folder per run).
+  routing server, created by the OSRM setup — [osrm_setup.md](osrm_setup.md)),
+  `runs/` (saved run artifacts, one folder per run).
 - **`tests/`** — `invariants.py` (the journal checks every run must pass),
   `scenarios.py` (builders of tiny synthetic runs), the test modules, and
   `test_docs_scenarios.py`, which re-runs every toy table of
@@ -88,7 +94,7 @@ with a depth table (level 3).
 
 Level 3 — every module and its contract, in coarse words. The module
 diagrams and the module depth table are in
-[architecture.md](architecture.md). Five documents
+[architecture.md](architecture.md). Six documents
 cover the run chain from the map above. [dataloader.md](dataloader.md): how
 the raw trip CSV becomes `ResolvedModelData` — the entities, the historical
 journal, the sized initial state. [simulator.md](simulator.md): what a period
@@ -99,6 +105,8 @@ and how the trucks execute it period by period.
 (`gbp/model/flows.py`) shared by the loaders and the simulator — the event
 schema, the builders, the read-models, the checks. [app.md](app.md): how a
 finished run becomes a saved artifact and how the web interface draws it.
+[api.md](api.md): the HTTP service that serves saved runs to clients and
+starts runs on a server.
 
 Level 4a — exact contracts. [`Notations.md`](../Notations.md) (repository
 root) defines every column, status, and table name.

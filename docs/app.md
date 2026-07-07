@@ -16,6 +16,13 @@ What happens inside the simulator during a run is
 [simulator.md](simulator.md); the journal functions the builders call are
 explained in [flow_journal.md](flow_journal.md).
 
+The UI has two backends. Without `API_URL` it reads run artifacts from the
+local disk, and the Run scenario page runs scenarios in the same process.
+With `API_URL` set it fetches the same runs from the run-artifact API over
+HTTP, and the Run scenario page starts runs on the server. This document
+describes the local backend; the switch and the server side are in
+[api.md](api.md).
+
 ## Code Map
 
 | File | Main role |
@@ -81,6 +88,24 @@ The terminal entry point wraps the same two calls:
 python app/runner.py --run-name demand_x2 --demand-scale 2.0 --periods 50
 python app/runner.py --run-name with_trucks --rebalancing --truck-homes depot_1,depot_1,depot_3
 ```
+
+The full flag list of `app/runner.py`:
+
+| Flag | Meaning | Default |
+|---|---|---|
+| `--run-name` | Artifact folder name. Required. | — |
+| `--demand-scale` | Demand multiplier the run faces (`demand_scale_factor`). | `1.0` |
+| `--sizing-scale` | Demand the state is sized for (`sizing_scale_factor`). | `1.0` |
+| `--periods` | How many periods to step. | `50` |
+| `--trips-path` | Path to the raw trip CSV. | `data/raw/202601-citibike-tripdata_1.csv` |
+| `--rebalancing` | Run with the two overnight rebalancing phases. | off |
+| `--truck-homes` | Home depot per truck, comma-separated; the list length is the fleet size. | 5 trucks at `depot_1` |
+| `--truck-capacity` | Bikes one truck can carry. | `20` |
+| `--routing` | Distance and travel-time mode: `haversine` or `osrm`. | `haversine` |
+| `--osrm-url` | OSRM server URL; read only with `--routing osrm`. | `http://127.0.0.1:5000` |
+
+`--routing osrm` needs a running OSRM server; the setup is
+[osrm_setup.md](osrm_setup.md).
 
 ## Step 2: `artifacts.py` — Build The Tables
 
@@ -167,13 +192,18 @@ picker, KPI and totals lists.
 
 `save_run` writes the five parquet files first and `meta.json` last, so a
 folder with a `meta.json` is always a complete artifact — `list_runs` keys on
-that file. `load_run_table` and `load_run_meta` are the raw file reads; only
-the `ui_shared` loader calls them (pages go through its typed accessors).
+that file. `load_run_table` and `load_run_meta` are the raw file reads.
+`load_run_table` is called only by the `ui_shared` loader (pages go through
+its typed accessors). `load_run_meta` has more callers: the API endpoints in
+`app/api.py` and the runner's terminal entry point, which prints the totals
+of the run it just saved.
 
-The Run scenario page calls `next_free_run_name` before it runs. A taken name
-gets a `_version_2`, `_version_3`, … suffix there, so that page does not
-overwrite a saved run. A caller that passes an existing `run_name` directly to
-`save_run` replaces the files in that folder.
+The Run scenario page resolves a free name before it runs: with the local
+backend it calls `next_free_run_name` itself; with `API_URL` set the server
+resolves the name (see [api.md](api.md)). A taken name gets a `_version_2`,
+`_version_3`, … suffix either way, so that page does not overwrite a saved
+run. A caller that passes an existing `run_name` directly to `save_run`
+replaces the files in that folder.
 
 ## Step 3: The Streamlit App
 
@@ -183,8 +213,10 @@ share lives in `ui_shared.py`:
 - the run-artifact loader — the one front door to a saved run. Typed
   accessors per table (`load_panel`, `load_arcs`, `load_flow_totals`,
   `load_facilities`, `load_meta`) plus `rebalancing_settings` for the
-  rebalancing block of `meta.json`. The cache key includes the file's
-  modification time, so a rewritten artifact invalidates itself.
+  rebalancing block of `meta.json`. With the local backend the cache key
+  includes the file's modification time, so a rewritten artifact invalidates
+  itself. With `API_URL` set the key is a constant, because a served
+  artifact never changes ([api.md](api.md)).
   Old-artifact fallbacks live here: `load_arcs(run, flow_type=...)` handles
   arcs saved before the `flow_type` column existed.
 - `pick_scenario_pair` — the sidebar pickers for scenario A and the optional
