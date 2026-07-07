@@ -24,7 +24,7 @@ after changing `pyproject.toml`).
 ```bash
 streamlit run app/main.py                                        # web interface
 python app/runner.py --run-name demo --demand-scale 1.5 --periods 50   # one scenario from the terminal
-uvicorn api:app --app-dir app                                    # run-artifact API (docs/api.md)
+uvicorn api:app --app-dir app                                    # run-artifact API (docs/explanation/api.md)
 ```
 
 A finished run is saved as a folder under `<data dir>/runs/<run_name>/`;
@@ -63,7 +63,7 @@ repository layout.
 ```
 <DATA_DIR>/
   raw/    # source trip CSVs (e.g. 202601-citibike-tripdata_1.csv)
-  osrm/   # road graph files for the OSRM server (created by the setup in docs/osrm_setup.md)
+  osrm/   # road graph files for the OSRM server (created by the setup in docs/guides/osrm_setup.md)
   runs/   # saved run artifacts, one folder per run
 ```
 

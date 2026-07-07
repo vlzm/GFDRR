@@ -9,7 +9,7 @@ The simulator does three things:
 2. It writes every movement as rows in `state_flows_df`, the flow journal.
 3. It checks that the final journal and the live state still agree.
 
-The terms are the same as in [`Notations.md`](../Notations.md). The scenario
+The terms are the same as in [`Notations.md`](../../Notations.md). The scenario
 examples, with concrete journal rows, are in [`scenarios.md`](scenarios.md).
 
 ## Code Map

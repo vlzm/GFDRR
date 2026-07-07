@@ -21,7 +21,7 @@ and the disk. On a shared server the saved runs live on the server's disk, so
 every client — the Streamlit app, a script, a second service — needs one way
 to reach them. The API is that way: a small HTTP service that serves the run
 artifacts. It is the network form of the same contract the UI reads locally —
-[Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads).
+[Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads).
 
 The API is a reader and a saver of run artifacts. It serves saved files, and
 it starts runs by calling the same `runner.run_scenario` the Run scenario

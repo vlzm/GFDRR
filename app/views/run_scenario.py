@@ -1,6 +1,6 @@
 """Run page: set the scenario parameters, run, save a new artifact.
 
-The page has two backends (docs/api.md). Without ``API_URL`` it calls
+The page has two backends (docs/explanation/api.md). Without ``API_URL`` it calls
 ``runner.run_scenario`` in this process, as before. With ``API_URL`` set it
 sends ``POST /runs`` to the API and polls ``GET /runs/{run_name}/status``,
 showing the same progress lines the local path prints through
@@ -150,7 +150,7 @@ if api_url is None:
     run_name = artifacts.next_free_run_name(requested_name)
     location = f"data/runs/{run_name}"
 else:
-    # The server resolves the final name itself (docs/api.md): the runs live
+    # The server resolves the final name itself (docs/explanation/api.md): the runs live
     # on its disk, not here. POST /runs answers with the name to poll.
     run_name = requested_name
     location = f"{run_name} on the server"

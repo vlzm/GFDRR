@@ -58,11 +58,11 @@ degrees of crankshaft rotation".
 **Example for this project:**
 "The system has three big blocks: the simulator (`gbp/consumers/simulator/`)
 plays a scenario period by period and produces the flow journal
-([Notations.md §0](../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
+([Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
 the table of everything that happened to every bike; the artifact builder
 (`app/artifacts.py`) turns a finished run into a folder of tables under
 `data/runs/<run_name>/`
-([Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads));
+([Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads));
 the Streamlit UI (`app/`) reads those tables and draws them." What exactly is
 inside the flow journal — at this level the person does not know.
 
@@ -162,13 +162,13 @@ level 2, but with numbers and exact conditions.
 **Example for this project:**
 At level 2 it was: "the artifact builder turns a run into a folder of tables".
 At level 4a it is the exact contract of that folder
-([Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads)):
+([Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads)):
 `meta.json` holds the run parameters, the invariant `violations` list, and the
 whole-run totals; `flows.parquet` is the finalized journal with the measure
 columns; `panel.parquet` has one row per
 `(period_id, facility_id, commodity_category)`; `arcs.parquet` has one row per
 `(flow_id, move_id)` pair. Inside the rebalancer
-([`rebalancing.md`](rebalancing.md)) there is
+([`rebalancing.md`](../explanation/rebalancing.md)) there is
 `solve_rebalance_vrp(nodes, travel_minutes, trucks, params)` returning the
 stops table, with these guarantees: every truck starts and ends empty at its
 home depot, the truck's load never goes below zero or above its capacity, every
@@ -207,10 +207,10 @@ table of events — rather than a mutable state table: every read-model
 (inventory, demand, the panel) is computed from the journal, so the simulator
 and the historical loader can be compared row by row. This is a load-bearing
 decision; it is written down in the "Why it is built this way" section of
-[`simulator.md`](simulator.md#why-it-is-built-this-way). Knows why rebalancing
+[`simulator.md`](../explanation/simulator.md#why-it-is-built-this-way). Knows why rebalancing
 is planned once per window but executed period by period, re-checking free
 docks and bikes on hand at every step instead of trusting the plan
-([`rebalancing.md`](rebalancing.md#why-it-is-built-this-way)). And knows that
+([`rebalancing.md`](../explanation/rebalancing.md#why-it-is-built-this-way)). And knows that
 the solver counting time in tenths of a minute (`_MINUTE_SCALE` in
 `rebalancing.py`) is an arbitrary decision: OR-Tools works in whole numbers,
 and tenths are precise enough — hundredths would work just as well, nothing
@@ -341,8 +341,8 @@ compromise.
 **Second**, 4b (the theory of the module) must be written down — in design
 decision records, specifications, design documents. In this repository it
 lives in the "Why it is built this way" sections of
-[`simulator.md`](simulator.md#why-it-is-built-this-way) and
-[`rebalancing.md`](rebalancing.md#why-it-is-built-this-way). Otherwise it fades
+[`simulator.md`](../explanation/simulator.md#why-it-is-built-this-way) and
+[`rebalancing.md`](../explanation/rebalancing.md#why-it-is-built-this-way). Otherwise it fades
 with time even in the author's head, let alone in other people's.
 
 **Third**, if for some module you decided to work at 4a without 5 — that must

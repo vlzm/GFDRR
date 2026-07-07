@@ -15,7 +15,7 @@ The module does four things:
 4. It checks two whole-journal invariants: I1 (demand split) and I2 (flow
    closure).
 
-The column-by-column schema is [Notations.md §0](../Notations.md#0-the-flow-event-schema-the-symbol-table).
+The column-by-column schema is [Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table).
 How the simulator calls these functions period by period is
 [simulator.md](simulator.md). Worked examples with concrete journal rows are
 in [scenarios.md](scenarios.md).
@@ -61,7 +61,7 @@ the same table have one definition, not two kept in sync by hand.
 ## The Event Schema
 
 One row of the journal is one flow event. The full column table is
-[Notations.md §0](../Notations.md#0-the-flow-event-schema-the-symbol-table);
+[Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table);
 grouped by purpose:
 
 | Group | Columns |
@@ -186,7 +186,7 @@ It casts the types, settles the order columns, sorts by
 
 The work is in `_assign_step_id`. A step is one batch of `+1`/`-1` inventory
 changes applied together; `step_id` is its run-global ordinal
-([Notations.md §0.1](../Notations.md#01-moment-and-step-the-inventory-time-axis)).
+([Notations.md §0.1](../../Notations.md#01-moment-and-step-the-inventory-time-axis)).
 The function fills it one of two ways:
 
 ```python
@@ -225,7 +225,7 @@ historical order and the simulator order agree.
 A read-model is a table computed from the journal by a pure function. It adds
 no new facts; running it twice on the same journal gives the same answer. The
 marginals are the per-period read-models
-([Notations.md §9](../Notations.md#9-marginals-the-read-models-of-the-journal)):
+([Notations.md §9](../../Notations.md#9-marginals-the-read-models-of-the-journal)):
 
 | Function | Counts | At which facility |
 |---|---|---|
@@ -301,7 +301,7 @@ Three functions widen the journal — same rows, more columns:
 | `flows_with_measures` | the money columns from `flows_with_costs` plus `planned_duration_periods`, `realized_duration_periods`, `planned_distance_km`, `realized_distance_km` | `routes`, rates, `period_len` |
 
 `flows_with_measures` is the one place a journal gains its measure columns
-([Notations.md §6.1](../Notations.md#61-rate-and-cost-money)). The wide
+([Notations.md §6.1](../../Notations.md#61-rate-and-cost-money)). The wide
 journal (the canonical notebook) and the artifact builder
 (`app/artifacts.py`) both call it, so `flows.parquet` and a notebook's wide
 journal price a trip identically.
@@ -403,7 +403,7 @@ trips — one `(period_id, phase_rank, phase_round)` tuple is always exactly one
 batch — so deriving the number from the tuple is safe there. `_assign_step_id`
 implements exactly this split: trust the stamped number, derive only when none
 was stamped. The full reasoning is in
-[Notations.md §0.1](../Notations.md#01-moment-and-step-the-inventory-time-axis).
+[Notations.md §0.1](../../Notations.md#01-moment-and-step-the-inventory-time-axis).
 
 ### The Geometry Helpers Live Here
 

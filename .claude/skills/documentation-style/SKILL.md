@@ -72,7 +72,7 @@ happens, then why it was built that way.
 - Use small tables only when comparing a few concrete items.
 - Avoid long paragraphs that mix state, mechanics, writes, and checks.
 - Split those ideas into separate sections when the topic is complex.
-- Link to `docs/scenarios.md` for row-by-row journal examples instead of
+- Link to `docs/explanation/scenarios.md` for row-by-row journal examples instead of
   repeating large scenario tables.
 
 ## Before Finishing

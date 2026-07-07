@@ -2,7 +2,7 @@
 
 This document explains how the simulator moves bikes by truck at night. The
 code is `gbp/consumers/simulator/rebalancing.py`. The vocabulary is defined in
-[`Notations.md` §14](../Notations.md#14-rebalancing-moving-bikes-by-truck).
+[`Notations.md` §14](../../Notations.md#14-rebalancing-moving-bikes-by-truck).
 
 Rebalancing exists for one reason: a station can be empty before the morning
 demand reaches it. If riders want bikes there and none are docked, those trips

@@ -1,4 +1,4 @@
-"""Tests of the run-artifact API (``app/api.py``, design: ``docs/api.md``).
+"""Tests of the run-artifact API (``app/api.py``, described in ``docs/explanation/api.md``).
 
 The API runs under FastAPI's ``TestClient`` against synthetic saved runs (the
 offline scenarios of ``tests/scenarios.py``) in a tmp data folder. The heavy
@@ -197,7 +197,7 @@ def test_api_url_reads_the_environment(monkeypatch):
 
 
 def test_table_cache_key_is_a_constant_over_http(monkeypatch):
-    # Served artifacts are immutable (docs/api.md): the HTTP cache key must
+    # Served artifacts are immutable (docs/explanation/api.md): the HTTP cache key must
     # not touch the disk and must not vary.
     import ui_shared
 

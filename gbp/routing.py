@@ -8,7 +8,7 @@ How the answer is measured is the ``routing_mode`` of the scenario:
   line between the two facilities; travel time is that distance divided by
   ``trip_speed_km_per_period``.
 - ``"osrm"`` — road-network mode. Distance and riding time come from a local
-  OSRM server (see ``docs/osrm_setup.md``). The full facility-to-facility
+  OSRM server (see ``docs/guides/osrm_setup.md``). The full facility-to-facility
   table is fetched once, in one ``/table`` request, when the object is built;
   queries after that are matrix lookups with no network calls.
 

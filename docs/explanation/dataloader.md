@@ -14,7 +14,7 @@ The loaders do three things:
 3. They compute the initial inventory for the base replay and provide the
    sizing helpers used by `size_state_for_demand`.
 
-The terms are the same as in [`Notations.md`](../Notations.md). What the
+The terms are the same as in [`Notations.md`](../../Notations.md). What the
 simulator does with these tables is [simulator.md](simulator.md). The journal
 functions used here are explained in [flow_journal.md](flow_journal.md).
 
@@ -73,7 +73,7 @@ Everything here still uses the raw column names: `station_id`, `depot_id`,
 ## The Raw-To-Canonical Boundary
 
 `ResolvedModelData` renames the raw names to the canonical schema
-([Notations.md §4](../Notations.md#4-facility-and-its-roles-in-a-trip)):
+([Notations.md §4](../../Notations.md#4-facility-and-its-roles-in-a-trip)):
 
 | Raw | Canonical |
 |---|---|
@@ -257,7 +257,7 @@ self.routes = Routes(
 
 It answers `distance_km(source, target)` and
 `duration_periods(source, target)` for facility pairs
-([Notations.md §13](../Notations.md#13-routing-distance-and-travel-time-between-facilities)).
+([Notations.md §13](../../Notations.md#13-routing-distance-and-travel-time-between-facilities)).
 In `osrm` mode the full facility-to-facility table is fetched here, once.
 
 ### The Consistency Check

@@ -3,7 +3,7 @@
 Эта страница — вход в документацию проекта. Она говорит, что это за проект,
 как его запустить, за что отвечает каждая папка репозитория и какой документ
 читать следующим. Маршрут идёт по пяти уровням понимания кода из
-[comprehension_levels_ru.md](comprehension_levels_ru.md) — от «умею запустить»
+[comprehension_levels_ru.md](method/comprehension_levels_ru.md) — от «умею запустить»
 (уровень 1) до «понимаю каждую строчку» (уровень 5). Каждый уровень закрыт
 ровно одним артефактом, и страница проходит их по порядку.
 
@@ -39,7 +39,7 @@ uv pip install -e ".[dev,ui,api]"  # симулятор + веб-интерфе�
 
 python app/runner.py --run-name demo   # один сценарий с настройками по умолчанию
 streamlit run app/main.py              # смотреть сохранённые запуски в браузере
-uvicorn api:app --app-dir app          # поднять API артефактов запусков (api.md)
+uvicorn api:app --app-dir app          # поднять API артефактов запусков (explanation/api.md)
 pytest                                 # запустить тесты
 ```
 
@@ -48,7 +48,7 @@ pytest                                 # запустить тесты
 список всех сохранённых запусков. Docker, переменные окружения и устройство
 папки данных описаны в [корневом README](../README.md). Необязательный
 маршрутный сервер (OSRM) ставится по инструкции
-[osrm_setup.md](osrm_setup.md).
+[osrm_setup.md](guides/osrm_setup.md).
 
 ## Карта репозитория (уровень 2)
 
@@ -57,7 +57,7 @@ pytest                                 # запустить тесты
 сырые CSV поездок → `RawModelData` → `ResolvedModelData` → симулятор → журнал
 flow-событий → артефакт запуска → веб-интерфейс
 
-Та же карта в виде диаграмм: [architecture.md](architecture.md) — система и
+Та же карта в виде диаграмм: [architecture.md](explanation/architecture.md) — система и
 внешний мир (уровень 1), крупные блоки (уровень 2), полная карта модулей с
 таблицей глубины (уровень 3).
 
@@ -79,56 +79,56 @@ flow-событий → артефакт запуска → веб-интерф�
   страниц, в том числе загрузчик с двумя источниками данных: локальные файлы
   или HTTP-запросы через `app/api_client.py`, когда установлена переменная
   `API_URL`. `app/api.py` — API артефактов запусков: HTTP-сервис, который
-  отдаёт сохранённые запуски и запускает новые ([api.md](api.md)).
+  отдаёт сохранённые запуски и запускает новые ([api.md](explanation/api.md)).
 - **`notebooks/`** — `test_pipeline.ipynb`, канонический сценарий: весь
   конвейер в одном ноутбуке, от сырого CSV до проверенного запуска. Остальные
   ноутбуки — рабочие, вокруг отдельных частей кода.
 - **`data/`** — `raw/` (исходные CSV поездок), `osrm/` (файлы дорожного графа
   для маршрутного сервера; папку создаёт установка OSRM —
-  [osrm_setup.md](osrm_setup.md)), `runs/` (сохранённые артефакты запусков,
+  [osrm_setup.md](guides/osrm_setup.md)), `runs/` (сохранённые артефакты запусков,
   одна папка на запуск).
 - **`tests/`** — `invariants.py` (проверки журнала, которые обязан проходить
   каждый запуск), `scenarios.py` (сборщики крошечных синтетических запусков),
   модули тестов и `test_docs_scenarios.py`, который заново прогоняет каждую
-  игрушечную таблицу из [scenarios.md](scenarios.md), чтобы документация не
+  игрушечную таблицу из [scenarios.md](explanation/scenarios.md), чтобы документация не
   разошлась с кодом незаметно.
 
 ## Куда идти дальше (уровни 3–5)
 
 Уровень 3 — все модули и их контракты в общих словах. Диаграммы модулей и
-таблица глубины модулей — в [architecture.md](architecture.md). Шесть
-документов покрывают цепочку запуска с карты выше. [dataloader.md](dataloader.md): как
+таблица глубины модулей — в [architecture.md](explanation/architecture.md). Шесть
+документов покрывают цепочку запуска с карты выше. [dataloader.md](explanation/dataloader.md): как
 сырой CSV поездок становится `ResolvedModelData` — сущности, исторический
-журнал, рассчитанное стартовое состояние. [simulator.md](simulator.md): что
+журнал, рассчитанное стартовое состояние. [simulator.md](explanation/simulator.md): что
 такое период, какое состояние несёт симулятор, цикл фаз, механики,
-инварианты. [rebalancing.md](rebalancing.md): как считается план для
+инварианты. [rebalancing.md](explanation/rebalancing.md): как считается план для
 грузовиков и как они исполняют его период за периодом.
-[flow_journal.md](flow_journal.md): библиотека журнала
+[flow_journal.md](explanation/flow_journal.md): библиотека журнала
 (`gbp/model/flows.py`), общая для загрузчиков и симулятора, — схема событий,
-сборщики событий, функции чтения, проверки. [app.md](app.md): как завершённый
+сборщики событий, функции чтения, проверки. [app.md](explanation/app.md): как завершённый
 запуск становится сохранённым артефактом и как веб-интерфейс его рисует.
-[api.md](api.md): HTTP-сервис, который отдаёт сохранённые запуски клиентам и
+[api.md](explanation/api.md): HTTP-сервис, который отдаёт сохранённые запуски клиентам и
 запускает запуски на сервере.
 
 Уровень 4a — точные контракты. [`Notations.md`](../Notations.md) (корень
 репозитория) определяет каждую колонку, каждый статус и каждое имя таблицы.
-[scenarios.md](scenarios.md) показывает разобранные сценарии — у каждого
+[scenarios.md](explanation/scenarios.md) показывает разобранные сценарии — у каждого
 короткая история, sequence-диаграмма и игрушечная таблица журнала,
 воспроизводимая тестом.
 
 Уровень 4b — почему устроено так, а не иначе. Каждый документ уровня 3
 заканчивается секцией «Why It Is Built This Way»: несущие решения, для
 каждого — отвергнутая альтернатива и причина. Начать с
-[simulator.md](simulator.md#why-it-is-built-this-way) и
-[rebalancing.md](rebalancing.md#why-it-is-built-this-way).
+[simulator.md](explanation/simulator.md#why-it-is-built-this-way) и
+[rebalancing.md](explanation/rebalancing.md#why-it-is-built-this-way).
 
 Уровень 5 — построчно. Это не документ, а сам код; вход — через
 `notebooks/test_pipeline.ipynb` и, для отдельных модулей, разовые
 ноутбуки-разборы в `notebooks/`.
 
-[comprehension_levels_ru.md](comprehension_levels_ru.md) объясняет сам маршрут:
+[comprehension_levels_ru.md](method/comprehension_levels_ru.md) объясняет сам маршрут:
 что означает каждый уровень и когда какой обязателен.
-[working-method.ru.md](working-method.ru.md) — личная шпаргалка автора о методе
+[working-method.ru.md](method/working-method.ru.md) — личная шпаргалка автора о методе
 работы; это не документация кода.
 
 ## Языки
@@ -136,5 +136,5 @@ flow-событий → артефакт запуска → веб-интерф�
 Канонический язык документов — английский. Русская версия (`*_ru.md`) есть
 только у файлов, которые автор регулярно перечитывает: у этой страницы
 (каноническая версия — [README.md](README.md)), у
-[comprehension_levels.md](comprehension_levels.md) и у
-[working-method.md](working-method.md). Каждая пара держится синхронной.
+[comprehension_levels.md](method/comprehension_levels.md) и у
+[working-method.md](method/working-method.md). Каждая пара держится синхронной.

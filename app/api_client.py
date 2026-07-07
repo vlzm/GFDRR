@@ -1,4 +1,4 @@
-"""HTTP client of the run-artifact API (docs/api.md): plain functions.
+"""HTTP client of the run-artifact API (docs/explanation/api.md): plain functions.
 
 The Streamlit loader (``ui_shared.py``) calls these when ``API_URL`` is set.
 This module never imports fastapi or streamlit: the API side and the client
@@ -36,7 +36,7 @@ def _base() -> str:
 
 
 def _headers() -> dict[str, str]:
-    """Build the shared-key header when ``API_KEY`` is set (docs/api.md, access control)."""
+    """Build the shared-key header when ``API_KEY`` is set (docs/explanation/api.md)."""
     key = os.environ.get("API_KEY")
     return {"X-API-Key": key} if key else {}
 

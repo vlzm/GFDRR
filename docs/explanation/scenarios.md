@@ -8,7 +8,7 @@ a test compares the document with a fresh run cell by cell. If the code
 changes the journal rows, the test fails before this document can go out of
 date.
 
-The vocabulary is [Notations.md](../Notations.md): the flow-event schema is
+The vocabulary is [Notations.md](../../Notations.md): the flow-event schema is
 §0, the step axis (`step_id`, `phase_rank`, `phase_round`) is §0.1, the four
 outcomes (`departed`, `arrived`, `redirected`, `lost`) are §1, rebalancing is
 §14. This document does not re-explain those concepts; it shows their concrete

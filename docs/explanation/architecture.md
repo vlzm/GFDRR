@@ -1,10 +1,10 @@
 # Architecture — the system in diagrams
 
 This page is the map of the system: three diagrams, one per level of
-understanding from [comprehension_levels.md](comprehension_levels.md), and a
+understanding from [comprehension_levels.md](../method/comprehension_levels.md), and a
 module depth table. The diagrams stay coarse on purpose: every arrow is a
 contract in domain words ("hands over the flow journal"), never a signature.
-Exact contracts live in [`Notations.md`](../Notations.md) and in the
+Exact contracts live in [`Notations.md`](../../Notations.md) and in the
 per-module documents linked below.
 
 How the sections map to the levels:
@@ -34,9 +34,9 @@ flowchart LR
 The platform takes one month of published Citi Bike trips and replays that
 demand period by period, with optional changes (scaled demand, overnight
 rebalancing by truck). Each run is saved as one folder on disk — a run
-artifact ([Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads)) —
+artifact ([Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads)) —
 and the web interface shows the saved runs. The only optional outside service
-is a local OSRM routing server ([osrm_setup.md](osrm_setup.md)); without it,
+is a local OSRM routing server ([osrm_setup.md](../guides/osrm_setup.md)); without it,
 distances come from the haversine formula (the straight line between two
 points on the globe).
 
@@ -69,7 +69,7 @@ flowchart LR
   inventory.
 - The **simulator** ([simulator.md](simulator.md)) plays the scenario period
   by period and produces the flow journal
-  ([Notations.md §0](../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
+  ([Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
   an append-only table of everything that happened to every bike. Overnight
   rebalancing ([rebalancing.md](rebalancing.md)) is an opt-in part of the
   simulator.

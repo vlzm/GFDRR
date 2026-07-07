@@ -3,7 +3,7 @@
 This page is the entry point to the project documentation. It says what the
 project is, how to run it, what each folder of the repository does, and which
 document to read next. The route follows the five levels of code
-understanding from [comprehension_levels.md](comprehension_levels.md) — from
+understanding from [comprehension_levels.md](method/comprehension_levels.md) — from
 "I can run it" (level 1) to "I know every line" (level 5). Each level is
 covered by exactly one artifact, and this page visits them in order.
 
@@ -38,7 +38,7 @@ uv pip install -e ".[dev,ui,api]"  # simulator + web interface + API + dev tools
 
 python app/runner.py --run-name demo   # run one scenario with default settings
 streamlit run app/main.py              # browse saved runs in the browser
-uvicorn api:app --app-dir app          # serve the run-artifact API (api.md)
+uvicorn api:app --app-dir app          # serve the run-artifact API (explanation/api.md)
 pytest                                 # run the tests
 ```
 
@@ -46,7 +46,7 @@ pytest                                 # run the tests
 saved as a folder under `data/runs/<run_name>/`; the web interface lists every
 saved run. Docker, environment variables, and the layout of the data folder
 are described in the [root README](../README.md). The optional road-network
-routing server (OSRM) is set up by [osrm_setup.md](osrm_setup.md).
+routing server (OSRM) is set up by [osrm_setup.md](guides/osrm_setup.md).
 
 ## The map of the repository (level 2)
 
@@ -55,7 +55,7 @@ One run flows through the repository like this:
 raw trip CSVs → `RawModelData` → `ResolvedModelData` → simulator → flow
 journal → run artifact → web interface
 
-The same map as diagrams: [architecture.md](architecture.md) — the system and
+The same map as diagrams: [architecture.md](explanation/architecture.md) — the system and
 the outside world (level 1), the big blocks (level 2), the full module map
 with a depth table (level 3).
 
@@ -77,55 +77,55 @@ with a depth table (level 3).
   shared helpers, including the loader with its two backends: local files,
   or HTTP calls through `app/api_client.py` when `API_URL` is set.
   `app/api.py` is the run-artifact API — an HTTP service that serves saved
-  runs and starts new ones ([api.md](api.md)).
+  runs and starts new ones ([api.md](explanation/api.md)).
 - **`notebooks/`** — `test_pipeline.ipynb`, the canonical scenario: the whole
   pipeline in one notebook, from raw CSV to validated run. The other notebooks
   are working notebooks around specific parts of the code.
 - **`data/`** — `raw/` (source trip CSVs), `osrm/` (road graph files for the
-  routing server, created by the OSRM setup — [osrm_setup.md](osrm_setup.md)),
+  routing server, created by the OSRM setup — [osrm_setup.md](guides/osrm_setup.md)),
   `runs/` (saved run artifacts, one folder per run).
 - **`tests/`** — `invariants.py` (the journal checks every run must pass),
   `scenarios.py` (builders of tiny synthetic runs), the test modules, and
   `test_docs_scenarios.py`, which re-runs every toy table of
-  [scenarios.md](scenarios.md) so the documentation cannot silently drift from
+  [scenarios.md](explanation/scenarios.md) so the documentation cannot silently drift from
   the code.
 
 ## Where to go next (levels 3–5)
 
 Level 3 — every module and its contract, in coarse words. The module
 diagrams and the module depth table are in
-[architecture.md](architecture.md). Six documents
-cover the run chain from the map above. [dataloader.md](dataloader.md): how
+[architecture.md](explanation/architecture.md). Six documents
+cover the run chain from the map above. [dataloader.md](explanation/dataloader.md): how
 the raw trip CSV becomes `ResolvedModelData` — the entities, the historical
-journal, the sized initial state. [simulator.md](simulator.md): what a period
+journal, the sized initial state. [simulator.md](explanation/simulator.md): what a period
 is, what state the simulator carries, the phase loop, the mechanics, the
-invariants. [rebalancing.md](rebalancing.md): how a truck plan is computed
+invariants. [rebalancing.md](explanation/rebalancing.md): how a truck plan is computed
 and how the trucks execute it period by period.
-[flow_journal.md](flow_journal.md): the journal library
+[flow_journal.md](explanation/flow_journal.md): the journal library
 (`gbp/model/flows.py`) shared by the loaders and the simulator — the event
-schema, the builders, the read-models, the checks. [app.md](app.md): how a
+schema, the builders, the read-models, the checks. [app.md](explanation/app.md): how a
 finished run becomes a saved artifact and how the web interface draws it.
-[api.md](api.md): the HTTP service that serves saved runs to clients and
+[api.md](explanation/api.md): the HTTP service that serves saved runs to clients and
 starts runs on a server.
 
 Level 4a — exact contracts. [`Notations.md`](../Notations.md) (repository
 root) defines every column, status, and table name.
-[scenarios.md](scenarios.md) shows the worked scenarios — each one a short
+[scenarios.md](explanation/scenarios.md) shows the worked scenarios — each one a short
 story, a sequence diagram, and a toy journal table reproduced by a test.
 
 Level 4b — why it is built this way. Every level-3 document ends with a
 "Why It Is Built This Way" section: the load-bearing decisions, each with
 the alternative that was rejected and the reason. Start with
-[simulator.md](simulator.md#why-it-is-built-this-way) and
-[rebalancing.md](rebalancing.md#why-it-is-built-this-way).
+[simulator.md](explanation/simulator.md#why-it-is-built-this-way) and
+[rebalancing.md](explanation/rebalancing.md#why-it-is-built-this-way).
 
 Level 5 — line by line. Not a document: the code itself, entered through
 `notebooks/test_pipeline.ipynb` and, for single modules, one-off walkthrough
 notebooks in `notebooks/`.
 
-[comprehension_levels.md](comprehension_levels.md) explains the route itself:
+[comprehension_levels.md](method/comprehension_levels.md) explains the route itself:
 what each level means and when each is required.
-[working-method.md](working-method.md) is the author's personal cheat sheet
+[working-method.md](method/working-method.md) is the author's personal cheat sheet
 about how to work; it is not documentation of the code.
 
 ## Languages
@@ -133,5 +133,5 @@ about how to work; it is not documentation of the code.
 The canonical language of the documents is English. A Russian companion
 (`*_ru.md`) exists only for the files the author rereads regularly: this page
 ([README_ru.md](README_ru.md)),
-[comprehension_levels_ru.md](comprehension_levels_ru.md), and
-[working-method.ru.md](working-method.ru.md). Each pair is kept in sync.
+[comprehension_levels_ru.md](method/comprehension_levels_ru.md), and
+[working-method.ru.md](method/working-method.ru.md). Each pair is kept in sync.

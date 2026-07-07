@@ -13,7 +13,7 @@ ruff format gbp/ tests/ app/      # format
 mypy gbp/                         # typecheck
 streamlit run app/main.py         # UI
 python app/runner.py --help       # run a scenario from the terminal
-uvicorn api:app --app-dir app     # serve the run-artifact API (docs/api.md)
+uvicorn api:app --app-dir app     # serve the run-artifact API (docs/explanation/api.md)
 ```
 
 ## Universal Rules

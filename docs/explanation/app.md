@@ -11,7 +11,7 @@ The app has three parts, in the order a run passes through them:
    what the artifact builder has already computed.
 
 The artifact contract is
-[Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads).
+[Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads).
 What happens inside the simulator during a run is
 [simulator.md](simulator.md); the journal functions the builders call are
 explained in [flow_journal.md](flow_journal.md).
@@ -105,7 +105,7 @@ The full flag list of `app/runner.py`:
 | `--osrm-url` | OSRM server URL; read only with `--routing osrm`. | `http://127.0.0.1:5000` |
 
 `--routing osrm` needs a running OSRM server; the setup is
-[osrm_setup.md](osrm_setup.md).
+[osrm_setup.md](../guides/osrm_setup.md).
 
 ## Step 2: `artifacts.py` — Build The Tables
 

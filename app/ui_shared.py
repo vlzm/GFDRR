@@ -64,7 +64,7 @@ LEVELS = [LEVEL_GLOBAL, LEVEL_PERIOD, LEVEL_COMMODITY, LEVEL_FACILITY]
 # The one front door to a saved run (Notations.md §12). A page asks for a table
 # through the typed accessors below; the file layout, the caching, the two
 # backends (local files, or HTTP calls to the API when API_URL is set --
-# docs/api.md), and the old-artifact fallbacks all live here, so a page never
+# docs/explanation/api.md), and the old-artifact fallbacks all live here, so a page never
 # names a parquet file or re-checks which columns an older artifact carries.
 def list_runs() -> list[str]:
     """Names of every saved run: from the API when ``API_URL`` is set, else the disk."""
@@ -91,7 +91,7 @@ def table_cache_key(run_name: str, table: str) -> float:
 
     A local file can be rewritten, so the mtime must be part of the key. A
     served artifact cannot change (the API is the only writer on the server
-    and never overwrites a saved run -- docs/api.md), so ``(run_name, table)``
+    and never overwrites a saved run -- docs/explanation/api.md), so ``(run_name, table)``
     alone identifies the content and the key is a constant.
     """
     if api_client.api_url():

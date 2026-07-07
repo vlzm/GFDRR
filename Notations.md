@@ -476,7 +476,7 @@ KPI row are all built from this one table.
 | `routes` | The one object that answers distance and travel-time queries for facility pairs: `distance_km(source, target)` and `duration_periods(source, target)` (class `Routes` in `gbp/routing.py`). Built once per scenario, held on `ResolvedModelData.routes`. Every reader of a facility-pair distance (the wide journal, the arcs table, the redirect travel-time fallback) asks it. | inline `haversine_km` calls |
 | `routing_mode` | How `routes` measures: `haversine` or `osrm`. A `ResolvedModelData` parameter; saved in `meta.json`. | "distance mode", "travel model" |
 | `haversine` (mode) | The formula mode, and the default. Distance is the straight (great-circle) line between the two facilities; travel time is that distance over `trip_speed_km_per_period` (§6). Needs nothing but coordinates. | "formula mode", "straight-line mode" |
-| `osrm` (mode) | Road-network mode. Distance and riding time come from a local OSRM server (`docs/osrm_setup.md`): the full facility-to-facility table is fetched once, in one `/table` request, when `Routes` is built. A pair the server cannot route falls back to the `haversine` answer. | — |
+| `osrm` (mode) | Road-network mode. Distance and riding time come from a local OSRM server (`docs/guides/osrm_setup.md`): the full facility-to-facility table is fetched once, in one `/table` request, when `Routes` is built. A pair the server cannot route falls back to the `haversine` answer. | — |
 
 Not routing: `duration` on the OD matrix (§6) stays the mean **historical**
 trip length in both modes — observed data beats any model. `routes` supplies
@@ -556,7 +556,7 @@ parameters, `inputs` and `code_version` next to the tables.
 
 ## 16. The run-artifact API (serving runs over HTTP)
 
-The API (`app/api.py`, described in `docs/api.md`) serves run artifacts (§12) over
+The API (`app/api.py`, described in `docs/explanation/api.md`) serves run artifacts (§12) over
 HTTP and starts runs through the same `runner.run_scenario` the Run scenario
 page calls. It is a reader and a saver of run artifacts: it never computes
 what `build_run_tables` can precompute, and the artifact contract (§12) **is**

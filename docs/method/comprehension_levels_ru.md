@@ -60,11 +60,11 @@
 «Система состоит из трёх больших блоков: симулятор
 (`gbp/consumers/simulator/`) проигрывает сценарий период за периодом и выдаёт
 журнал flow-событий
-([Notations.md §0](../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
+([Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
 таблицу всего, что случилось с каждым велосипедом; билдер артефактов
 (`app/artifacts.py`) превращает законченный запуск в папку таблиц
 `data/runs/<run_name>/`
-([Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads));
+([Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads));
 интерфейс на Streamlit (`app/`) читает эти таблицы и рисует их.» Что именно
 лежит внутри журнала — на этом уровне не знают.
 
@@ -164,13 +164,13 @@ pydantic-схеме или в тщательно написанной docstring.
 **Пример для этого проекта:**
 На уровне 2 было: «билдер артефактов превращает запуск в папку таблиц». На
 уровне 4a — точный контракт этой папки
-([Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads)):
+([Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads)):
 `meta.json` хранит параметры запуска, список нарушений инвариантов
 `violations` и суммы по всему запуску; `flows.parquet` — финализированный
 журнал с колонками-мерами; в `panel.parquet` одна строка на
 `(period_id, facility_id, commodity_category)`; в `arcs.parquet` одна строка на
 пару `(flow_id, move_id)`. Внутри ребалансировщика
-([`rebalancing.md`](rebalancing.md)) есть
+([`rebalancing.md`](../explanation/rebalancing.md)) есть
 `solve_rebalance_vrp(nodes, travel_minutes, trucks, params)`, возвращающая
 таблицу остановок, с гарантиями: каждый грузовик начинает и заканчивает
 маршрут пустым на своём домашнем депо, загрузка грузовика никогда не уходит
@@ -211,11 +211,11 @@ pydantic-схеме или в тщательно написанной docstring.
 производная величина — инвентарь, спрос, панель — считается из журнала, поэтому
 симулятор и исторический загрузчик можно сверить строка к строке. Это несущее
 решение, оно записано в секции «Why it is built this way» в
-[`simulator.md`](simulator.md#why-it-is-built-this-way). Знает, почему
+[`simulator.md`](../explanation/simulator.md#why-it-is-built-this-way). Знает, почему
 ребалансировка планируется один раз на окно, а исполняется период за периодом,
 на каждом шаге заново проверяя свободные доки и велосипеды в наличии, вместо
 того чтобы верить плану
-([`rebalancing.md`](rebalancing.md#why-it-is-built-this-way)). А вот то, что
+([`rebalancing.md`](../explanation/rebalancing.md#why-it-is-built-this-way)). А вот то, что
 солвер считает время в десятых долях минуты (`_MINUTE_SCALE` в
 `rebalancing.py`), — решение произвольное: OR-Tools работает с целыми числами,
 и десятых достаточно по точности; сотые работали бы так же, ничего бы не
@@ -347,8 +347,8 @@ modules) — для этого человека нет никого, с кем �
 **Во-вторых**, 4b (теорию модуля) надо фиксировать письменно — в записях о
 дизайн-решениях, спецификациях, дизайн-документах. В этом репозитории она
 живёт в секциях «Why it is built this way» в
-[`simulator.md`](simulator.md#why-it-is-built-this-way) и
-[`rebalancing.md`](rebalancing.md#why-it-is-built-this-way). Иначе она
+[`simulator.md`](../explanation/simulator.md#why-it-is-built-this-way) и
+[`rebalancing.md`](../explanation/rebalancing.md#why-it-is-built-this-way). Иначе она
 размывается со временем даже в голове у автора, не говоря уже о других людях.
 
 **В-третьих**, если для какого-то модуля вы приняли решение работать на 4a без
