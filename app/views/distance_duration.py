@@ -1,5 +1,6 @@
 """Distance and duration charts: whole-run, per period, per commodity, per facility."""
 
+import artifacts
 import streamlit as st
 import ui_shared
 
@@ -10,9 +11,9 @@ if run_a is None:
     st.stop()
 
 
-def _duration_tile(value: float, meta: dict) -> str:
+def _duration_tile(value: float, meta: artifacts.RunMeta) -> str:
     """Whole-run tile text: the mean duration, also as wall-clock minutes."""
-    minutes = value * meta["period_len_hours"] * 60
+    minutes = value * meta.period_len_hours * 60
     return f"{value:.2f} periods (~{minutes:.0f} min)"
 
 
@@ -49,7 +50,7 @@ measure_label = left.radio("Measure", list(MEASURES), horizontal=True)
 level = right.selectbox("Detail level", ui_shared.LEVELS)
 ui_shared.flow_totals_page(run_a, run_b, MEASURES[measure_label], level)
 
-modes = {name: ui_shared.load_meta(name)["routing_mode"] for name in filter(None, [run_a, run_b])}
+modes = {name: ui_shared.load_meta(name).routing_mode for name in filter(None, [run_a, run_b])}
 modes_text = "; ".join(f"{name}: {mode}" for name, mode in modes.items())
 st.caption(
     "Distance is the sum of a trip's arc lengths, measured by the run's routing mode "

@@ -25,6 +25,7 @@ and the artifact builder.
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -33,6 +34,7 @@ import requests
 from gbp.model import haversine_km
 
 #: The two ways a scenario can measure distance and travel time.
+RoutingMode = Literal["haversine", "osrm"]
 ROUTING_MODES = ("haversine", "osrm")
 
 #: Base URL of the OSRM server. Set the ``OSRM_URL`` environment variable to
@@ -98,7 +100,7 @@ class Routes:
     def __init__(
         self,
         facilities_geo_df: pd.DataFrame,
-        mode: str = "haversine",
+        mode: RoutingMode = "haversine",
         *,
         trip_speed_km_per_period: float,
         period_len: pd.Timedelta,

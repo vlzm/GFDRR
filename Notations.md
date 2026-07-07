@@ -47,6 +47,13 @@ The literal columns of one flow event (`FLOW_EVENT_COLUMNS` in `flows.py`).
 Every other word in this file is one of these columns, one of their values, or a
 projection of them. This is the anchor; read it first.
 
+The machine-checked form of this table is `FLOW_EVENT_SCHEMA`
+(`gbp/model/journal_schema.py`): a pandera schema built from
+`FLOW_EVENT_DTYPES`, checked once per journal — by `validate_run` on a
+finished run and by `get_historical_flows_df` at load time.
+`check_journal_schema(flows)` returns its violations as a list of strings,
+empty when the journal fits.
+
 | Column | What it holds |
 |---|---|
 | `flow_id` | Id of the flow this event belongs to (§3). |
@@ -439,6 +446,13 @@ happens while a page renders. One saved run is a **run artifact**: a folder
 | `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `flow_type` (`user_trip` or `rebalance` — §14) and `resource_id` (the truck on a rebalance arc, NA otherwise), `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, `distance_km` (measured by the run's `routing_mode` — §13), and the endpoint coordinates (`source_lat`, `source_lng`, `target_lat`, `target_lng`), so the trips map draws arcs without joining another table. |
 | `flow_totals.parquet` | One row per `flow_id` with the flow's whole-trip values: `flow_type` (`user_trip` or `rebalance` — §14), origin `source_id`, `planned_target_id`, `realized_target_id`, `start_period`, `end_period`, terminal `event_type`, `reason`, `duration_periods`, `distance_km` (sum over its arcs), `cost` (value on the terminal event). The cost and distance/duration charts group this table. Not here: a stockout loss (it has no flow — `flow_id` is NA; it lives in the panel as `lost_demand`) and a flow still riding when the run ends (no terminal event yet). |
 | `facilities.parquet` | Facility attributes for the maps: `facility_id`, `facility_category`, `lat`, `lng`, `capacity`. |
+
+The `meta.json` contract is the pydantic model `RunMeta` (`app/artifacts.py`,
+with the nested `RebalancingMeta` block): `build_meta` constructs it,
+`save_run` writes it, and `load_run_meta` validates it back — an artifact
+missing a field fails at load, with the field named. Each parquet table has a
+pandera schema (`RUN_TABLE_SCHEMAS`, same file), checked in `save_run` before
+writing; loading is not re-checked.
 
 Chart attribution rule: a flow's `cost`, `distance_km` and `duration_periods`
 belong to its **origin facility** (`source_id`) and its **`start_period`** — the

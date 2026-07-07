@@ -24,6 +24,7 @@ from gbp.model import (
     get_inventory_df,
     inventory_at_moments,
 )
+from gbp.model.journal_schema import check_journal_schema
 
 from .state import SimulationState
 
@@ -63,6 +64,9 @@ def validate_run(
     -------
     list of str
         Human-readable invariant violations; empty when the run is valid.
+        The list also covers the journal schema
+        (:func:`gbp.model.journal_schema.check_journal_schema`), checked here
+        once per run, before I1-I5.
     """
     flows = finalize_flows(state.state_flows_df)
     initial = resolved.initial_inventory_df
@@ -75,6 +79,7 @@ def validate_run(
         demand["quantity"] = (demand["quantity"] * demand_scale_factor).round().astype("Int64")
 
     violations: list[str] = []
+    violations += check_journal_schema(flows)  # the journal's shape contract
     violations += check_demand_split(flows, demand)  # I1
     violations += check_flow_closure(flows)  # I2
     violations += _check_projection_consistency(state.state_inventory_df, flows, initial)  # I3

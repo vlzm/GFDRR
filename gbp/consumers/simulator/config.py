@@ -23,3 +23,10 @@ class EnvironmentConfig:
     validate: bool = True
     demand_scale_factor: float = 1.0
     number_of_periods: int = 10
+
+    def __post_init__(self) -> None:
+        """Reject a config no run can execute, at construction time."""
+        if self.number_of_periods < 1:
+            raise ValueError(f"number_of_periods must be >= 1, got {self.number_of_periods}")
+        if self.demand_scale_factor <= 0:
+            raise ValueError(f"demand_scale_factor must be > 0, got {self.demand_scale_factor}")

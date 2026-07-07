@@ -113,32 +113,32 @@ def load_arcs(run_name: str, flow_type: str | None = None) -> pd.DataFrame | Non
 
 
 @st.cache_data(show_spinner=False)
-def _meta_cached(run_name: str, mtime: float) -> dict:
+def _meta_cached(run_name: str, mtime: float) -> artifacts.RunMeta:
     """Cache one meta.json; ``mtime`` invalidates the entry on rewrite."""
     return artifacts.load_run_meta(run_name)
 
 
-def load_meta(run_name: str) -> dict:
+def load_meta(run_name: str) -> artifacts.RunMeta:
     """Read a saved run's meta.json through the Streamlit cache."""
     path = artifacts.run_dir(run_name) / "meta.json"
     return _meta_cached(run_name, path.stat().st_mtime)
 
 
 class RebalancingSettings(NamedTuple):
-    """The rebalancing block of one run's meta.json."""
+    """The rebalancing block of one run's meta.json, with ``truck_homes`` never None."""
 
     enabled: bool
     truck_homes: list[str]
 
 
-def rebalancing_settings(meta: dict) -> RebalancingSettings:
-    """Read the rebalancing block of ``meta.json`` (one place for the fallback).
+def rebalancing_settings(meta: artifacts.RunMeta) -> RebalancingSettings:
+    """Read the rebalancing block of ``meta.json`` (one place for the empty-list rule).
 
-    Runs saved before the rebalancing feature have no such block; they read as
-    rebalancing off with no trucks.
+    ``truck_homes`` is written only when rebalancing is on; when it is off the
+    block reads as no trucks (an empty list), so pages can take ``len(...)``.
     """
-    block = meta.get("rebalancing", {})
-    return RebalancingSettings(block.get("enabled", False), block.get("truck_homes", []))
+    block = meta.rebalancing
+    return RebalancingSettings(block.enabled, block.truck_homes or [])
 
 
 # --- Scenario picking -------------------------------------------------------
@@ -175,30 +175,32 @@ def pick_scenario_pair() -> tuple[str | None, str | None]:
                 trucks = len(settings.truck_homes)
                 suffix = f", rebalancing on ({trucks} trucks)" if settings.enabled else ""
                 st.caption(
-                    f"{label}: demand scale {meta['demand_scale_factor']}, "
-                    f"{meta['number_of_periods']} periods{suffix}"
+                    f"{label}: demand scale {meta.demand_scale_factor}, "
+                    f"{meta.number_of_periods} periods{suffix}"
                 )
     return run_a, run_b
 
 
-def slider_max_period(meta_a: dict, meta_b: dict | None) -> int:
+def slider_max_period(meta_a: artifacts.RunMeta, meta_b: artifacts.RunMeta | None) -> int:
     """Last period the period slider can show (both scenarios must have it)."""
-    last = meta_a["number_of_periods"] - 1
+    last = meta_a.number_of_periods - 1
     if meta_b is not None:
-        last = min(last, meta_b["number_of_periods"] - 1)
+        last = min(last, meta_b.number_of_periods - 1)
     return max(last, 0)
 
 
 # --- Period ids to wall-clock time -------------------------------------------
-def period_start_time(meta: dict, periods):
+def period_start_time(meta: artifacts.RunMeta, periods):
     """Wall-clock start of a period (or a Series of periods): ``t0 + period * period_len``.
 
     Every ``meta.json`` carries ``t0`` (see ``artifacts.build_meta``).
     """
-    return pd.Timestamp(meta["t0"]) + periods * pd.Timedelta(hours=meta["period_len_hours"])
+    return pd.Timestamp(meta.t0) + periods * pd.Timedelta(hours=meta.period_len_hours)
 
 
-def slider_time_caption(period: int, meta_a: dict, meta_b: dict | None = None) -> None:
+def slider_time_caption(
+    period: int, meta_a: artifacts.RunMeta, meta_b: artifacts.RunMeta | None = None
+) -> None:
     """Show under the period slider when the chosen period starts on the clock."""
     starts = [
         (tag, period_start_time(meta, period))
@@ -240,14 +242,14 @@ def delta_b_minus_a(value_a: float, value_b: float, fmt: Callable[[float], str] 
     return f"{'+' if diff >= 0 else '-'}{fmt(abs(diff))}"
 
 
-def kpi_row(meta_a: dict, meta_b: dict | None = None) -> None:
+def kpi_row(meta_a: artifacts.RunMeta, meta_b: artifacts.RunMeta | None = None) -> None:
     """Whole-run totals as metric tiles; with B chosen, the delta is B − A.
 
     The tiles come from the one METRICS table (``kpi=True`` entries); the tile
     label is the metric's full label without the braces part.
     """
-    totals_a = meta_a["totals"]
-    totals_b = meta_b["totals"] if meta_b else None
+    totals_a = meta_a.totals
+    totals_b = meta_b.totals if meta_b else None
     items = [metric for metric in METRICS if metric.kpi]
     columns = []
     for _ in range((len(items) + 3) // 4):
@@ -265,9 +267,9 @@ def kpi_row(meta_a: dict, meta_b: dict | None = None) -> None:
         column.metric(label, fmt(totals_a[metric.name]), delta=delta, delta_color=color)
 
 
-def validation_badge(meta: dict, label: str) -> None:
+def validation_badge(meta: artifacts.RunMeta, label: str) -> None:
     """Green badge when invariants I1-I5 held; red badge with the list otherwise."""
-    violations = meta.get("violations", [])
+    violations = meta.violations
     if not violations:
         st.success(f"{label}: run invariants I1–I5 hold", icon="✅")
     else:
@@ -547,10 +549,10 @@ class FlowTotalsView:
     agg: str  # "sum" or "mean"
     tile_label: str  # label of the whole-run metric tile
     y_title: str  # y-axis title of the per-period chart
-    totals_key: str  # METRICS name of the precomputed total in meta["totals"]
+    totals_key: str  # METRICS name of the precomputed total in meta.totals
     fmt: Callable[[float], str]  # one value with its unit
     # Tile text for the whole-run view; gets the run's meta (for period length).
-    fmt_global: Callable[[float, dict], str] | None = None
+    fmt_global: Callable[[float, artifacts.RunMeta], str] | None = None
     global_note: str | None = None  # caption under the whole-run tiles
 
 
@@ -558,7 +560,7 @@ def flow_totals_page(run_a: str, run_b: str | None, view: FlowTotalsView, level:
     """Render the shared body of a ``flow_totals`` metric page at one detail level.
 
     The whole-run level shows one tile per scenario (the precomputed total
-    from ``meta["totals"]``) and the B − A difference; every other level
+    from ``meta.totals``) and the B − A difference; every other level
     aggregates with :func:`aggregate_flow_totals` and draws
     :func:`level_line_chart` plus the data table.
     """
@@ -571,7 +573,7 @@ def flow_totals_page(run_a: str, run_b: str | None, view: FlowTotalsView, level:
         values: dict[str, float] = {}
         for column, run_name in zip(columns, frames, strict=False):
             meta = load_meta(run_name)
-            values[run_name] = float(meta["totals"][view.totals_key])
+            values[run_name] = float(meta.totals[view.totals_key])
             text = (
                 view.fmt_global(values[run_name], meta)
                 if view.fmt_global

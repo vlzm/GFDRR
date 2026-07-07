@@ -1212,7 +1212,13 @@ def flows_with_costs(
     pandas.DataFrame
         ``flows`` plus ``rate``, ``elapsed_periods`` and ``cost``.
     """
-    out = flows.merge(rates[["commodity_category", "rate"]], on="commodity_category", how="left")
+    # The rates table may carry a plain object key and an integer rate; cast
+    # both so the merge keeps the journal's string dtype on commodity_category
+    # and the widened journal always prices in float dollars.
+    rates_typed = rates[["commodity_category", "rate"]].astype(
+        {"commodity_category": "string", "rate": "float64"}
+    )
+    out = flows.merge(rates_typed, on="commodity_category", how="left")
     out["elapsed_periods"] = (out["period_id"] - out["start_period"]).astype("Int64")
     hours_per_period = period_len / _ONE_HOUR
     out["cost"] = out["rate"] * out["elapsed_periods"] * hours_per_period

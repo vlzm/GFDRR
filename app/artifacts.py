@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
-import json
 import os
 import pathlib
 from typing import Any
 
 import pandas as pd
+import pandera.pandas as pa
+import pydantic
 
 from gbp.model import (
     PANEL_KEYS,
@@ -24,10 +25,133 @@ from gbp.model import (
     flows_with_measures,
     is_docking,
 )
+from gbp.model import (
+    PANEL_VALUES as _MODEL_PANEL_VALUES,
+)
+from gbp.model.journal_schema import FLOW_EVENT_SCHEMA, schema_violations
 from gbp.routing import Routes
 
 #: The parquet tables a run artifact holds, by file stem.
 RUN_TABLES = ("flows", "panel", "arcs", "flow_totals", "facilities")
+
+# ---------------------------------------------------------------------------
+# Schemas of the run-artifact tables (Notations.md §12)
+# ---------------------------------------------------------------------------
+# One pandera schema per table of ``RUN_TABLES``. ``save_run`` checks each
+# table against its schema before writing, so a table with a wrong column set
+# fails at save time -- not later, when a page tries to draw it. Loading is
+# not checked: what was written was already valid, and pages load on every
+# render. The id and category columns keep their dtype unchecked where the
+# sources mix pandas ``string`` and plain ``object`` columns.
+
+#: ``flows.parquet``: the journal schema plus the measure columns added by
+#: ``flows_with_measures`` (§6.1), in that order. The duration and money
+#: columns are NA on rows the measure does not apply to (e.g. a stockout
+#: ``lost`` rode nothing), so they are nullable; ``rate`` is not -- a missing
+#: rate means the rates table lacks a commodity.
+FLOWS_TABLE_SCHEMA = FLOW_EVENT_SCHEMA.add_columns(
+    {
+        "planned_duration_periods": pa.Column("Int64", nullable=True),
+        "realized_duration_periods": pa.Column("Int64", nullable=True),
+        "planned_distance_km": pa.Column("float64", nullable=True),
+        "realized_distance_km": pa.Column("float64", nullable=True),
+        "rate": pa.Column("float64", nullable=False),
+        "elapsed_periods": pa.Column("Int64", nullable=True),
+        "cost": pa.Column("Float64", nullable=True),
+    }
+)
+FLOWS_TABLE_SCHEMA.name = "flows"
+
+#: ``panel.parquet``: one row per (period, facility, commodity) with the
+#: period's values side by side. The inventory columns are not checked for
+#: sign on purpose: a run that violates I5 is still saved (the violation list
+#: lives in ``meta.json``), so the panel must be storable as-is.
+PANEL_TABLE_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "period_id": pa.Column("int64", nullable=False),
+        "facility_id": pa.Column(nullable=False),
+        "commodity_category": pa.Column(nullable=False),
+        **{value: pa.Column("int64", nullable=False) for value in _MODEL_PANEL_VALUES},
+    },
+    unique=list(PANEL_KEYS),
+    ordered=True,
+    strict=True,
+    name="panel",
+)
+
+#: ``arcs.parquet``: one row per ``(flow_id, move_id)`` physical edge, with
+#: the endpoint coordinates saved on the row (the trips map joins nothing).
+ARCS_TABLE_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "flow_id": pa.Column(nullable=False),
+        "move_id": pa.Column("Int64", nullable=False),
+        "flow_type": pa.Column(nullable=False),
+        "resource_id": pa.Column(nullable=True),
+        "commodity_category": pa.Column(nullable=False),
+        "source_id": pa.Column(nullable=False),
+        "target_id": pa.Column(nullable=False),
+        "start_period": pa.Column("Int64", nullable=False),
+        "end_period": pa.Column("Int64", nullable=False),
+        "event_type": pa.Column(nullable=False),
+        "reason": pa.Column(nullable=True),
+        "quantity": pa.Column("Int64", checks=pa.Check.ge(1), nullable=False),
+        "distance_km": pa.Column("float64", checks=pa.Check.ge(0), nullable=False),
+        "source_lat": pa.Column("float64", nullable=False),
+        "source_lng": pa.Column("float64", nullable=False),
+        "target_lat": pa.Column("float64", nullable=False),
+        "target_lng": pa.Column("float64", nullable=False),
+    },
+    unique=["flow_id", "move_id"],
+    ordered=True,
+    strict=True,
+    name="arcs",
+)
+
+#: ``flow_totals.parquet``: one row per flow with its whole-trip values.
+FLOW_TOTALS_TABLE_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "flow_id": pa.Column(nullable=False, unique=True),
+        "flow_type": pa.Column(nullable=False),
+        "commodity_category": pa.Column(nullable=False),
+        "source_id": pa.Column(nullable=False),
+        "planned_target_id": pa.Column(nullable=False),
+        "realized_target_id": pa.Column(nullable=True),
+        "start_period": pa.Column("Int64", nullable=False),
+        "end_period": pa.Column("Int64", nullable=False),
+        "event_type": pa.Column(nullable=False),
+        "reason": pa.Column(nullable=True),
+        "duration_periods": pa.Column("Int64", nullable=False),
+        "distance_km": pa.Column("float64", checks=pa.Check.ge(0), nullable=False),
+        "cost": pa.Column("Float64", nullable=False),
+    },
+    ordered=True,
+    strict=True,
+    name="flow_totals",
+)
+
+#: ``facilities.parquet``: facility attributes for the maps. The maps read
+#: every column of every row, so nothing here is nullable.
+FACILITIES_TABLE_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "facility_id": pa.Column(nullable=False, unique=True),
+        "facility_category": pa.Column(nullable=False),
+        "lat": pa.Column("float64", nullable=False),
+        "lng": pa.Column("float64", nullable=False),
+        "capacity": pa.Column(checks=pa.Check.ge(0), nullable=False),
+    },
+    ordered=True,
+    strict=True,
+    name="facilities",
+)
+
+#: Schema per ``RUN_TABLES`` stem, in save order.
+RUN_TABLE_SCHEMAS = {
+    "flows": FLOWS_TABLE_SCHEMA,
+    "panel": PANEL_TABLE_SCHEMA,
+    "arcs": ARCS_TABLE_SCHEMA,
+    "flow_totals": FLOW_TOTALS_TABLE_SCHEMA,
+    "facilities": FACILITIES_TABLE_SCHEMA,
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -376,6 +500,43 @@ def build_totals(panel: pd.DataFrame, flow_totals: pd.DataFrame) -> dict[str, fl
     return totals
 
 
+class RebalancingMeta(pydantic.BaseModel):
+    """The ``rebalancing`` block of ``meta.json`` (Notations.md §12, §14).
+
+    ``truck_homes`` and ``truck_capacity_bikes`` are written only when
+    rebalancing is on; a run without it carries ``enabled=False`` alone.
+    """
+
+    enabled: bool
+    truck_homes: list[str] | None = None
+    truck_capacity_bikes: int | None = None
+
+
+class RunMeta(pydantic.BaseModel):
+    """The ``meta.json`` contract of a run artifact (Notations.md §12).
+
+    The runner writes it and the Streamlit app reads it later, possibly with a
+    different code version -- so the fields are an explicit model, not a plain
+    dict. :func:`build_meta` is the only builder; :func:`load_run_meta` is the
+    only reader. An artifact missing a field fails at load with a pydantic
+    error naming the field, instead of a ``KeyError`` in the middle of
+    rendering a page.
+    """
+
+    run_name: str
+    scenario_id: str
+    demand_scale_factor: float
+    sizing_scale_factor: float
+    number_of_periods: int
+    period_len_hours: float
+    routing_mode: str
+    t0: str
+    created_at: str
+    violations: list[str]
+    rebalancing: RebalancingMeta
+    totals: dict[str, float]
+
+
 def build_meta(
     tables: dict[str, pd.DataFrame],
     *,
@@ -388,8 +549,8 @@ def build_meta(
     t0: Any,
     violations: list[str],
     rebalancing: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build ``meta.json`` for one run: parameters, violations, and totals.
+) -> RunMeta:
+    """Build the ``meta.json`` model for one run: parameters, violations, totals.
 
     This is the one place that defines the ``meta.json`` contract; the runner
     and the test fixtures both call it, so a saved artifact always carries the
@@ -422,23 +583,25 @@ def build_meta(
 
     Returns
     -------
-    dict
-        The ``meta.json`` payload for :func:`save_run`.
+    RunMeta
+        The validated ``meta.json`` payload for :func:`save_run`.
     """
-    return {
-        "run_name": run_name,
-        "scenario_id": run_name,
-        "demand_scale_factor": demand_scale_factor,
-        "sizing_scale_factor": sizing_scale_factor,
-        "number_of_periods": number_of_periods,
-        "period_len_hours": period_len_hours,
-        "routing_mode": routing_mode,
-        "t0": pd.Timestamp(t0).isoformat(),
-        "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
-        "violations": violations,
-        "rebalancing": rebalancing if rebalancing is not None else {"enabled": False},
-        "totals": build_totals(tables["panel"], tables["flow_totals"]),
-    }
+    return RunMeta(
+        run_name=run_name,
+        scenario_id=run_name,
+        demand_scale_factor=demand_scale_factor,
+        sizing_scale_factor=sizing_scale_factor,
+        number_of_periods=number_of_periods,
+        period_len_hours=period_len_hours,
+        routing_mode=routing_mode,
+        t0=pd.Timestamp(t0).isoformat(),
+        created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+        violations=violations,
+        rebalancing=RebalancingMeta.model_validate(
+            rebalancing if rebalancing is not None else {"enabled": False}
+        ),
+        totals=build_totals(tables["panel"], tables["flow_totals"]),
+    )
 
 
 def build_run_tables(
@@ -494,13 +657,15 @@ def build_run_tables(
 def save_run(
     run_name: str,
     tables: dict[str, pd.DataFrame],
-    meta: dict[str, Any],
+    meta: RunMeta,
     root: pathlib.Path | None = None,
 ) -> pathlib.Path:
     """Write one run artifact to ``<runs root>/<run_name>/``.
 
-    ``meta.json`` is written last, so a folder with a ``meta.json`` is always
-    a complete artifact (``list_runs`` keys on that file).
+    Each table is checked against its schema (``RUN_TABLE_SCHEMAS``) before
+    anything is written, so a wrong table fails here, not when a page draws
+    it. ``meta.json`` is written last, so a folder with a ``meta.json`` is
+    always a complete artifact (``list_runs`` keys on that file).
 
     Parameters
     ----------
@@ -508,7 +673,7 @@ def save_run(
         Folder name of the artifact; also the name the UI shows.
     tables : dict of str to pandas.DataFrame
         The tables to save; keys must match ``RUN_TABLES``.
-    meta : dict
+    meta : RunMeta
         Run parameters, invariant violations, and totals.
     root : pathlib.Path, optional
         Runs root override (defaults to :func:`runs_root`).
@@ -521,11 +686,16 @@ def save_run(
     missing = set(RUN_TABLES) - set(tables)
     if missing:
         raise ValueError(f"missing run tables: {sorted(missing)}")
+    violations: list[str] = []
+    for name in RUN_TABLES:
+        violations += schema_violations(RUN_TABLE_SCHEMAS[name], tables[name])
+    if violations:
+        raise ValueError("run tables break their schemas:\n" + "\n".join(violations))
     folder = run_dir(run_name, root)
     folder.mkdir(parents=True, exist_ok=True)
     for name in RUN_TABLES:
         tables[name].to_parquet(folder / f"{name}.parquet", index=False)
-    (folder / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+    (folder / "meta.json").write_text(meta.model_dump_json(indent=2))
     return folder
 
 
@@ -536,6 +706,10 @@ def load_run_table(run_name: str, table: str, root: pathlib.Path | None = None) 
     return pd.read_parquet(run_dir(run_name, root) / f"{table}.parquet")
 
 
-def load_run_meta(run_name: str, root: pathlib.Path | None = None) -> dict[str, Any]:
-    """Read a saved run's ``meta.json``."""
-    return json.loads((run_dir(run_name, root) / "meta.json").read_text())
+def load_run_meta(run_name: str, root: pathlib.Path | None = None) -> RunMeta:
+    """Read a saved run's ``meta.json``, validated against :class:`RunMeta`.
+
+    An artifact missing a field fails here, at load, with a pydantic error
+    naming the field -- not later, while a page renders.
+    """
+    return RunMeta.model_validate_json((run_dir(run_name, root) / "meta.json").read_text())

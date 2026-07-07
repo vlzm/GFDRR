@@ -30,15 +30,15 @@ st.subheader("All saved runs")
 rows = []
 for name in artifacts.list_runs():
     meta = ui_shared.load_meta(name)
-    totals = meta["totals"]
+    totals = meta.totals
     rows.append(
         {
             "Run": name,
-            "Demand scale": meta["demand_scale_factor"],
-            "Sizing scale": meta["sizing_scale_factor"],
-            "Periods": meta["number_of_periods"],
-            "Created": meta["created_at"],
-            "Invariant violations": len(meta["violations"]),
+            "Demand scale": meta.demand_scale_factor,
+            "Sizing scale": meta.sizing_scale_factor,
+            "Periods": meta.number_of_periods,
+            "Created": meta.created_at,
+            "Invariant violations": len(meta.violations),
             "Demand": totals["demand"],
             "Lost demand": totals["lost_demand"],
             "Lost at full docks": totals["lost_dock_full"],

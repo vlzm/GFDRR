@@ -4,17 +4,68 @@ Reads the raw trip CSV, then derives the raw entity tables (stations, depots,
 trucks, bikes) with their capacities, costs and rates. ``RawModelData`` runs
 all of this once and exposes the results as attributes; ``ResolvedModelData``
 (in :mod:`dataloader_graph`) consumes it.
+
+The trip CSV is the only external data in the project, so it gets an explicit
+schema (:data:`TRIPS_SCHEMA`): the loaded table is checked once, at load time,
+and a bad CSV fails here with a full list of violations instead of surfacing
+later as an unrelated pandas error or a run-end invariant violation.
 """
 
 import numpy as np
 import pandas as pd
+import pandera.pandas as pa
+
+from gbp.model.journal_schema import schema_violations
+
+#: Loose bounding box around the service area (New York City and Jersey City).
+#: Wide enough that every real station fits with room to spare; a coordinate
+#: outside it is a data error, not a new station.
+SERVICE_AREA_LAT = (40.4, 41.1)
+SERVICE_AREA_LNG = (-74.5, -73.4)
+
+
+def _trip_time_ordered(trips: pd.DataFrame) -> pd.Series:
+    """Each trip ends at or after its start: ``started_at <= ended_at``."""
+    return trips["started_at"] <= trips["ended_at"]
+
+
+#: Schema of the loaded trips table: the columns the pipeline reads, their
+#: dtypes (as fixed by :func:`load_trips_raw_df`), coordinates inside the
+#: service area, and trip times in order. Extra CSV columns are allowed.
+TRIPS_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "ride_id": pa.Column("string", nullable=True),
+        "rideable_type": pa.Column("string", nullable=False),
+        "started_at": pa.Column("datetime64[ns]", nullable=False),
+        "ended_at": pa.Column("datetime64[ns]", nullable=False),
+        "start_station_id": pa.Column("string", nullable=False),
+        "end_station_id": pa.Column("string", nullable=False),
+        "start_lat": pa.Column("float64", pa.Check.in_range(*SERVICE_AREA_LAT), nullable=False),
+        "start_lng": pa.Column("float64", pa.Check.in_range(*SERVICE_AREA_LNG), nullable=False),
+        "end_lat": pa.Column("float64", pa.Check.in_range(*SERVICE_AREA_LAT), nullable=False),
+        "end_lng": pa.Column("float64", pa.Check.in_range(*SERVICE_AREA_LNG), nullable=False),
+    },
+    checks=[
+        pa.Check(
+            _trip_time_ordered,
+            name="started_at <= ended_at",
+            error="a trip ends before it starts",
+        )
+    ],
+    strict=False,
+    name="trips",
+)
 
 
 # ---------------------------------------------------------------------------
 # Raw loaders
 # ---------------------------------------------------------------------------
 def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
-    """Load the raw Citi Bike trip CSV and drop rows with missing key fields."""
+    """Load the raw Citi Bike trip CSV, drop rows with missing key fields, check the schema.
+
+    The schema check (:data:`TRIPS_SCHEMA`) runs once here, at the load
+    boundary; it raises ``ValueError`` with every violation found.
+    """
     trips_dtypes = {
         "ride_id": "string",
         "rideable_type": "string",
@@ -46,6 +97,11 @@ def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
         ]
     )
     trips_df = trips_df.reset_index(drop=True)
+    violations = schema_violations(TRIPS_SCHEMA, trips_df)
+    if violations:
+        raise ValueError(
+            f"trips CSV {trips_path} breaks the trips schema:\n" + "\n".join(violations)
+        )
     return trips_df
 
 

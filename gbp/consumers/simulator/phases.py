@@ -15,6 +15,8 @@ the redirect do nothing. They only start to matter when traffic goes above the
 historical level.
 """
 
+from typing import Literal
+
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
@@ -80,7 +82,13 @@ class Phase:
         period: PeriodRow,
         config: EnvironmentConfig,
     ) -> pd.DataFrame:
-        """Build this period's events; an empty frame means nothing happened."""
+        """Build this period's events; an empty frame means nothing happened.
+
+        Required for a phase that uses the default :meth:`execute`. A phase
+        that overrides ``execute`` (the two rebalancing phases) never calls
+        it, so this cannot be an ``abc`` abstract method: that would forbid
+        instantiating those phases.
+        """
         raise NotImplementedError
 
 
@@ -101,7 +109,7 @@ class DockArrivals(Phase):
     ``"same"`` docks bikes that departed within this period (after them).
     """
 
-    def __init__(self, when: str) -> None:
+    def __init__(self, when: Literal["previous", "same"]) -> None:
         if when not in ("previous", "same"):
             raise ValueError(f"when must be 'previous' or 'same', got {when!r}")
         self.when = when

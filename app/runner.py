@@ -259,8 +259,8 @@ def main() -> None:
     )
     meta = artifacts.load_run_meta(args.run_name)
     print(f"Saved {folder}")
-    print(f"Invariant violations: {len(meta['violations'])}")
-    print(f"Totals: {meta['totals']}")
+    print(f"Invariant violations: {len(meta.violations)}")
+    print(f"Totals: {meta.totals}")
 
 
 if __name__ == "__main__":

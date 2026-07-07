@@ -13,6 +13,7 @@ read a narrow subset of them: ``periods_df``, ``initial_inventory_df``,
 import copy
 
 import pandas as pd
+import pandera.pandas as pa
 
 from gbp.loaders.dataloader_raw import (
     RawModelData,
@@ -31,7 +32,102 @@ from gbp.model import (
     inventory_at_moments,
     phase_rank_by_timing,
 )
-from gbp.routing import DEFAULT_OSRM_URL, Routes
+from gbp.model.journal_schema import check_journal_schema, schema_violations
+from gbp.routing import DEFAULT_OSRM_URL, Routes, RoutingMode
+
+# ---------------------------------------------------------------------------
+# Schemas of the tables the engine and its phases read
+# ---------------------------------------------------------------------------
+# One pandera schema per table the engine reads from ``ResolvedModelData``.
+# They are checked once, at the end of ``ResolvedModelData.__init__``; the two
+# sized-state tables are checked again in ``run_sized_scenario`` right after
+# sizing replaces them. The id and category columns keep their dtype
+# unchecked on purpose (the sources mix pandas ``string`` and plain ``object``
+# columns); the contract is the column set, non-null ids, non-negative
+# quantities, and unique keys.
+
+#: The period grid: one row per ``period_id`` with its wall-clock bounds.
+PERIODS_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "period_id": pa.Column(nullable=False, unique=True),
+        "start_timestamp": pa.Column(nullable=False),
+        "end_timestamp": pa.Column(nullable=False),
+    },
+    strict=False,
+    name="periods",
+)
+
+#: Starting inventory: one row per ``(facility_id, commodity_category)``.
+INITIAL_INVENTORY_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "facility_id": pa.Column(nullable=False),
+        "commodity_category": pa.Column(nullable=False),
+        "quantity": pa.Column(checks=pa.Check.ge(0), nullable=False),
+    },
+    unique=["facility_id", "commodity_category"],
+    strict=False,
+    name="initial_inventory",
+)
+
+#: Historical demand marginal: quantity per (period, facility, commodity).
+HISTORICAL_DEMAND_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "period_id": pa.Column(nullable=False),
+        "facility_id": pa.Column(nullable=False),
+        "commodity_category": pa.Column(nullable=False),
+        "quantity": pa.Column(checks=pa.Check.ge(0), nullable=False),
+    },
+    strict=False,
+    name="historical_demand",
+)
+
+#: The OD matrix: target probability and mean duration per source pair.
+HISTORICAL_OD_MATRIX_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "source_id": pa.Column(nullable=False),
+        "planned_target_id": pa.Column(nullable=False),
+        "period_id": pa.Column(nullable=False),
+        "commodity_category": pa.Column(nullable=False),
+        "count": pa.Column(checks=pa.Check.ge(1), nullable=False),
+        "duration": pa.Column(checks=pa.Check.ge(0), nullable=False),
+        "probability": pa.Column(checks=[pa.Check.gt(0), pa.Check.le(1)], nullable=False),
+    },
+    strict=False,
+    name="historical_od_matrix",
+)
+
+#: Dock capacities: one row per facility.
+FACILITIES_CAPACITIES_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "facility_id": pa.Column(nullable=False, unique=True),
+        "capacity": pa.Column(checks=pa.Check.ge(0), nullable=False),
+    },
+    strict=False,
+    name="facilities_capacities",
+)
+
+#: Facility geography: one coordinate pair per facility.
+FACILITIES_GEO_SCHEMA = pa.DataFrameSchema(
+    columns={
+        "facility_id": pa.Column(nullable=False, unique=True),
+        "lat": pa.Column(nullable=False),
+        "lng": pa.Column(nullable=False),
+    },
+    strict=False,
+    name="facilities_geo",
+)
+
+#: The engine-facing tables of ``ResolvedModelData``, with the schema of each
+#: (the same list as the class docstring, ``routes`` excluded -- it is an
+#: object, not a table).
+ENGINE_TABLE_SCHEMAS = {
+    "periods_df": PERIODS_SCHEMA,
+    "initial_inventory_df": INITIAL_INVENTORY_SCHEMA,
+    "historical_demand_df": HISTORICAL_DEMAND_SCHEMA,
+    "historical_od_matrix_df": HISTORICAL_OD_MATRIX_SCHEMA,
+    "facilities_capacities_df": FACILITIES_CAPACITIES_SCHEMA,
+    "facilities_geo_df": FACILITIES_GEO_SCHEMA,
+}
 
 # ---------------------------------------------------------------------------
 # Period grid (the simulation clock)
@@ -118,7 +214,15 @@ def get_historical_flows_df(
     # (departed -> period-own; an arrival -> dock-same or dock-previous by whether
     # it closes in its own period). The simulator stamps its phase's rank instead.
     journal["phase_rank"] = phase_rank_by_timing(journal)
-    return finalize_flows(journal)
+    flows = finalize_flows(journal)
+    # The load boundary: the historical journal is checked once here, so bad
+    # input data fails now instead of surfacing later as a run-end violation.
+    violations = check_journal_schema(flows)
+    if violations:
+        raise ValueError(
+            "historical flow journal breaks the journal schema:\n" + "\n".join(violations)
+        )
+    return flows
 
 
 def get_trip_speed_km_per_period(
@@ -519,7 +623,7 @@ class ResolvedModelData:
         self,
         raw: RawModelData,
         period_len: pd.Timedelta = DEFAULT_PERIOD_LEN,
-        routing_mode: str = "haversine",
+        routing_mode: RoutingMode = "haversine",
         osrm_url: str = DEFAULT_OSRM_URL,
     ) -> None:
         # Entities
@@ -611,6 +715,28 @@ class ResolvedModelData:
             f"per commodity category:\ninitial_inventory:\n{init_by_cat}\n"
             f"historical_inventory quantity_sop@period 0:\n{sop0_by_cat}"
         )
+
+        # The load boundary: every table the engine reads is checked once
+        # here, so a wrong shape fails now instead of as a mid-run pandas
+        # error. (The assert above stays: it is a cross-table consistency
+        # check, which a per-table schema cannot express.)
+        violations = check_engine_tables(self)
+        if violations:
+            raise ValueError(
+                "resolved model data breaks its table schemas:\n" + "\n".join(violations)
+            )
+
+
+def check_engine_tables(resolved: "ResolvedModelData") -> list[str]:
+    """Check every engine-facing table of ``resolved`` against its schema.
+
+    Runs each schema of :data:`ENGINE_TABLE_SCHEMAS` with ``lazy=True`` and
+    returns all violations as one list (empty = every table is valid).
+    """
+    violations: list[str] = []
+    for attribute, schema in ENGINE_TABLE_SCHEMAS.items():
+        violations += schema_violations(schema, getattr(resolved, attribute))
+    return violations
 
 
 # ---------------------------------------------------------------------------

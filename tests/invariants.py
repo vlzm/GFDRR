@@ -1,23 +1,21 @@
 """Structural well-formedness of a flow journal (a test-side invariant).
 
 These checks are about the *shape* of the event log, independent of any
-scenario: the schema is exact, ids are unique, each flow's events follow the
-legal sequence, ``move_id`` agrees with ``event_id``, and time never
-runs backwards inside a flow. They complement the run-level invariants I1-I4
-(:func:`gbp.consumers.simulator.validation.validate_run`), which are about
-*quantities* (the demand split, conservation). Both follow the same contract:
-return a list of human-readable violations, empty when the journal holds.
-
-Kept in the test tree on purpose -- it is a tool for *checking* a journal in
-tests, not part of the runtime contract. (If the schema contract ever needs
-enforcing in production, promote it next to the other journal invariants.)
+scenario. The row-wise part -- exact column list, dtypes, field domains,
+``move_id`` agreeing with ``event_id`` -- is the pandera schema
+(:func:`gbp.model.journal_schema.check_journal_schema`), shared with the
+runtime. This module adds only what a row-wise schema cannot express: the
+per-flow event sequence (ids contiguous, the legal event order, time never
+running backwards inside a flow) and the stockout-loss shape. Both follow the
+same contract: return a list of human-readable violations, empty when the
+journal holds.
 """
 
 import re
 
 import pandas as pd
 
-from gbp.model.flows import FLOW_EVENT_COLUMNS
+from gbp.model.journal_schema import check_journal_schema
 
 #: A flow's event types, read in ``event_id`` order, must be: a ``departed``,
 #: then zero or more bounce-and-new-leg pairs (``redirected``, ``departed``),
@@ -39,31 +37,15 @@ def check_journal_well_formed(flows: pd.DataFrame) -> list[str]:
     list of str
         Human-readable violations; empty when the journal is well-formed.
     """
-    if list(flows.columns) != FLOW_EVENT_COLUMNS:
-        return [f"schema: columns {list(flows.columns)} != FLOW_EVENT_COLUMNS"]
+    # The row-wise schema first; the per-flow checks below assume it holds
+    # (they read the columns the schema guarantees).
+    schema_violations = check_journal_schema(flows)
+    if schema_violations:
+        return schema_violations
     if flows.empty:
         return []
 
     v: list[str] = []
-
-    # -- field domains -------------------------------------------------------
-    if (flows["quantity"].astype("int64") < 1).any():
-        v.append("quantity: some rows are < 1")
-    legal_types = {"departed", "arrived", "redirected", "lost"}
-    unknown = set(flows["event_type"].dropna().unique()) - legal_types
-    if unknown:
-        v.append(f"event_type: unknown values {unknown}")
-    # move_id is fixed by event_id: arc m opens at event 2m and ends at event 2m+1.
-    expected_move = flows["event_id"].astype("int64") // 2
-    if not (flows["move_id"].astype("int64") == expected_move).all():
-        v.append("move_id: disagrees with event_id (arc m spans events 2m and 2m+1)")
-
-    # -- realized_target_id is set only for a docking ``arrived`` ------------
-    is_arrived = flows["event_type"] == "arrived"
-    if flows.loc[is_arrived, "realized_target_id"].isna().any():
-        v.append("realized_target_id: an ``arrived`` is missing its docked-at facility")
-    if flows.loc[~is_arrived, "realized_target_id"].notna().any():
-        v.append("realized_target_id: set on a non-``arrived`` event (only docking sets it)")
 
     # -- stockout losses are aggregated and id-less, at (move 0, event 0) ----
     stockout = flows[(flows["event_type"] == "lost") & (flows["reason"] == "stockout")]

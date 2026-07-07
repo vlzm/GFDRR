@@ -19,7 +19,12 @@ import dataclasses
 
 import pandas as pd
 
-from gbp.loaders.dataloader_graph import ResolvedModelData
+from gbp.loaders.dataloader_graph import (
+    FACILITIES_CAPACITIES_SCHEMA,
+    INITIAL_INVENTORY_SCHEMA,
+    ResolvedModelData,
+)
+from gbp.model.journal_schema import schema_violations
 
 from .config import EnvironmentConfig
 from .engine import Environment
@@ -104,6 +109,15 @@ def run_sized_scenario(
         number_of_periods=number_of_periods,
     )
     initial_inventory_df, facilities_capacities_df = size_state_for_demand(resolved, sizing_config)
+
+    # The sized tables replace two engine inputs, so they must fit the same
+    # schemas the loader checked the originals against.
+    sizing_violations = [
+        *schema_violations(INITIAL_INVENTORY_SCHEMA, initial_inventory_df),
+        *schema_violations(FACILITIES_CAPACITIES_SCHEMA, facilities_capacities_df),
+    ]
+    if sizing_violations:
+        raise ValueError("sized state tables break their schemas:\n" + "\n".join(sizing_violations))
 
     sized = copy.copy(resolved)
     sized.initial_inventory_df = initial_inventory_df

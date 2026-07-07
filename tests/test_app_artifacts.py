@@ -198,8 +198,8 @@ def test_save_and_load_round_trip(tmp_path):
 
     assert artifacts.list_runs(tmp_path) == ["overflow"]
     panel = artifacts.load_run_table("overflow", "panel", tmp_path)
-    assert panel["demand"].sum() == meta["totals"]["demand"]
-    assert artifacts.load_run_meta("overflow", tmp_path)["run_name"] == "overflow"
+    assert panel["demand"].sum() == meta.totals["demand"]
+    assert artifacts.load_run_meta("overflow", tmp_path).run_name == "overflow"
 
 
 def test_next_free_run_name_versions_taken_names(tmp_path):
@@ -246,15 +246,13 @@ def test_meta_carries_t0_and_the_run_parameters():
         t0=resolved.periods_df["start_timestamp"].iloc[0],
         violations=[],
     )
-    assert meta["t0"] == "2026-01-01T00:00:00"
-    assert meta["routing_mode"] == "haversine"
-    assert meta["scenario_id"] == "canonical"
-    assert meta["totals"] == artifacts.build_totals(tables["panel"], tables["flow_totals"])
+    assert meta.t0 == "2026-01-01T00:00:00"
+    assert meta.routing_mode == "haversine"
+    assert meta.scenario_id == "canonical"
+    assert meta.totals == artifacts.build_totals(tables["panel"], tables["flow_totals"])
     # t0 + period * period_len is what the pages show on the time axis.
-    t0 = pd.Timestamp(meta["t0"])
-    assert t0 + 3 * pd.Timedelta(hours=meta["period_len_hours"]) == pd.Timestamp(
-        "2026-01-01T03:00:00"
-    )
+    t0 = pd.Timestamp(meta.t0)
+    assert t0 + 3 * pd.Timedelta(hours=meta.period_len_hours) == pd.Timestamp("2026-01-01T03:00:00")
 
 
 # ---------------------------------------------------------------------------
@@ -314,12 +312,30 @@ def test_delta_b_minus_a_owns_direction_and_sign():
     assert ui_shared.delta_b_minus_a(5, 5) == "+0"
 
 
+def _meta_with_rebalancing(rebalancing: dict) -> artifacts.RunMeta:
+    """Build a minimal valid RunMeta carrying the given rebalancing block."""
+    return artifacts.RunMeta(
+        run_name="r",
+        scenario_id="r",
+        demand_scale_factor=1.0,
+        sizing_scale_factor=1.0,
+        number_of_periods=1,
+        period_len_hours=1.0,
+        routing_mode="haversine",
+        t0="2026-01-01T00:00:00",
+        created_at="2026-01-01T00:00:00",
+        violations=[],
+        rebalancing=artifacts.RebalancingMeta.model_validate(rebalancing),
+        totals={},
+    )
+
+
 def test_rebalancing_settings_reads_the_block_and_falls_back():
     import ui_shared
 
-    old_run = ui_shared.rebalancing_settings({})
-    assert old_run.enabled is False and old_run.truck_homes == []
-    meta = {"rebalancing": {"enabled": True, "truck_homes": ["depot_1", "depot_1"]}}
+    off = ui_shared.rebalancing_settings(_meta_with_rebalancing({"enabled": False}))
+    assert off.enabled is False and off.truck_homes == []
+    meta = _meta_with_rebalancing({"enabled": True, "truck_homes": ["depot_1", "depot_1"]})
     settings = ui_shared.rebalancing_settings(meta)
     assert settings.enabled is True
     assert len(settings.truck_homes) == 2
