@@ -7,12 +7,13 @@ Citi Bike Simulation Platform — vertical bike-sharing simulation built on the 
 ## Commands
 
 ```bash
-uv pip install -e ".[dev,ui]"     # install
+uv pip install -e ".[dev,ui,api]" # install
 ruff check gbp/ tests/ app/       # lint
 ruff format gbp/ tests/ app/      # format
 mypy gbp/                         # typecheck
 streamlit run app/main.py         # UI
 python app/runner.py --help       # run a scenario from the terminal
+uvicorn api:app --app-dir app     # serve the run-artifact API (docs/api.md)
 ```
 
 ## Universal Rules

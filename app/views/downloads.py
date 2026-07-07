@@ -30,8 +30,8 @@ TABLES = {
 
 
 @st.cache_data(show_spinner=False)
-def _csv_bytes(run_name: str, table: str, mtime: float) -> bytes:
-    """CSV bytes of one run table; ``mtime`` invalidates the cache on rewrite."""
+def _csv_bytes(run_name: str, table: str, cache_key: float) -> bytes:
+    """CSV bytes of one run table; ``cache_key`` comes from ``table_cache_key``."""
     loader, _ = TABLES[table]
     return loader(run_name).to_csv(index=False).encode("utf-8")
 
@@ -40,10 +40,10 @@ for run_name in [name for name in (run_a, run_b) if name]:
     st.subheader(run_name)
     for table, (loader, description) in TABLES.items():
         frame = loader(run_name)
-        mtime = ui_shared.table_path(run_name, table).stat().st_mtime
+        cache_key = ui_shared.table_cache_key(run_name, table)
         st.download_button(
             f"Download {table}.csv ({ui_shared.fmt_int(len(frame))} rows)",
-            data=_csv_bytes(run_name, table, mtime),
+            data=_csv_bytes(run_name, table, cache_key),
             file_name=f"{run_name}_{table}.csv",
             mime="text/csv",
             key=f"download_{run_name}_{table}",

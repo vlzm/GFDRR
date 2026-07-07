@@ -1,6 +1,5 @@
 """Overview page: pick scenarios A/B, whole-run totals, list of saved runs."""
 
-import artifacts
 import pandas as pd
 import streamlit as st
 import ui_shared
@@ -28,7 +27,7 @@ ui_shared.kpi_row(meta_a, meta_b)
 
 st.subheader("All saved runs")
 rows = []
-for name in artifacts.list_runs():
+for name in ui_shared.list_runs():
     meta = ui_shared.load_meta(name)
     totals = meta.totals
     rows.append(

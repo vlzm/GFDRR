@@ -12,6 +12,7 @@ import pathlib
 from collections.abc import Callable
 from typing import NamedTuple
 
+import api_client
 import artifacts
 import numpy as np
 import pandas as pd
@@ -61,23 +62,46 @@ LEVELS = [LEVEL_GLOBAL, LEVEL_PERIOD, LEVEL_COMMODITY, LEVEL_FACILITY]
 
 # --- The run-artifact loader --------------------------------------------------
 # The one front door to a saved run (Notations.md §12). A page asks for a table
-# through the typed accessors below; the file layout, the caching, and the
-# old-artifact fallbacks all live here, so a page never names a parquet file or
-# re-checks which columns an older artifact carries.
+# through the typed accessors below; the file layout, the caching, the two
+# backends (local files, or HTTP calls to the API when API_URL is set --
+# docs/api.md), and the old-artifact fallbacks all live here, so a page never
+# names a parquet file or re-checks which columns an older artifact carries.
+def list_runs() -> list[str]:
+    """Names of every saved run: from the API when ``API_URL`` is set, else the disk."""
+    if api_client.api_url():
+        return [meta.run_name for meta in api_client.list_runs()]
+    return artifacts.list_runs()
+
+
 @st.cache_data(show_spinner=False)
-def _table_cached(run_name: str, table: str, mtime: float) -> pd.DataFrame:
-    """Cache one parquet table; ``mtime`` invalidates the entry on rewrite."""
+def _table_cached(run_name: str, table: str, cache_key: float) -> pd.DataFrame:
+    """Cache one parquet table; ``cache_key`` comes from :func:`table_cache_key`."""
+    if api_client.api_url():
+        return api_client.load_table(run_name, table)
     return artifacts.load_run_table(run_name, table)
 
 
 def table_path(run_name: str, table: str) -> pathlib.Path:
-    """Path of one saved table (the downloads page needs the file itself)."""
+    """Path of one saved table on the local disk (the local cache key reads its mtime)."""
     return artifacts.run_dir(run_name) / f"{table}.parquet"
+
+
+def table_cache_key(run_name: str, table: str) -> float:
+    """Cache key of one saved table: the file mtime locally, a constant over HTTP.
+
+    A local file can be rewritten, so the mtime must be part of the key. A
+    served artifact cannot change (the API is the only writer on the server
+    and never overwrites a saved run -- docs/api.md), so ``(run_name, table)``
+    alone identifies the content and the key is a constant.
+    """
+    if api_client.api_url():
+        return 0.0
+    return table_path(run_name, table).stat().st_mtime
 
 
 def _load_table(run_name: str, table: str) -> pd.DataFrame:
     """Read one table of a saved run through the Streamlit cache."""
-    return _table_cached(run_name, table, table_path(run_name, table).stat().st_mtime)
+    return _table_cached(run_name, table, table_cache_key(run_name, table))
 
 
 def load_panel(run_name: str) -> pd.DataFrame:
@@ -113,13 +137,17 @@ def load_arcs(run_name: str, flow_type: str | None = None) -> pd.DataFrame | Non
 
 
 @st.cache_data(show_spinner=False)
-def _meta_cached(run_name: str, mtime: float) -> artifacts.RunMeta:
-    """Cache one meta.json; ``mtime`` invalidates the entry on rewrite."""
+def _meta_cached(run_name: str, cache_key: float) -> artifacts.RunMeta:
+    """Cache one meta.json; ``cache_key`` is the mtime locally, a constant over HTTP."""
+    if api_client.api_url():
+        return api_client.load_meta(run_name)
     return artifacts.load_run_meta(run_name)
 
 
 def load_meta(run_name: str) -> artifacts.RunMeta:
     """Read a saved run's meta.json through the Streamlit cache."""
+    if api_client.api_url():
+        return _meta_cached(run_name, 0.0)
     path = artifacts.run_dir(run_name) / "meta.json"
     return _meta_cached(run_name, path.stat().st_mtime)
 
@@ -148,7 +176,7 @@ def pick_scenario_pair() -> tuple[str | None, str | None]:
     The chosen names are kept in ``st.session_state`` so every page shows the
     same pair. Returns ``(None, None)`` when no run is saved yet.
     """
-    runs = artifacts.list_runs()
+    runs = list_runs()
     if not runs:
         st.info("No saved runs yet. Open the “Run scenario” page and start the first one.")
         return None, None

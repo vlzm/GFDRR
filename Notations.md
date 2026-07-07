@@ -554,6 +554,24 @@ parameters, `inputs` and `code_version` next to the tables.
 
 ---
 
+## 16. The run-artifact API (serving runs over HTTP)
+
+The API (`app/api.py`, design: `docs/api.md`) serves run artifacts (§12) over
+HTTP and starts runs through the same `runner.run_scenario` the Run scenario
+page calls. It is a reader and a saver of run artifacts: it never computes
+what `build_run_tables` can precompute, and the artifact contract (§12) **is**
+the API contract — `meta.json` travels as JSON (the `RunMeta` model), each
+table travels as its saved parquet bytes.
+
+| Canonical | Meaning | Instead of |
+|---|---|---|
+| run state | The in-memory record of one started run in the API process: `run_name`, `status`, the `progress` lines from `on_progress`, and `error` when it failed. Lost on a restart; the status endpoint then falls back to the disk — an existing `meta.json` answers `done`, anything else `404`. | "job", "task record" |
+| `queued` / `running` / `done` / `failed` | The four values of a run state's `status`. One single-thread worker runs one scenario at a time, so a second started run waits as `queued`. | "pending", "in progress", "finished" |
+| `API_URL` | The backend switch of the Streamlit loader (`ui_shared.py`): unset — read local files, exactly as before; set — fetch the same runs from the API at that URL. The typed accessors (`load_panel`, `load_meta`, ...) keep their signatures either way. | "remote mode flag" |
+| `API_KEY` | The one shared access key: the server checks it against the `X-API-Key` header on every endpoint except `/health`; unset (local development) — the check is off. | "token", "credentials" |
+
+---
+
 ## Known drift to fix
 
 The audit (`check-notations`) lists current offenders here so the file does not
