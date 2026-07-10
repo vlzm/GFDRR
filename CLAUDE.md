@@ -1,8 +1,8 @@
 # CLAUDE.md
 
-Citi Bike Simulation Platform — vertical bike-sharing simulation built on the Citi Bike domain. Current phase: **codebase cleanup to canonical scenario minimum**.
+Citi Bike Simulation Platform — vertical bike-sharing simulation built on the Citi Bike domain. Current phase: **demand forecasting** — a model predicts future demand, and the simulator runs on that forecast next to the base replay on history. Plan: `docs/plans/ml_demand_forecast_plan.md`.
 
-**Source of truth:** `notebooks/test_pipeline.ipynb` — everything in the codebase must serve this scenario. If it doesn't, it should be removed.
+**Source of truth:** the canonical scenario is two runs. The base replay stays in `notebooks/test_pipeline.ipynb`, unchanged. The forecast run (Notations.md §11) gets a second notebook next to it, `notebooks/forecast_pipeline.ipynb`, created in phase 1 of the plan. Everything in the codebase must serve one of these two runs. If it doesn't, it should be removed.
 
 ## Commands
 

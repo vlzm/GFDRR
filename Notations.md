@@ -392,7 +392,7 @@ used for the historical, simulated, and live-state views alike (§10).
 
 ## 10. The prefix system (one concept, three views)
 
-The same marginal exists as up to four views, told apart by a prefix on the same
+The same marginal exists as up to five views, told apart by a prefix on the same
 canonical word. This is how related things are recognized by name — do not invent
 new stems for the views.
 
@@ -401,6 +401,7 @@ new stems for the views.
 | `raw_` / `*_raw_df` | Untouched source data, before the canonical schema. | `trips_raw_df` |
 | `historical_` | Ground truth derived from real history. | `historical_inventory_df`, `historical_demand_df` |
 | `simulated_` | Derived from a finished run's journal. | `simulated_inventory_df`, `simulated_flows_df` |
+| `forecast_` | Predicted by a model, for periods that may have no history (§17). | `forecast_demand_df` |
 | `state_` | The live value during a run (in `SimulationState`). | `state_inventory_df`, `state_flows_df` |
 
 `flow_id` carries the same idea at the row level: `hist_` ids come from history,
@@ -422,6 +423,7 @@ A scenario can be run for two different purposes. Keep the two apart by name.
 | `saturated` | An initial inventory or a capacity table set far above any demand, so the limits never take effect (`get_saturated_inventory_df`). |
 | `canonical phases` | The three-phase list every run of the scenario uses: dock earlier arrivals, form departures, dock same-period arrivals. Built by `canonical_phases()` in the simulator layer; the runner, the tests and the notebook all take the list from there. |
 | `sized run` | A run whose state was sized first: measure the initial inventory and capacities against `sizing_scale_factor` with a sizing run, then run the demand at `demand_scale_factor` against that state, then check the run invariants. `run_sized_scenario` owns this order and returns a `ScenarioRun`: the journal, the final state, the sized state tables, and the invariant violations. Equal scale factors give a base replay; a larger run scale makes the limits take effect. |
+| `forecast run` | A sized run whose demand table is a forecast demand table (§17) instead of a historical one. It goes through the same path — `size_state_for_demand` sizes the state, `run_sized_scenario` runs it — and its `meta.json` records the name of the forecast it used. |
 
 The sizing run works because every phase is deterministic and departures depend on
 inventory only through `min(demand, inventory)`: a real run started from the
@@ -538,13 +540,14 @@ in by appending `rebalancing_phases(params)` to `canonical_phases()`.
 
 ## 15. Data folders (raw → processed → runs)
 
-The `data/` folder has three subfolders, one per stage of the data on disk:
+The `data/` folder has four subfolders, one per stage of the data on disk:
 
 | Canonical | Meaning | Instead of |
 |---|---|---|
 | `data/raw/` | The downloaded Citi Bike trip CSVs, exactly as published. Code never edits this folder. | "source data", "input folder", "bronze" |
 | `data/processed/` | The processed copy of each trip CSV, written by `load_trips_raw_df` (`gbp/loaders/dataloader_raw.py`) on the first load: rows with missing key fields dropped, dtypes fixed, the trips schema checked, saved as parquet. Later loads read this copy instead of parsing the CSV, which is much faster. It is a cache: a copy counts as fresh only while it is newer than its CSV, and deleting the folder is always safe — the next load rebuilds it. Delete it after changing the cleaning code in `load_trips_raw_df`. | "preprocessed layer", "intermediate data", "silver" |
 | `data/runs/` | One folder per saved run — the run artifacts the UI reads (§12). | "output layer", "results", "gold" |
+| `data/ml/` | The forecasting data (§17): training tables in `training/`, one folder per saved forecast in `forecasts/` (the forecast demand table plus its `meta.json`), forecast-quality metrics in `monitoring/`, and the local MLflow store in `mlflow/`. Created in the demand forecasting phase. | "model folder", "ml artifacts" |
 
 Everything between `processed` and `runs` — `RawModelData`,
 `ResolvedModelData`, the flow journal of a run — lives in memory for one run
@@ -569,6 +572,24 @@ table travels as its saved parquet bytes.
 | `queued` / `running` / `done` / `failed` | The four values of a run state's `status`. One single-thread worker runs one scenario at a time, so a second started run waits as `queued`. | "pending", "in progress", "finished" |
 | `API_URL` | The backend switch of the Streamlit loader (`ui_shared.py`): unset — read local files, exactly as before; set — fetch the same runs from the API at that URL. The typed accessors (`load_panel`, `load_meta`, ...) keep their signatures either way. | "remote mode flag" |
 | `API_KEY` | The one shared access key: the server checks it against the `X-API-Key` header on every endpoint except `/health`; unset (local development) — the check is off. | "token", "credentials" |
+
+---
+
+## 17. Demand forecasting (the model around the simulator)
+
+The demand forecasting phase (plan: `docs/plans/ml_demand_forecast_plan.md`)
+adds a model that predicts future demand; the simulator then runs on that
+prediction. New code lives in `gbp/ml/`, new data under `data/ml/` (§15).
+These words are fixed here before they appear in code. They anchor to the
+demand schema in the graph loader (`HISTORICAL_DEMAND_SCHEMA`,
+`gbp/loaders/dataloader_graph.py`).
+
+| Canonical | Meaning | Avoid |
+|---|---|---|
+| `forecast demand table` | A table in the shape of `HISTORICAL_DEMAND_SCHEMA` (`period_id`, `facility_id`, `commodity_category`, `quantity`) whose `quantity` comes from a model, not from history. The simulator reads it exactly as it reads historical demand — that is the whole integration contract. | `predictions`, `predicted demand` |
+| `training table` | The table a model learns from: one row per `(period_id, facility_id, commodity_category)` with the observed departure count and the feature columns. Zero rows are kept — a station-hour with no departures is a real observation, not a missing one. Monthly parquet partitions under `data/ml/training/`. | `dataset`, `train set` |
+| `backtest` | Model validation on held-out months: train on months `1..k`, forecast month `k+1`, move the split forward, average the scores over at least 3 splits. Rows from the future never appear in training — no random splits. | `cross-validation` |
+| `champion` | The model version the platform currently uses for forecasts. In the model registry (the list of trained model versions that MLflow keeps) it is marked by the alias `champion` — a movable name that points at one version. The forecast builder resolves the model by this alias, never by a file path. A version that lost the comparison stays registered as a `challenger` and waits for the next one. | `production model`, `best model` |
 
 ---
 
