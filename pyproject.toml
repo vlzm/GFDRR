@@ -46,6 +46,7 @@ api = [
 ]
 ml = [
     "dvc>=3.30.0",
+    "holidays>=0.60",
 ]
 db = [
     "sqlalchemy[asyncio]>=2.0.0",

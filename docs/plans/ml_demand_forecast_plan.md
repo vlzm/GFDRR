@@ -341,8 +341,11 @@ its own plan when the local system works.
   not, fall back to a coarser mapping (weekday/weekend × hour).
 - The rounding rule for fractional forecast quantities: plain rounding
   changes the total demand; decide in phase 1 and write the rule down.
-- Archived station-status data for censored-demand marking (phase 3): find
-  out whether snapshots exist for the chosen months before promising the
-  masking step.
+- Archived station-status data for censored-demand marking (phase 3):
+  answered on 2026-07-10 — the CityBikes archive publishes monthly dumps of
+  the station feed for New York from 2024-11 on, covering every training
+  month. The mark is built in `gbp/ml/station_status.py`; months before
+  2024-11 have no snapshots, so their mark stays NaN and the written
+  assumption stands.
 - How much history the models need: the plan starts with 12 months; revisit
   after the first backtest.

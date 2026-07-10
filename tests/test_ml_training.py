@@ -1,14 +1,17 @@
 """Tests for the training-table builder (phase 2 of the demand forecasting plan).
 
 The full month grid with zero rows kept, the month filter, agreement with the
-simulator's own departures read-model, and the idempotent parquet partition.
+simulator's own departures read-model, and the idempotent parquet partition —
+now carrying the feature columns and the stockout mark (phase 3).
 """
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from gbp.loaders.dataloader_graph import get_historical_flows_df
 from gbp.ml import training
+from gbp.ml.features import FEATURE_COLUMNS, HISTORY_FEATURES
 from gbp.model import flows_to_departures
 
 CLASSIC = "classic_bike"
@@ -136,24 +139,68 @@ def raw(tmp_path):
     return folder
 
 
-def test_write_month_partition_builds_the_checked_parquet(raw, tmp_path):
+@pytest.fixture
+def weather():
+    dates = pd.date_range("2025-02-01", "2025-02-28", freq="D")
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "temperature_max_c": np.full(len(dates), 4.0),
+            "temperature_min_c": np.full(len(dates), -3.0),
+            "precipitation_mm": np.full(len(dates), 0.5),
+        }
+    )
+
+
+def test_write_month_partition_builds_the_checked_parquet(raw, weather, tmp_path):
     root = tmp_path / "training"
-    path = training.write_month_partition("202502", raw=raw, root=root)
+    path = training.write_month_partition("202502", raw=raw, root=root, weather_df=weather)
     assert path == root / "202502.parquet"
 
     table = pd.read_parquet(path)
     assert len(table) == FEB_HOURS * 2 * 2
     assert table["quantity"].sum() == 3
+    # The feature columns are on board; the oldest month has no earlier
+    # partitions, so its history features stay NaN.
+    assert set(FEATURE_COLUMNS) < set(table.columns)
+    assert table["temperature_max_c"].eq(4.0).all()
+    assert table[HISTORY_FEATURES].isna().all().all()
+    # No status dump on disk -> the mark is unknown, not zero.
+    assert table["stockout_share"].isna().all()
 
 
-def test_write_month_partition_is_idempotent(raw, tmp_path):
+def test_write_month_partition_is_idempotent(raw, weather, tmp_path):
     root = tmp_path / "training"
-    path = training.write_month_partition("202502", raw=raw, root=root)
+    path = training.write_month_partition("202502", raw=raw, root=root, weather_df=weather)
     first = path.read_bytes()
-    again = training.write_month_partition("202502", raw=raw, root=root)
+    again = training.write_month_partition("202502", raw=raw, root=root, weather_df=weather)
     assert again.read_bytes() == first
 
 
 def test_build_month_partition_needs_the_raw_files(tmp_path):
     with pytest.raises(FileNotFoundError, match="no raw CSVs for 202502"):
         training.build_month_partition("202502", raw=tmp_path / "empty")
+
+
+def test_partition_marks_stockout_hours_for_covered_facilities(raw, weather, tmp_path):
+    # The feed knows one station at the trips' coordinates: empty for the
+    # first half of local hour 5 on Feb 1 (10:00 UTC), stocked afterwards.
+    records = pd.DataFrame(
+        {
+            "nuid": ["a", "a"],
+            "latitude": [40.75, 40.75],  # s1 sits at (40.75, -73.99) in the fixture
+            "longitude": [-73.99, -73.99],
+            "bikes": [0, 2],
+            "timestamp": pd.to_datetime(["2025-02-01 10:00", "2025-02-01 10:30"]),
+        }
+    )
+    table = training.build_month_partition(
+        "202502", raw=raw, root=tmp_path / "training", weather_df=weather, status_records_df=records
+    )
+
+    by_key = table.set_index(["period_id", "facility_id", "commodity_category"])["stockout_share"]
+    assert by_key[(5, "s1", CLASSIC)] == 0.5
+    assert by_key[(5, "s1", ELECTRIC)] == 0.5  # the mark is per station, not per bike type
+    assert by_key[(6, "s1", CLASSIC)] == 0.0  # covered and stocked -> zero, not unknown
+    # s2 sits at (40.76, -73.97), too far from the feed station -> unknown.
+    assert table[table["facility_id"] == "s2"]["stockout_share"].isna().all()

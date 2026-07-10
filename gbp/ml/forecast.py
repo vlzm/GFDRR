@@ -4,7 +4,9 @@ The model's whole job is to produce a forecast demand table: a table in
 ``HISTORICAL_DEMAND_SCHEMA`` shape whose ``quantity`` comes from a model, for
 periods that have no history yet. This module holds the first model (seasonal
 naive), the one rounding rule that turns fractional forecasts into whole
-bikes, and the forecast artifact — the folder
+bikes, the forecast input (:func:`forecast_input` — the feature table a
+model predicts from, built by the shared feature module), and the forecast
+artifact — the folder
 ``data/ml/forecasts/<forecast_name>/`` with ``demand.parquet`` and
 ``meta.json`` that a forecast run (Notations.md §11) is loaded from.
 
@@ -32,6 +34,7 @@ from gbp.loaders.dataloader_graph import (
     get_forecast_periods_df,
     hour_of_week,
 )
+from gbp.ml.features import HISTORY_WEEKS, build_features, clip_history_window
 from gbp.model.journal_schema import schema_violations
 
 _DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[2] / "data"
@@ -207,6 +210,58 @@ def round_forecast_demand(demand_df: pd.DataFrame) -> pd.DataFrame:
         .sort_values(["period_id", "facility_id", "commodity_category"])
         .reset_index(drop=True)
     )
+
+
+def forecast_input(
+    history_df: pd.DataFrame,
+    forecast_periods_df: pd.DataFrame,
+    weather_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Build the feature table a model predicts from (plan, phase 3).
+
+    One row per ``(period, facility, commodity)`` of the forecast horizon:
+    every facility × commodity of the history window crossed with every
+    horizon period, with the feature columns appended by the same functions
+    that build the training table (``gbp/ml/features.py``) — never a copy.
+    For the same station-day this table and the training table hold
+    identical feature values; a test in ``tests/test_ml_features.py``
+    proves it.
+
+    Parameters
+    ----------
+    history_df : pandas.DataFrame
+        Departure counts in training-table shape (zero rows kept), for
+        example read from the training partitions. Only the history window
+        (the ``HISTORY_WEEKS`` weeks right before the horizon) is used.
+    forecast_periods_df : pandas.DataFrame
+        The forecast period grid (:func:`get_forecast_periods_df`).
+    weather_df : pandas.DataFrame, optional
+        Daily weather covering the horizon dates. In a backtest this is the
+        actual weather of the held-out month — a perfect weather forecast.
+        A true future horizon has no published weather; without a supplied
+        weather forecast the weather columns stay NaN.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``period_id``, ``start_timestamp``, ``facility_id``,
+        ``commodity_category`` plus the ``FEATURE_COLUMNS``.
+    """
+    t0 = forecast_periods_df["start_timestamp"].iloc[0]
+    history = clip_history_window(history_df, t0)
+    if history.empty:
+        raise ValueError(f"no departure counts in the {HISTORY_WEEKS}-week window before {t0}")
+    grid = pd.MultiIndex.from_product(
+        [
+            forecast_periods_df["period_id"],
+            sorted(history["facility_id"].unique()),
+            sorted(history["commodity_category"].unique()),
+        ],
+        names=["period_id", "facility_id", "commodity_category"],
+    ).to_frame(index=False)
+    grid = grid.merge(forecast_periods_df[["period_id", "start_timestamp"]], on="period_id")
+    grid = grid[["period_id", "start_timestamp", "facility_id", "commodity_category"]]
+    return build_features(grid, history, weather_df)
 
 
 def save_forecast(
