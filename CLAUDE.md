@@ -15,6 +15,8 @@ streamlit run app/main.py         # UI
 python app/runner.py --help       # run a scenario from the terminal
 uvicorn api:app --app-dir app     # serve the run-artifact API (docs/explanation/api.md)
 python -m gbp.ml.training --months 202502 202503  # download raw months, build the training table
+python -m gbp.ml.backtest         # rolling-origin backtest of the model families, logged to MLflow
+mlflow ui --backend-store-uri sqlite:///data/ml/mlflow/mlflow.db  # browse the backtest experiment
 dvc status                        # data/raw and data/ml/training vs their .dvc files
 ```
 

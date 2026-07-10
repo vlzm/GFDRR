@@ -49,12 +49,12 @@ from gbp.ml.data import (
     download_months,
     load_trips_any_schema,
     load_weather_daily,
+    ml_dir,
     month_bounds,
     month_csvs,
     normalize_month,
 )
 from gbp.ml.features import FEATURE_SCHEMA_COLUMNS, HISTORY_WEEKS, build_features
-from gbp.ml.forecast import ml_dir
 from gbp.ml.station_status import download_status_months, next_month, stockout_share_table
 from gbp.model.journal_schema import schema_violations
 
@@ -115,6 +115,45 @@ def load_history_counts(month: str, root: pathlib.Path | None = None) -> pd.Data
                 "quantity": pd.Series(dtype="int64"),
             }
         )
+    return pd.concat(frames, ignore_index=True)
+
+
+def load_training_table(months: list[str], root: pathlib.Path | None = None) -> pd.DataFrame:
+    """Read the training table of the given months: their partitions stacked.
+
+    A year of partitions is tens of millions of rows, so the columns are
+    made compact while loading: the float feature columns become ``float32``,
+    and ``facility_id`` / ``commodity_category`` become pandas ``category``
+    columns (each distinct string stored once). All partitions share one
+    category list, so the stacked table keeps the category dtype. Code that
+    groups by these columns must pass ``observed=True``.
+
+    Raises ``FileNotFoundError`` when a month has no partition — build it
+    first with ``python -m gbp.ml.training``.
+    """
+    float_columns = [
+        column
+        for column, checked in TRAINING_TABLE_SCHEMA.columns.items()
+        if str(checked.dtype) == "float64"
+    ]
+    id_columns = ["facility_id", "commodity_category"]
+    frames = []
+    for month in sorted(normalize_month(m) for m in months):
+        path = partition_path(month, root)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"no training partition for {month}; build it first (python -m gbp.ml.training)"
+            )
+        frame = pd.read_parquet(path)
+        frame[float_columns] = frame[float_columns].astype("float32")
+        frames.append(frame)
+    categories = {
+        column: sorted({value for frame in frames for value in frame[column].unique()})
+        for column in id_columns
+    }
+    for frame in frames:
+        for column, values in categories.items():
+            frame[column] = pd.Categorical(frame[column], categories=values)
     return pd.concat(frames, ignore_index=True)
 
 

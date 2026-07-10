@@ -17,6 +17,7 @@ from gbp.loaders.dataloader_graph import (
     map_od_matrix_by_hour_of_week,
 )
 from gbp.ml import forecast
+from gbp.ml.models import create_model
 from tests import scenarios
 
 CLASSIC = "classic_bike"
@@ -64,8 +65,18 @@ def test_forecast_periods_restart_at_zero():
 
 
 # ---------------------------------------------------------------------------
-# Seasonal naive
+# Seasonal naive (through the model interface)
 # ---------------------------------------------------------------------------
+def seasonal_naive_fractional(
+    history: pd.DataFrame, periods: pd.DataFrame, horizon: pd.DataFrame
+) -> pd.DataFrame:
+    """Run the interface path: counts grid -> forecast input -> predict."""
+    counts = forecast.counts_from_demand(history, periods)
+    model = create_model("seasonal_naive")
+    model.fit(counts)
+    return model.predict(forecast.forecast_input(counts, horizon))
+
+
 def test_seasonal_naive_averages_same_hour_of_week():
     # Two weeks of history. Monday 08:00 sees 2 then 4 departures at s1
     # (mean 3.0); Tuesday 09:00 sees 6 in week one and nothing in week two —
@@ -74,20 +85,31 @@ def test_seasonal_naive_averages_same_hour_of_week():
     history = demand_table([(8, "s1", 2), (168 + 8, "s1", 4), (33, "s1", 6)])
     horizon = hourly_periods(MONDAY + pd.Timedelta(days=14), 168)
 
-    out = forecast.seasonal_naive_demand(history, periods, horizon)
+    out = seasonal_naive_fractional(history, periods, horizon)
 
-    by_period = out.set_index("period_id")["quantity"]
-    assert by_period[8] == 3.0
-    assert by_period[33] == 3.0
-    # No other hour of week ever saw a departure, so no other rows exist.
-    assert sorted(by_period.index) == [8, 33]
+    positive = out[out["quantity"] > 0].set_index("period_id")["quantity"]
+    assert positive[8] == 3.0
+    assert positive[33] == 3.0
+    # No other hour of week ever saw a departure, so every other row is 0.
+    assert sorted(positive.index) == [8, 33]
+    assert len(out) == 168  # the full horizon grid: one facility, one commodity
 
 
-def test_seasonal_naive_rejects_demand_outside_the_grid():
+def test_counts_from_demand_rejects_demand_outside_the_grid():
     periods = hourly_periods(MONDAY, 24)
     history = demand_table([(100, "s1", 1)])
     with pytest.raises(ValueError, match="outside the period grid"):
-        forecast.seasonal_naive_demand(history, periods, hourly_periods(MONDAY, 24))
+        forecast.counts_from_demand(history, periods)
+
+
+def test_counts_from_demand_fills_the_grid_with_zeros():
+    periods = hourly_periods(MONDAY, 24)
+    counts = forecast.counts_from_demand(demand_table([(8, "s1", 2)]), periods)
+    assert len(counts) == 24
+    assert counts["quantity"].sum() == 2
+    assert counts.loc[counts["quantity"] > 0, "start_timestamp"].tolist() == [
+        MONDAY + pd.Timedelta(hours=8)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +232,7 @@ def synthetic_history_resolved():
 def forecast_tables(resolved):
     """Build and reload a seasonal naive forecast for the scenario's next week."""
     horizon = hourly_periods(resolved.periods_df["end_timestamp"].iloc[-1], 168)
-    fractional = forecast.seasonal_naive_demand(
+    fractional = seasonal_naive_fractional(
         resolved.historical_demand_df, resolved.periods_df, horizon
     )
     return forecast.round_forecast_demand(fractional), horizon

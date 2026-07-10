@@ -1,52 +1,52 @@
 """Build and save forecast demand tables (Notations.md §17).
 
-The model's whole job is to produce a forecast demand table: a table in
+A model's whole job is to produce a forecast demand table: a table in
 ``HISTORICAL_DEMAND_SCHEMA`` shape whose ``quantity`` comes from a model, for
-periods that have no history yet. This module holds the first model (seasonal
-naive), the one rounding rule that turns fractional forecasts into whole
-bikes, the forecast input (:func:`forecast_input` — the feature table a
+periods that have no history yet. The models themselves live behind the one
+interface in ``gbp/ml/models/``; this module is the forecast builder around
+them. It holds the one rounding rule that turns fractional forecasts into
+whole bikes, the forecast input (:func:`forecast_input` — the feature table a
 model predicts from, built by the shared feature module), and the forecast
-artifact — the folder
-``data/ml/forecasts/<forecast_name>/`` with ``demand.parquet`` and
-``meta.json`` that a forecast run (Notations.md §11) is loaded from.
+artifact — the folder ``data/ml/forecasts/<forecast_name>/`` with
+``demand.parquet`` and ``meta.json`` that a forecast run (Notations.md §11)
+is loaded from.
 
-Terminal use::
+Two builders save an artifact:
+
+- :func:`build_seasonal_naive_forecast` — the phase-1 path: from one trip
+  CSV's demand and period grid, seasonal naive only.
+- :func:`build_model_forecast` — from the training partitions, any model
+  family by name.
+
+Terminal use (one command each; wrapped here for width)::
 
     python -m gbp.ml.forecast --trips-path data/raw/202601-citibike-tripdata_1.csv
         --forecast-name seasonal_naive_w1 --horizon-periods 168
 
-(one command; wrapped here for width).
+    python -m gbp.ml.forecast --model lightgbm --months 202502 ... 202512
+        --forecast-name lightgbm_202601 --horizon-periods 744
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
-import os
 import pathlib
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
 import pydantic
 
 from gbp.loaders.dataloader_graph import (
+    DEFAULT_PERIOD_LEN,
     HISTORICAL_DEMAND_SCHEMA,
     get_forecast_periods_df,
-    hour_of_week,
 )
+from gbp.ml.data import load_weather_daily, ml_dir, month_bounds, normalize_month
 from gbp.ml.features import HISTORY_WEEKS, build_features, clip_history_window
+from gbp.ml.models import create_model
 from gbp.model.journal_schema import schema_violations
-
-_DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[2] / "data"
-
-
-def ml_dir() -> pathlib.Path:
-    """Root of the forecasting data (Notations.md §15): ``<data dir>/ml``.
-
-    Honors the same ``DATA_DIR`` environment switch as ``app/artifacts.py``;
-    without it, this is ``data/ml`` at the repository root.
-    """
-    return pathlib.Path(os.environ.get("DATA_DIR", _DEFAULT_DATA_DIR)) / "ml"
 
 
 def forecasts_root() -> pathlib.Path:
@@ -101,63 +101,41 @@ def forecast_periods_from_meta(meta: ForecastMeta) -> pd.DataFrame:
     )
 
 
-def seasonal_naive_demand(
-    demand_df: pd.DataFrame,
-    periods_df: pd.DataFrame,
-    forecast_periods_df: pd.DataFrame,
-) -> pd.DataFrame:
-    """Seasonal naive forecast: the average of the same hour of the same weekday.
+def counts_from_demand(demand_df: pd.DataFrame, periods_df: pd.DataFrame) -> pd.DataFrame:
+    """Turn the historical demand marginal into a zero-filled counts grid.
 
-    For each ``(facility, commodity, hour of week)`` the forecast is the mean
-    historical demand over every period in history with that hour of week. The
-    mean divides by *all* those periods, not only the ones with departures: a
-    week where a station saw no departures at that hour is a real zero
-    observation, not a missing one. Each forecast period then takes the value
-    of its own hour of week.
+    The demand marginal lists only positive rows, but the feature builder
+    reads departure counts in training-table shape, where a station-hour
+    with no departures is a real zero observation. So the grid crosses every
+    period of ``periods_df`` with every ``(facility, commodity)`` seen in
+    the demand, takes each row's quantity from the demand, and fills the
+    rest with 0.
 
-    Quantities come out fractional (an average of whole numbers); the engine
-    moves whole bikes, so round them with :func:`round_forecast_demand` before
-    running.
-
-    Parameters
-    ----------
-    demand_df : pandas.DataFrame
-        The historical demand marginal (``HISTORICAL_DEMAND_SCHEMA``).
-    periods_df : pandas.DataFrame
-        The historical period grid; gives each demand row its hour of week.
-    forecast_periods_df : pandas.DataFrame
-        The forecast period grid (:func:`get_forecast_periods_df`).
+    Raises ``ValueError`` when the demand names a period the grid does not
+    have — such a row would silently vanish otherwise.
 
     Returns
     -------
     pandas.DataFrame
-        ``period_id``, ``facility_id``, ``commodity_category``, ``quantity``
-        (fractional) — one row per forecast period and per
-        ``(facility, commodity)`` that ever departed at that hour of week.
+        ``start_timestamp``, ``facility_id``, ``commodity_category``,
+        ``quantity`` — one row per period × facility × commodity.
     """
-    period_hours = periods_df[["period_id"]].assign(
-        hour_of_week=hour_of_week(periods_df["start_timestamp"])
-    )
-    demand = demand_df.merge(period_hours, on="period_id", how="left")
-    if demand["hour_of_week"].isna().any():
-        missing = demand.loc[demand["hour_of_week"].isna(), "period_id"].unique()[:5].tolist()
+    known = demand_df["period_id"].isin(set(periods_df["period_id"]))
+    if not known.all():
+        missing = demand_df.loc[~known, "period_id"].unique()[:5].tolist()
         raise ValueError(f"demand has periods outside the period grid: {missing}")
-
-    occurrences = period_hours.groupby("hour_of_week").size()
-    mean = demand.groupby(["facility_id", "commodity_category", "hour_of_week"], as_index=False)[
-        "quantity"
-    ].sum()
-    mean["quantity"] = mean["quantity"] / mean["hour_of_week"].map(occurrences)
-
-    forecast_hours = forecast_periods_df[["period_id"]].assign(
-        hour_of_week=hour_of_week(forecast_periods_df["start_timestamp"])
-    )
-    out = mean.merge(forecast_hours, on="hour_of_week", how="inner")
-    return (
-        out[["period_id", "facility_id", "commodity_category", "quantity"]]
-        .sort_values(["period_id", "facility_id", "commodity_category"])
-        .reset_index(drop=True)
-    )
+    grid = pd.MultiIndex.from_product(
+        [
+            periods_df["period_id"],
+            sorted(demand_df["facility_id"].unique()),
+            sorted(demand_df["commodity_category"].unique()),
+        ],
+        names=["period_id", "facility_id", "commodity_category"],
+    ).to_frame(index=False)
+    out = grid.merge(demand_df, on=["period_id", "facility_id", "commodity_category"], how="left")
+    out["quantity"] = out["quantity"].fillna(0).astype("int64")
+    out = out.merge(periods_df[["period_id", "start_timestamp"]], on="period_id")
+    return out[["start_timestamp", "facility_id", "commodity_category", "quantity"]]
 
 
 def round_forecast_demand(demand_df: pd.DataFrame) -> pd.DataFrame:
@@ -313,10 +291,16 @@ def build_seasonal_naive_forecast(
 ) -> pathlib.Path:
     """Build a seasonal naive forecast for the periods right after history and save it.
 
-    The forecast horizon starts where the history ends (the last period's
+    The phase-1 builder: history is a demand marginal plus its period grid
+    (what one trip CSV gives), the model is the seasonal naive. The path is
+    the interface one — the demand becomes a zero-filled counts grid
+    (:func:`counts_from_demand`), the counts become a forecast input
+    (:func:`forecast_input`), and the model predicts from it, so the mean
+    reads the history window like every history feature. The forecast
+    horizon starts where the history ends (the last period's
     ``end_timestamp``) and runs for ``horizon_periods`` periods of the same
-    length, numbered from 0. The fractional seasonal naive values are rounded
-    to whole bikes with :func:`round_forecast_demand`.
+    length, numbered from 0. The fractional values are rounded to whole
+    bikes with :func:`round_forecast_demand`.
 
     Parameters
     ----------
@@ -341,11 +325,14 @@ def build_seasonal_naive_forecast(
     t0 = periods_df["end_timestamp"].iloc[-1]
     period_len = periods_df["end_timestamp"].iloc[0] - periods_df["start_timestamp"].iloc[0]
     forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, period_len)
-    fractional = seasonal_naive_demand(demand_df, periods_df, forecast_periods_df)
+    counts = counts_from_demand(demand_df, periods_df)
+    model = create_model("seasonal_naive")
+    model.fit(counts)
+    fractional = model.predict(forecast_input(counts, forecast_periods_df))
     forecast_demand_df = round_forecast_demand(fractional)
     meta = ForecastMeta(
         forecast_name=forecast_name,
-        model_name="seasonal_naive",
+        model_name=model.name,
         model_version="1",
         created_at=datetime.datetime.now().isoformat(timespec="seconds"),
         t0=pd.Timestamp(t0).isoformat(),
@@ -358,20 +345,134 @@ def build_seasonal_naive_forecast(
     return save_forecast(forecast_demand_df, meta, root)
 
 
-def main() -> None:
-    """Terminal entry point: build one seasonal naive forecast from a trip CSV."""
-    parser = argparse.ArgumentParser(
-        description="Build a seasonal naive forecast demand table and save it."
+def build_model_forecast(
+    model_name: str,
+    train_months: list[str],
+    *,
+    horizon_periods: int,
+    forecast_name: str,
+    root: pathlib.Path | None = None,
+    training_root: pathlib.Path | None = None,
+    raw: pathlib.Path | None = None,
+    weather_df: pd.DataFrame | None = None,
+    log: Callable[[str], None] = print,
+    **model_params: object,
+) -> pathlib.Path:
+    """Fit one model family on the training partitions and save its forecast.
+
+    The interface path: ``create_model`` builds the family by name, ``fit``
+    reads the stacked partitions of ``train_months``, and the horizon starts
+    right where the last training month ends. The weather for the horizon is
+    whatever NOAA has published for those dates; unpublished dates leave the
+    weather features NaN, and a fully unreachable weather file is skipped
+    with a note — the models accept missing values.
+
+    Parameters
+    ----------
+    model_name : str
+        A model family name (``MODEL_FAMILIES`` in ``gbp/ml/models``).
+    train_months : list of str
+        The months whose partitions the model trains on, as ``YYYYMM``.
+    horizon_periods : int
+        How many one-hour periods the forecast covers.
+    forecast_name : str
+        Folder name of the forecast artifact.
+    root, training_root, raw : pathlib.Path, optional
+        Folder overrides for the forecast artifacts, the training
+        partitions, and the raw files.
+    weather_df : pandas.DataFrame, optional
+        Daily weather for the horizon dates; without it the published
+        weather is loaded (and missing dates stay NaN).
+    log : callable, optional
+        Where progress notes go (default: ``print``).
+    **model_params
+        Extra settings for the family's constructor.
+
+    Returns
+    -------
+    pathlib.Path
+        The saved forecast artifact folder.
+    """
+    # Imported here, not at the top: gbp.ml.training is the partition
+    # builder, and only this builder needs it.
+    from gbp.ml.training import load_history_counts, load_training_table
+
+    months = sorted(normalize_month(m) for m in train_months)
+    log(f"Training {model_name} on {months[0]}..{months[-1]} ...")
+    train_table = load_training_table(months, training_root)
+    model = create_model(model_name, train_months=months, raw=raw, **model_params)
+    model.fit(train_table)
+
+    t0 = month_bounds(months[-1])[1]
+    forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, DEFAULT_PERIOD_LEN)
+    horizon_end = forecast_periods_df["end_timestamp"].iloc[-1]
+    if weather_df is None:
+        try:
+            weather_df = load_weather_daily(t0, horizon_end - pd.Timedelta(days=1), raw)
+        except OSError as error:
+            log(f"weather unavailable, features stay NaN: {error}")
+            weather_df = None
+    history = load_history_counts(t0.strftime("%Y%m"), training_root)
+    log(f"Predicting {horizon_periods} periods from {t0} ...")
+    fractional = model.predict(forecast_input(history, forecast_periods_df, weather_df))
+    forecast_demand_df = round_forecast_demand(fractional)
+    meta = ForecastMeta(
+        forecast_name=forecast_name,
+        model_name=model.name,
+        model_version="1",
+        created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+        t0=pd.Timestamp(t0).isoformat(),
+        horizon_periods=horizon_periods,
+        period_len_hours=DEFAULT_PERIOD_LEN / pd.Timedelta(hours=1),
+        history_start=pd.Timestamp(month_bounds(months[0])[0]).isoformat(),
+        history_end=pd.Timestamp(t0).isoformat(),
+        inputs=[f"{month}.parquet" for month in months],
     )
-    parser.add_argument("--trips-path", required=True, help="raw trip CSV path")
+    return save_forecast(forecast_demand_df, meta, root)
+
+
+def main() -> None:
+    """Terminal entry point: build one forecast artifact.
+
+    Two modes: ``--trips-path`` builds the phase-1 seasonal naive from one
+    raw trip CSV; ``--months`` (with ``--model``) trains any model family on
+    the training partitions.
+    """
+    parser = argparse.ArgumentParser(description="Build a forecast demand table and save it.")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--trips-path", help="raw trip CSV path (seasonal naive only)")
+    source.add_argument(
+        "--months", nargs="+", help="training months, as YYYYMM or YYYY-MM (any --model)"
+    )
+    parser.add_argument(
+        "--model", default="seasonal_naive", help="model family name (default: seasonal_naive)"
+    )
     parser.add_argument("--forecast-name", required=True, help="forecast folder name")
     parser.add_argument(
         "--horizon-periods", type=int, default=168, help="periods to forecast (default: one week)"
     )
     parser.add_argument(
-        "--period-len-hours", type=float, default=1.0, help="wall-clock length of one period"
+        "--period-len-hours",
+        type=float,
+        default=1.0,
+        help="wall-clock length of one period (--trips-path mode only)",
     )
     args = parser.parse_args()
+
+    if args.months:
+        folder = build_model_forecast(
+            args.model,
+            args.months,
+            horizon_periods=args.horizon_periods,
+            forecast_name=args.forecast_name,
+        )
+        _, meta = load_forecast(args.forecast_name)
+        print(f"Saved {folder}")
+        print(f"Horizon: {meta.horizon_periods} periods from {meta.t0}")
+        return
+
+    if args.model != "seasonal_naive":
+        raise SystemExit("--trips-path builds the seasonal naive only; use --months instead")
 
     # The heavy loader imports live here so `import gbp.ml.forecast` stays light.
     from gbp.loaders.dataloader_graph import get_historical_flows_df, get_periods_df

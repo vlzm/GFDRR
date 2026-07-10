@@ -1,0 +1,82 @@
+"""The one model interface every model family implements (plan, phase 4).
+
+A model family is one way to forecast demand (seasonal naive, SARIMAX,
+LightGBM, GraphSage) behind the same two calls:
+
+- ``fit(training_table)`` learns from the training table (Notations.md §17);
+- ``predict(feature_table)`` takes a forecast input and returns the
+  fractional demand: one row per ``(period_id, facility_id,
+  commodity_category)`` with a non-negative float ``quantity``.
+
+The forecast builder (``gbp/ml/forecast.py``) and the backtest
+(``gbp/ml/backtest.py``) see only this interface — model internals never
+leak past it.
+
+``predict`` returns fractional values on purpose. The forecast demand table
+the simulator reads holds whole bikes, and the rounding happens once, in the
+forecast builder (``round_forecast_demand``) — a model never rounds its own
+output. The backtest metrics also read the fractional values: rounding is a
+simulator constraint, not a model property.
+
+``save`` and ``load`` write and read a fitted model as files in a folder, so
+a backtest run can log the model file to MLflow and a later phase can load
+it back without refitting.
+"""
+
+from __future__ import annotations
+
+import abc
+import pathlib
+from typing import ClassVar, Self
+
+import numpy as np
+import pandas as pd
+
+#: The key columns of the fractional demand a model predicts.
+DEMAND_KEYS = ["period_id", "facility_id", "commodity_category"]
+
+
+class DemandModel(abc.ABC):
+    """One model family behind the ``fit`` / ``predict`` interface."""
+
+    #: The family name — the key in ``MODEL_FAMILIES`` and the
+    #: ``model_name`` a forecast artifact records.
+    name: ClassVar[str]
+
+    @abc.abstractmethod
+    def fit(self, training_table: pd.DataFrame) -> None:
+        """Learn from the training table (``TRAINING_TABLE_SCHEMA``)."""
+
+    @abc.abstractmethod
+    def predict(self, feature_table: pd.DataFrame) -> pd.DataFrame:
+        """Forecast the rows of a forecast input; return fractional demand."""
+
+    @abc.abstractmethod
+    def save(self, folder: pathlib.Path) -> None:
+        """Write the fitted model into ``folder`` (created if missing)."""
+
+    @classmethod
+    @abc.abstractmethod
+    def load(cls, folder: pathlib.Path) -> Self:
+        """Read a model saved by :meth:`save`."""
+
+    def params(self) -> dict[str, object]:
+        """Return the settings that define this model instance, for experiment logs."""
+        return {}
+
+
+def fractional_demand(
+    feature_table: pd.DataFrame, quantity: pd.Series | np.ndarray
+) -> pd.DataFrame:
+    """Wrap predicted quantities into the fractional demand shape.
+
+    Takes the key columns from ``feature_table`` (same row order as
+    ``quantity``), clips negatives to zero, and sorts by the keys — every
+    model returns exactly this shape from ``predict``.
+    """
+    out = feature_table[DEMAND_KEYS].copy()
+    for column in ["facility_id", "commodity_category"]:
+        if isinstance(out[column].dtype, pd.CategoricalDtype):
+            out[column] = out[column].astype(object)
+    out["quantity"] = np.clip(np.asarray(quantity, dtype="float64"), 0.0, None)
+    return out.sort_values(DEMAND_KEYS).reset_index(drop=True)

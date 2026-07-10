@@ -47,6 +47,10 @@ api = [
 ml = [
     "dvc>=3.30.0",
     "holidays>=0.60",
+    "lightgbm>=4.3.0",
+    "statsmodels>=0.14.0",
+    "mlflow>=2.15.0",
+    "torch>=2.3.0",
 ]
 db = [
     "sqlalchemy[asyncio]>=2.0.0",
@@ -99,6 +103,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "ortools.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["lightgbm.*", "statsmodels.*", "mlflow.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

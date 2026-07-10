@@ -117,6 +117,15 @@ def raw_dir() -> pathlib.Path:
     return pathlib.Path(os.environ.get("DATA_DIR", _DEFAULT_DATA_DIR)) / "raw"
 
 
+def ml_dir() -> pathlib.Path:
+    """Root of the forecasting data (Notations.md §15): ``<data dir>/ml``.
+
+    Honors the same ``DATA_DIR`` environment switch as ``app/artifacts.py``;
+    without it, this is ``data/ml`` at the repository root.
+    """
+    return pathlib.Path(os.environ.get("DATA_DIR", _DEFAULT_DATA_DIR)) / "ml"
+
+
 def normalize_month(month: str) -> str:
     """Turn a month given as ``YYYYMM`` or ``YYYY-MM`` into ``YYYYMM``.
 
