@@ -141,12 +141,39 @@ def to_period_id(ts: pd.Series, t0: pd.Timestamp, period_len: pd.Timedelta) -> p
     return ((ts - t0) // period_len).astype("int64")
 
 
+def hour_of_week(ts: pd.Series) -> pd.Series:
+    """Map timestamps to the hour of the week: ``weekday * 24 + hour``, 0..167.
+
+    0 is Monday 00:00. Two timestamps in different weeks share a value when
+    they fall on the same weekday and hour — the key the forecast path uses to
+    carry weekly patterns (demand averages, OD shares) onto future periods.
+    """
+    return (ts.dt.dayofweek * 24 + ts.dt.hour).astype("int64")
+
+
 def get_periods_df(
     trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta
 ) -> pd.DataFrame:
     """Build the period grid covering every trip, with start/end timestamps."""
     n_periods = int(to_period_id(trips_df["ended_at"], t0, period_len).max()) + 1
     periods_df = pd.DataFrame({"period_id": range(n_periods)})
+    periods_df["start_timestamp"] = t0 + periods_df["period_id"] * period_len
+    periods_df["end_timestamp"] = periods_df["start_timestamp"] + period_len
+    return periods_df
+
+
+def get_forecast_periods_df(
+    t0: pd.Timestamp, number_of_periods: int, period_len: pd.Timedelta
+) -> pd.DataFrame:
+    """Build the period grid of a forecast horizon: ``number_of_periods`` from ``t0``.
+
+    The same shape as :func:`get_periods_df`, but the length comes from the
+    forecast horizon instead of the last trip. Period ids restart at 0: a
+    forecast run is its own scenario with its own clock, and the run machinery
+    (the demand filter per period, the invariant checks, the panel) all count
+    periods from 0.
+    """
+    periods_df = pd.DataFrame({"period_id": range(number_of_periods)})
     periods_df["start_timestamp"] = t0 + periods_df["period_id"] * period_len
     periods_df["end_timestamp"] = periods_df["start_timestamp"] + period_len
     return periods_df
@@ -419,6 +446,165 @@ def apply_truck_fleet(
         get_trucks_capacities_df(truck_capacity_bikes, trucks_df)
     )
     out.resources_rates_df = get_resources_rates_df(get_trucks_rates_df(truck_rate, trucks_df))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Forecast path: run the scenario on a forecast demand table (Notations.md §17)
+# ---------------------------------------------------------------------------
+def map_od_matrix_by_hour_of_week(
+    od_matrix_df: pd.DataFrame,
+    periods_df: pd.DataFrame,
+    forecast_periods_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Carry the historical OD matrix onto forecast periods by hour of week.
+
+    Forecast periods have no history, so they have no OD matrix of their own.
+    This builds one from the historical matrix: pool the historical rows that
+    share an hour of week (Monday 08:00 across all weeks is one pool), then
+    give every forecast period the pool of its own hour of week.
+
+    Within one pool, per ``(source, target, commodity)``: ``count`` is the sum
+    of the historical counts, ``duration`` is the count-weighted mean of the
+    historical mean durations (rounded to whole periods), and ``probability``
+    is recomputed as the pair's share of the pool's total per
+    ``(source, commodity)`` — so the shares sum to 1 again.
+
+    Parameters
+    ----------
+    od_matrix_df : pandas.DataFrame
+        The historical OD matrix (``HISTORICAL_OD_MATRIX_SCHEMA``).
+    periods_df : pandas.DataFrame
+        The historical period grid; gives each OD row its hour of week.
+    forecast_periods_df : pandas.DataFrame
+        The forecast period grid (:func:`get_forecast_periods_df`).
+
+    Returns
+    -------
+    pandas.DataFrame
+        An OD matrix in the same schema whose ``period_id`` values are the
+        forecast periods.
+    """
+    period_hours = periods_df[["period_id"]].assign(
+        hour_of_week=hour_of_week(periods_df["start_timestamp"])
+    )
+    od = od_matrix_df.merge(period_hours, on="period_id", how="left")
+    if od["hour_of_week"].isna().any():
+        missing = od.loc[od["hour_of_week"].isna(), "period_id"].unique()[:5].tolist()
+        raise ValueError(f"OD matrix has periods outside the period grid: {missing}")
+
+    od["duration_x_count"] = od["duration"] * od["count"]
+    pooled = od.groupby(
+        ["source_id", "planned_target_id", "hour_of_week", "commodity_category"], as_index=False
+    ).agg(count=("count", "sum"), duration_x_count=("duration_x_count", "sum"))
+    pooled["duration"] = (pooled["duration_x_count"] / pooled["count"]).round().astype("Int64")
+    totals = pooled.groupby(["source_id", "hour_of_week", "commodity_category"])["count"].transform(
+        "sum"
+    )
+    pooled["probability"] = pooled["count"] / totals
+
+    forecast_hours = forecast_periods_df[["period_id"]].assign(
+        hour_of_week=hour_of_week(forecast_periods_df["start_timestamp"])
+    )
+    out = pooled.merge(forecast_hours, on="hour_of_week", how="inner")
+    return out[
+        [
+            "source_id",
+            "planned_target_id",
+            "period_id",
+            "commodity_category",
+            "count",
+            "duration",
+            "probability",
+        ]
+    ].reset_index(drop=True)
+
+
+def apply_forecast_demand(
+    resolved: "ResolvedModelData",
+    forecast_demand_df: pd.DataFrame,
+    forecast_periods_df: pd.DataFrame,
+) -> "ResolvedModelData":
+    """Return a shallow copy of ``resolved`` that runs on a forecast demand table.
+
+    The copy carries the forecast period grid, the forecast demand table, and
+    a historical OD matrix mapped onto the forecast periods by hour of week
+    (:func:`map_od_matrix_by_hour_of_week`). Everything else — facilities,
+    capacities, routes, the historical observations — is shared as-is. The
+    forecast table sits in the ``historical_demand_df`` slot because that is
+    the one demand slot the engine reads; the run's ``meta.json`` records that
+    the demand came from a forecast (``demand_source``, ``forecast_name``).
+
+    Like the loader itself, this is a load boundary: the three replaced tables
+    are schema-checked here, plus two cross-table checks a schema cannot
+    express — every demand facility must exist in the facility table, and
+    every demanded ``(facility, commodity, period)`` must have OD rows, or the
+    engine would silently drop those departures and break the demand-split
+    invariant (I1).
+
+    Parameters
+    ----------
+    resolved : ResolvedModelData
+        The resolved scenario data. Not modified.
+    forecast_demand_df : pandas.DataFrame
+        A forecast demand table (Notations.md §17): whole-bike quantities in
+        ``HISTORICAL_DEMAND_SCHEMA`` shape, on the forecast period grid.
+    forecast_periods_df : pandas.DataFrame
+        The forecast period grid (:func:`get_forecast_periods_df`). Its period
+        length must equal the grid of ``resolved`` — OD durations are counted
+        in periods, so a different length would re-time every trip.
+
+    Returns
+    -------
+    ResolvedModelData
+        A shallow copy carrying the forecast demand, grid, and OD matrix.
+    """
+    violations = [
+        *schema_violations(PERIODS_SCHEMA, forecast_periods_df),
+        *schema_violations(HISTORICAL_DEMAND_SCHEMA, forecast_demand_df),
+    ]
+    if violations:
+        raise ValueError("forecast tables break their schemas:\n" + "\n".join(violations))
+
+    period_len = (
+        forecast_periods_df["end_timestamp"].iloc[0]
+        - (forecast_periods_df["start_timestamp"].iloc[0])
+    )
+    if period_len != resolved.period_len:
+        raise ValueError(
+            f"forecast period length {period_len} != scenario period length {resolved.period_len}"
+        )
+
+    known = set(resolved.facilities_df["facility_id"])
+    unknown = sorted(set(forecast_demand_df["facility_id"]) - known)
+    if unknown:
+        raise ValueError(f"forecast demand names unknown facilities: {unknown[:5]}")
+
+    od_matrix_df = map_od_matrix_by_hour_of_week(
+        resolved.historical_od_matrix_df, resolved.periods_df, forecast_periods_df
+    )
+
+    demanded = forecast_demand_df[forecast_demand_df["quantity"] > 0]
+    covered = od_matrix_df[["source_id", "period_id", "commodity_category"]].drop_duplicates()
+    coverage = demanded.merge(
+        covered.rename(columns={"source_id": "facility_id"}),
+        on=["facility_id", "period_id", "commodity_category"],
+        how="left",
+        indicator=True,
+    )
+    uncovered = coverage[coverage["_merge"] == "left_only"]
+    if not uncovered.empty:
+        sample = uncovered[["period_id", "facility_id", "commodity_category"]].head(5)
+        raise ValueError(
+            f"{len(uncovered)} forecast demand rows have no OD rows for their "
+            f"(facility, commodity, period); first rows:\n{sample.to_string(index=False)}"
+        )
+
+    out = copy.copy(resolved)
+    out.periods_df = forecast_periods_df
+    out.t0 = forecast_periods_df["start_timestamp"].iloc[0]
+    out.historical_demand_df = forecast_demand_df
+    out.historical_od_matrix_df = od_matrix_df
     return out
 
 

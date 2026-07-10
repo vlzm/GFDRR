@@ -46,6 +46,10 @@ class RunRequest(pydantic.BaseModel):
     demand_scale_factor: float
     sizing_scale_factor: float = 1.0
     number_of_periods: int = runner.DEFAULT_NUMBER_OF_PERIODS
+    demand_source: Literal["history", "forecast"] = "history"
+    #: A saved forecast on the server's disk (``data/ml/forecasts/``);
+    #: required when ``demand_source="forecast"``.
+    forecast_name: str | None = None
     rebalancing: bool = False
     truck_homes: list[str] | None = None
     truck_capacity_bikes: int = runner.DEFAULT_TRUCK_CAPACITY_BIKES
@@ -112,6 +116,8 @@ def _worker_loop() -> None:
                 demand_scale_factor=request.demand_scale_factor,
                 sizing_scale_factor=request.sizing_scale_factor,
                 number_of_periods=request.number_of_periods,
+                demand_source=request.demand_source,
+                forecast_name=request.forecast_name,
                 rebalancing=request.rebalancing,
                 truck_homes=request.truck_homes,
                 truck_capacity_bikes=request.truck_capacity_bikes,

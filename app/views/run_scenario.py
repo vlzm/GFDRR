@@ -16,9 +16,12 @@ import runner
 import streamlit as st
 import ui_shared
 
+from gbp.ml import forecast
+
 st.title("Run scenario")
 st.caption(
-    "A run replays the historical trips scaled by two multipliers. The first sets "
+    "A run replays the historical trips — or a saved forecast — scaled by two multipliers. "
+    "The first sets "
     "how much demand shows up; the second sets how much demand the starting bikes "
     "and dock capacities are prepared for. Equal values give a clean run with no "
     "losses; demand above the second value makes stations run out of bikes "
@@ -38,9 +41,12 @@ def _name_from_parameters(
     periods: int,
     rebalancing: bool,
     n_trucks: int,
+    forecast_name: str | None,
 ) -> str:
     """Default run name, built from the parameters: ``demand_x2_sizing_x1_50p``."""
     base = f"demand_x{demand_scale:g}_sizing_x{sizing_scale:g}_{periods}p"
+    if forecast_name:
+        base = f"forecast_{forecast_name}_{base}"
     if rebalancing:
         base += f"_{n_trucks}trucks"
     return base
@@ -74,6 +80,35 @@ def _run_on_server(request: dict) -> str:
 
 
 api_url = api_client.api_url()
+
+demand_source = st.radio(
+    "Demand source",
+    options=list(runner.DEMAND_SOURCES),
+    horizontal=True,
+    help=(
+        "history replays the historical trips; forecast runs on a saved forecast "
+        "demand table from data/ml/forecasts/ (see Notations.md §17). The demand "
+        "multiplier below applies to either source."
+    ),
+)
+forecast_name: str | None = None
+if demand_source == "forecast":
+    if api_url is None:
+        saved = forecast.list_forecasts()
+        if not saved:
+            st.error(
+                "No saved forecasts. Build one first: python -m gbp.ml.forecast "
+                "--trips-path <csv> --forecast-name <name>"
+            )
+            st.stop()
+        forecast_name = st.selectbox("Forecast", options=saved)
+    else:
+        # The forecasts live on the server's disk, so the page cannot list
+        # them; the server rejects an unknown name when the run starts.
+        forecast_name = st.text_input("Forecast name (on the server)", value="")
+        if not forecast_name:
+            st.info("Enter the name of a forecast saved on the server.")
+            st.stop()
 
 left, middle, right = st.columns(3)
 demand_scale = left.number_input(
@@ -142,7 +177,12 @@ if api_url is None:
         trips_path = st.text_input("Trips CSV", value=runner.DEFAULT_TRIPS_PATH)
 
 suggested = _name_from_parameters(
-    float(demand_scale), float(sizing_scale), int(periods), rebalancing, len(truck_homes)
+    float(demand_scale),
+    float(sizing_scale),
+    int(periods),
+    rebalancing,
+    len(truck_homes),
+    forecast_name,
 )
 custom_name = st.text_input("Run name (leave blank to name the run from the parameters)", value="")
 requested_name = custom_name.strip() or suggested
@@ -173,6 +213,8 @@ if st.button("Run", type="primary"):
                 demand_scale_factor=float(demand_scale),
                 sizing_scale_factor=float(sizing_scale),
                 number_of_periods=int(periods),
+                demand_source=demand_source,
+                forecast_name=forecast_name,
                 rebalancing=bool(rebalancing),
                 truck_homes=truck_homes,
                 truck_capacity_bikes=int(truck_capacity),
@@ -186,6 +228,8 @@ if st.button("Run", type="primary"):
                 "demand_scale_factor": float(demand_scale),
                 "sizing_scale_factor": float(sizing_scale),
                 "number_of_periods": int(periods),
+                "demand_source": demand_source,
+                "forecast_name": forecast_name,
                 "rebalancing": bool(rebalancing),
                 "truck_homes": truck_homes or None,
                 "truck_capacity_bikes": int(truck_capacity),

@@ -533,6 +533,12 @@ class RunMeta(pydantic.BaseModel):
     routing_mode: str
     t0: str
     created_at: str
+    #: Where the run's demand table came from: ``"history"`` (the replay) or
+    #: ``"forecast"`` (a forecast run, Notations.md §11). Defaults keep runs
+    #: saved before the forecast phase loadable.
+    demand_source: str = "history"
+    #: Name of the forecast artifact a forecast run used; None on history runs.
+    forecast_name: str | None = None
     #: File names of the raw source files the run was built from (for the
     #: canonical pipeline: the trip CSV). Empty for runs built from a
     #: synthetic journal, like the test fixtures.
@@ -588,6 +594,8 @@ def build_meta(
     inputs: list[str],
     violations: list[str],
     rebalancing: dict[str, Any] | None = None,
+    demand_source: str = "history",
+    forecast_name: str | None = None,
 ) -> RunMeta:
     """Build the ``meta.json`` model for one run: parameters, violations, totals.
 
@@ -624,6 +632,12 @@ def build_meta(
         The run's rebalancing settings: ``enabled`` (bool) and, when on,
         ``truck_homes`` (home depot per truck) and ``truck_capacity_bikes``.
         Defaults to ``{"enabled": False}``.
+    demand_source : str, optional
+        Where the demand table came from: ``"history"`` (default) or
+        ``"forecast"``.
+    forecast_name : str, optional
+        The forecast artifact a forecast run used; pass it whenever
+        ``demand_source="forecast"``, so the run names its forecast.
 
     Returns
     -------
@@ -640,6 +654,8 @@ def build_meta(
         routing_mode=routing_mode,
         t0=pd.Timestamp(t0).isoformat(),
         created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+        demand_source=demand_source,
+        forecast_name=forecast_name,
         inputs=list(inputs),
         code_version=code_version(),
         violations=violations,

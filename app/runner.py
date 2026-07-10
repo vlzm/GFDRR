@@ -10,6 +10,8 @@ Terminal use::
     python app/runner.py --run-name demand_x2 --demand-scale 2.0 --periods 50
     python app/runner.py --run-name with_trucks --rebalancing \
         --truck-homes depot_1,depot_1,depot_3
+    python app/runner.py --run-name forecast_demo --demand-source forecast \
+        --forecast-name seasonal_naive_w1
 """
 
 from __future__ import annotations
@@ -27,12 +29,20 @@ from gbp.consumers.simulator import (
     rebalancing_phases,
     run_sized_scenario,
 )
-from gbp.loaders.dataloader_graph import ResolvedModelData, apply_truck_fleet
+from gbp.loaders.dataloader_graph import (
+    ResolvedModelData,
+    apply_forecast_demand,
+    apply_truck_fleet,
+)
 from gbp.loaders.dataloader_raw import RawModelData
+from gbp.ml import forecast
 from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
 
 DEFAULT_TRIPS_PATH = str(artifacts.data_dir() / "raw" / "202601-citibike-tripdata_1.csv")
 DEFAULT_NUMBER_OF_PERIODS = 50
+
+#: Where a run's demand table can come from (Notations.md §11).
+DEMAND_SOURCES = ("history", "forecast")
 
 # The synthetic depot and truck fleet (see gbp/loaders/dataloader_raw.py).
 DEFAULT_N_DEPOTS = 10
@@ -93,6 +103,8 @@ def run_scenario(
     demand_scale_factor: float,
     sizing_scale_factor: float = 1.0,
     number_of_periods: int = DEFAULT_NUMBER_OF_PERIODS,
+    demand_source: str = "history",
+    forecast_name: str | None = None,
     rebalancing: bool = False,
     truck_homes: list[str] | None = None,
     truck_capacity_bikes: int = DEFAULT_TRUCK_CAPACITY_BIKES,
@@ -105,6 +117,13 @@ def run_scenario(
     ``sizing_scale_factor``; the run itself faces ``demand_scale_factor``.
     Equal values give a clean, no-loss run; a larger run scale makes the
     limits take effect (stockout and dock-full events appear).
+
+    With ``demand_source="forecast"`` the run is a forecast run
+    (Notations.md §11): the named forecast is loaded from
+    ``data/ml/forecasts/`` and put in place of the historical demand with
+    :func:`apply_forecast_demand` — the period grid becomes the forecast
+    horizon and the OD matrix is mapped onto it by hour of week. Everything
+    after that is the same sized-run path.
 
     Parameters
     ----------
@@ -121,6 +140,11 @@ def run_scenario(
         Demand multiplier the state is sized to survive with no loss.
     number_of_periods : int, optional
         How many periods to step.
+    demand_source : {"history", "forecast"}, optional
+        Where the demand table comes from. Default ``"history"``.
+    forecast_name : str, optional
+        Name of the saved forecast to run on. Required when
+        ``demand_source="forecast"``.
     rebalancing : bool, optional
         When True, run with the two overnight-rebalancing phases
         (Notations.md §14) and the truck fleet below. Default False: the
@@ -146,9 +170,21 @@ def run_scenario(
         if on_progress is not None:
             on_progress(message)
 
+    if demand_source not in DEMAND_SOURCES:
+        raise ValueError(f"demand_source must be one of {DEMAND_SOURCES}, got {demand_source!r}")
+    if demand_source == "forecast" and not forecast_name:
+        raise ValueError("demand_source='forecast' needs a forecast_name")
+
     homes = list(truck_homes) if truck_homes is not None else list(DEFAULT_TRUCK_HOMES)
     data = graph_data
     phases = None
+    if demand_source == "forecast":
+        assert forecast_name is not None
+        progress(f"Loading forecast {forecast_name} and mapping the OD matrix onto its horizon")
+        forecast_demand_df, forecast_meta = forecast.load_forecast(forecast_name)
+        data = apply_forecast_demand(
+            data, forecast_demand_df, forecast.forecast_periods_from_meta(forecast_meta)
+        )
     if rebalancing:
         progress(f"Applying the truck fleet: {len(homes)} trucks")
         data = apply_truck_fleet(graph_data, homes, truck_capacity_bikes, DEFAULT_TRUCK_RATE)
@@ -188,12 +224,16 @@ def run_scenario(
         demand_scale_factor=demand_scale_factor,
         sizing_scale_factor=sizing_scale_factor,
         number_of_periods=number_of_periods,
-        period_len_hours=graph_data.period_len / pd.Timedelta(hours=1),
-        routing_mode=graph_data.routing_mode,
-        t0=graph_data.t0,
-        inputs=[pathlib.Path(graph_data.trips_path).name],
+        # A forecast run's grid and t0 are the forecast horizon's, so read
+        # them off `data` (the copy the run actually used), not `graph_data`.
+        period_len_hours=data.period_len / pd.Timedelta(hours=1),
+        routing_mode=data.routing_mode,
+        t0=data.t0,
+        inputs=[pathlib.Path(data.trips_path).name],
         violations=result.violations,
         rebalancing=rebalancing_meta,
+        demand_source=demand_source,
+        forecast_name=forecast_name,
     )
     return artifacts.save_run(run_name, tables, meta, root)
 
@@ -210,6 +250,18 @@ def main() -> None:
         "--periods", type=int, default=DEFAULT_NUMBER_OF_PERIODS, help="periods to step"
     )
     parser.add_argument("--trips-path", default=DEFAULT_TRIPS_PATH, help="raw trip CSV path")
+    parser.add_argument(
+        "--demand-source",
+        choices=DEMAND_SOURCES,
+        default="history",
+        help="where the demand table comes from: the historical replay or a saved forecast",
+    )
+    parser.add_argument(
+        "--forecast-name",
+        default=None,
+        help="saved forecast to run on (a folder under data/ml/forecasts/); "
+        "required with --demand-source forecast",
+    )
     parser.add_argument(
         "--rebalancing",
         action="store_true",
@@ -253,6 +305,8 @@ def main() -> None:
         demand_scale_factor=args.demand_scale,
         sizing_scale_factor=args.sizing_scale,
         number_of_periods=args.periods,
+        demand_source=args.demand_source,
+        forecast_name=args.forecast_name,
         rebalancing=args.rebalancing,
         truck_homes=truck_homes,
         truck_capacity_bikes=args.truck_capacity,
