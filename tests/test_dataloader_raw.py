@@ -76,9 +76,38 @@ def test_csv_newer_than_the_copy_forces_a_rebuild(tmp_path):
     assert list(pd.read_parquet(processed)["ride_id"]) == ["r1"]
 
 
+def test_out_of_area_rows_are_dropped_not_fatal(tmp_path):
+    # Most published months carry a few rows at test docks or with plainly
+    # wrong coordinates; cleaning drops them like rows with missing fields.
+    csv = _write_csv(
+        tmp_path,
+        [_trip_row("r1"), _trip_row("bad_dock", start_lat=34.02), _trip_row("r2")],
+    )
+    trips = load_trips_raw_df(csv)
+    assert list(trips["ride_id"]) == ["r1", "r2"]
+
+
+def test_reversed_trip_times_are_dropped_not_fatal(tmp_path):
+    # On the fall-back night of daylight saving time the wall-clock
+    # timestamps repeat one hour, so a trip riding across the change looks
+    # like it ends before it starts. Cleaning drops such rows.
+    reversed_row = (
+        "dst,classic_bike,2025-11-02 01:36:08,2025-11-02 01:03:36,"
+        "A,st_a,B,st_b,40.7,-74.0,40.72,-74.01,member"
+    )
+    csv = _write_csv(tmp_path, [_trip_row("r1"), reversed_row])
+    trips = load_trips_raw_df(csv)
+    assert list(trips["ride_id"]) == ["r1"]
+
+
 def test_bad_csv_fails_and_is_not_cached(tmp_path):
-    # start_lat far outside the service area breaks TRIPS_SCHEMA.
-    csv = _write_csv(tmp_path, [_trip_row("r1", start_lat=10.0)])
+    # A file without a required column breaks TRIPS_SCHEMA.
+    header = CSV_HEADER.replace("rideable_type,", "")
+    row = _trip_row("r1").replace("classic_bike,", "")
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    csv = raw_dir / "trips.csv"
+    csv.write_text("\n".join([header, row]) + "\n")
     with pytest.raises(ValueError, match="breaks the trips schema"):
-        load_trips_raw_df(csv)
-    assert not processed_trips_path(csv).exists()
+        load_trips_raw_df(str(csv))
+    assert not processed_trips_path(str(csv)).exists()

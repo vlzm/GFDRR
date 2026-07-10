@@ -90,8 +90,15 @@ dmypy.json
 # uv (uv.lock is committed: it pins exact versions for reproducible builds)
 .uv/
 
-# Local data
-data/
+# Local data. data/raw and data/ml/training are DVC-tracked: their .dvc
+# files (small text files with the folder checksums) are committed, and DVC
+# writes its own ignore entries for the folders themselves (data/.gitignore,
+# data/ml/.gitignore). The untracked data folders are ignored here.
+data/processed/
+data/runs/
+data/ml/forecasts/
+data/ml/monitoring/
+data/ml/mlflow/
 *.parquet
 *.csv
 !tests/fixtures/*.csv

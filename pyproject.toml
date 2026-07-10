@@ -44,6 +44,9 @@ api = [
     "fastapi>=0.110.0",
     "uvicorn>=0.30.0",
 ]
+ml = [
+    "dvc>=3.30.0",
+]
 db = [
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.28.0",

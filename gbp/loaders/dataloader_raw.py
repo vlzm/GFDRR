@@ -31,9 +31,61 @@ SERVICE_AREA_LAT = (40.4, 41.1)
 SERVICE_AREA_LNG = (-74.5, -73.4)
 
 
+def in_service_area(trips_df: pd.DataFrame) -> pd.Series:
+    """Mark the rows whose both endpoints lie inside the service-area box.
+
+    Most published months carry a handful of rows at test docks or with
+    plainly wrong coordinates (zeros, another city). Those rows are data
+    errors; the loaders drop them the same way they drop rows with missing
+    key fields.
+    """
+    lat_lo, lat_hi = SERVICE_AREA_LAT
+    lng_lo, lng_hi = SERVICE_AREA_LNG
+    inside = pd.Series(True, index=trips_df.index)
+    for column in ("start_lat", "end_lat"):
+        inside &= trips_df[column].between(lat_lo, lat_hi)
+    for column in ("start_lng", "end_lng"):
+        inside &= trips_df[column].between(lng_lo, lng_hi)
+    return inside
+
+
 def _trip_time_ordered(trips: pd.DataFrame) -> pd.Series:
     """Each trip ends at or after its start: ``started_at <= ended_at``."""
     return trips["started_at"] <= trips["ended_at"]
+
+
+#: The key fields a trip row must have; rows missing any of them are dropped.
+KEY_FIELDS = [
+    "started_at",
+    "ended_at",
+    "start_station_id",
+    "end_station_id",
+    "start_lat",
+    "start_lng",
+    "end_lat",
+    "end_lng",
+]
+
+
+def clean_trips(trips_df: pd.DataFrame) -> pd.DataFrame:
+    """Drop the rows no consumer of the trips table can use.
+
+    Three groups go, each a data error in the published file, not a broken
+    file: rows with a missing key field (:data:`KEY_FIELDS`); rows with an
+    endpoint outside the service area (:func:`in_service_area`); and trips
+    that end before they start. The last group appears once a year: on the
+    fall-back night of daylight saving time the published wall-clock
+    timestamps repeat one hour, so a trip riding across the clock change
+    looks reversed. The timestamps carry no timezone marker, so the true
+    order cannot be recovered.
+
+    Every loader that parses a trip CSV calls this one function — old and new
+    schema alike — so the cleaning rules cannot drift apart.
+    """
+    trips_df = trips_df.dropna(subset=KEY_FIELDS)
+    trips_df = trips_df[in_service_area(trips_df)]
+    trips_df = trips_df[_trip_time_ordered(trips_df)]
+    return trips_df.reset_index(drop=True)
 
 
 #: Schema of the loaded trips table: the columns the pipeline reads, their
@@ -81,7 +133,8 @@ def processed_trips_path(trips_path: str) -> pathlib.Path:
 def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
     """Load one raw trip CSV, using its processed parquet copy when it is fresh.
 
-    The first load parses the CSV, drops rows with missing key fields, and
+    The first load parses the CSV, drops the unusable rows
+    (:func:`clean_trips`), and
     writes the cleaned table to ``data/processed/<csv name>.parquet``
     (see :func:`processed_trips_path`). Later loads read that parquet copy
     instead, which is much faster than parsing the CSV. The copy counts as
@@ -117,19 +170,7 @@ def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
             dtype=trips_dtypes,
             parse_dates=["started_at", "ended_at"],
         )
-        trips_df = trips_df.dropna(
-            subset=[
-                "started_at",
-                "ended_at",
-                "start_station_id",
-                "end_station_id",
-                "start_lat",
-                "start_lng",
-                "end_lat",
-                "end_lng",
-            ]
-        )
-        trips_df = trips_df.reset_index(drop=True)
+        trips_df = clean_trips(trips_df)
     violations = schema_violations(TRIPS_SCHEMA, trips_df)
     if violations:
         read_from = processed if processed_is_fresh else csv

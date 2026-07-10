@@ -1,0 +1,4 @@
+[core]
+    remote = local
+['remote "local"']
+    url = /Users/vladislav/dvc-store/gfdrr-citibike
