@@ -319,6 +319,22 @@ Goal: the system notices when the model gets worse, and shows it.
 Done when: the monitoring page shows the metric history, and a month with a
 degraded metric is visibly marked.
 
+Done on 2026-07-11: `python -m gbp.ml.monitoring --month <YYYYMM>` scores
+every saved forecast whose horizon touches the month against the month's
+training partition and appends one row per forecast to
+`data/ml/monitoring/metrics.parquet` (MAE, Poisson deviance, bias, and the
+month's seasonal naive MAE next to them); rescoring replaces rows, so the
+step is idempotent. The same command builds the drift report with Evidently:
+`drift_<month>.html` plus a JSON summary. The "Model monitoring" page shows
+the metric history per model version with the baseline line, marks degraded
+months (rolling MAE over the last 3 scored months worse than the naive
+baseline) with red markers and row highlights, and lists the drift reports.
+Verified on real data: 202601 scored five forecasts (the seasonal naive
+artifact landed exactly on the baseline, 0.5858 — the two are built by the
+same path), 202602 scored `lightgbm_202602` (MAE 0.3560 vs naive 0.4216, not
+degraded), and both drift reports flag the expected winter shift
+(temperatures, history features) against the year-long training reference.
+
 ## Phase 8 — tests and CI
 
 Goal: the checks that already exist locally run on every push.

@@ -46,6 +46,7 @@ api = [
 ]
 ml = [
     "dvc>=3.30.0",
+    "evidently>=0.7.0",
     "holidays>=0.60",
     "lightgbm>=4.3.0",
     "statsmodels>=0.14.0",
@@ -106,7 +107,7 @@ module = "ortools.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["lightgbm.*", "statsmodels.*", "mlflow.*"]
+module = ["lightgbm.*", "statsmodels.*", "mlflow.*", "evidently.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

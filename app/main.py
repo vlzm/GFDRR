@@ -25,6 +25,7 @@ pages = [
     st.Page("views/costs.py", title="Costs", icon="💰"),
     st.Page("views/distance_duration.py", title="Distance & duration", icon="📏"),
     st.Page("views/facility_detail.py", title="Single facility", icon="🔍"),
+    st.Page("views/model_monitoring.py", title="Model monitoring", icon="📈"),
     st.Page("views/downloads.py", title="Download data", icon="⬇️"),
 ]
 st.navigation(pages).run()

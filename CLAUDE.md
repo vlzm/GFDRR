@@ -19,6 +19,7 @@ python -m gbp.ml.backtest         # rolling-origin backtest of the model familie
 python -m gbp.ml.pipeline         # retraining pipeline: download → build-table → train → backtest → promote
 python -m gbp.ml.forecast --champion --forecast-name <name>  # forecast with the registry champion
 python app/evaluate.py --month 202601  # two-level evaluation: run the simulator on actual vs forecast demand
+python -m gbp.ml.monitoring --month 202602  # score saved forecasts against the month's actuals, build the drift report
 mlflow ui --backend-store-uri sqlite:///data/ml/mlflow/mlflow.db  # browse the experiments and the model registry
 dvc status                        # data/raw and data/ml/training vs their .dvc files
 ```
