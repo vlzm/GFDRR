@@ -1,0 +1,48 @@
+# CI (plan, phase 8): the checks that exist locally, run on every push.
+#
+# The four commands are the same ones CLAUDE.md lists for local use:
+# ruff check, ruff format --check, mypy gbp/, pytest. The test suite is
+# self-contained — every test builds its own fixture and stubs the network,
+# so the job needs no data/ folder and no secrets.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    # Pushes already cover branches of this repository; the pull_request
+    # event only has to cover pull requests opened from a fork. This guard
+    # keeps one run per commit instead of two.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install the package with its dev, ui, api and ml extras
+        # The CPU torch build: the default PyPI wheel drags in the CUDA
+        # stack, which the runner has no use for.
+        run: uv pip install --system --torch-backend=cpu -e ".[dev,ui,api,ml]"
+
+      - name: Lint
+        run: ruff check gbp/ tests/ app/
+
+      - name: Format check
+        run: ruff format --check gbp/ tests/ app/
+
+      - name: Typecheck
+        run: mypy gbp/
+
+      - name: Tests
+        run: pytest

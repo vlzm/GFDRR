@@ -349,6 +349,21 @@ Goal: the checks that already exist locally run on every push.
 Done when: the workflow is green on a pull request and fails when a schema
 or a feature test breaks.
 
+Done on 2026-07-11: `.github/workflows/ci.yml` runs the four local checks
+(`ruff check`, `ruff format --check`, `mypy gbp/`, `pytest`) on every push;
+the pull_request event is kept only for pull requests from forks, so each
+commit gets one run. The smoke tests live in `tests/test_ml_smoke.py`. The
+training test fits the seasonal naive and the LightGBM families on the tiny
+two-station fixture, builds a forecast artifact for each, and checks the
+saved table against `HISTORICAL_DEMAND_SCHEMA` (whole bikes, positive rows
+only). The pipeline test runs all five phase-6 steps end to end on fixture
+CSVs — the bucket lookup is stubbed and the weather comes from a pre-written
+year file, so nothing touches the network — and reruns them to prove every
+step is idempotent. The whole suite (340 tests) is self-contained: it needs
+no `data/` folder and passes in about two minutes. The deprecated top-level
+ruff keys in `pyproject.toml` moved to `[tool.ruff.lint]`, so the lint step
+runs without warnings.
+
 ## Deliberately not built
 
 - Traffic features: no reliable public history of New York traffic; calendar
