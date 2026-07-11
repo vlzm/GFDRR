@@ -23,7 +23,6 @@ import dataclasses
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import (
-    ResolvedModelData,
     get_replay_capacities_df,
     get_replay_initial_inventory_df,
     get_saturated_inventory_df,
@@ -31,6 +30,7 @@ from gbp.loaders.dataloader_graph import (
 
 from .config import EnvironmentConfig
 from .engine import Environment
+from .inputs import ScenarioInputs
 
 #: Per-station inventory and per-facility capacity used in the sizing run.
 #: Far above any period's demand, so no limit ever takes effect.
@@ -38,7 +38,7 @@ SATURATION_QUANTITY = 1_000_000
 
 
 def size_state_for_demand(
-    resolved: ResolvedModelData,
+    resolved: ScenarioInputs,
     config: EnvironmentConfig,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Smallest initial inventory and capacities for this config's demand.
@@ -55,7 +55,7 @@ def size_state_for_demand(
 
     Parameters
     ----------
-    resolved : ResolvedModelData
+    resolved : ScenarioInputs
         The scenario data to size. Only ``initial_inventory_df`` and
         ``facilities_capacities_df`` are replaced for the sizing run; every
         other table is shared as-is.

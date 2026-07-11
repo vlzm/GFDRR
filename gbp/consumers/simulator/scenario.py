@@ -22,12 +22,12 @@ import pandas as pd
 from gbp.loaders.dataloader_graph import (
     FACILITIES_CAPACITIES_SCHEMA,
     INITIAL_INVENTORY_SCHEMA,
-    ResolvedModelData,
 )
 from gbp.model.journal_schema import schema_violations
 
 from .config import EnvironmentConfig
 from .engine import Environment
+from .inputs import ScenarioInputs
 from .phases import DockArrivals, FormDeparturesPhase, Phase
 from .sizing import size_state_for_demand
 from .state import SimulationState
@@ -55,7 +55,7 @@ class ScenarioRun:
 
 
 def run_sized_scenario(
-    resolved: ResolvedModelData,
+    resolved: ScenarioInputs,
     *,
     scenario_id: str,
     demand_scale_factor: float = 1.0,
@@ -63,7 +63,7 @@ def run_sized_scenario(
     number_of_periods: int,
     validate: bool = True,
     phases: list[Phase] | None = None,
-    sizing_data: ResolvedModelData | None = None,
+    sizing_data: ScenarioInputs | None = None,
 ) -> ScenarioRun:
     """Size the state, run the scenario against it, check the run invariants.
 
@@ -74,9 +74,9 @@ def run_sized_scenario(
 
     Parameters
     ----------
-    resolved : ResolvedModelData
-        The resolved scenario data. Not modified: the run works on a shallow
-        copy that carries the sized tables.
+    resolved : ScenarioInputs
+        The scenario inputs. Not modified: the run works on a shallow copy
+        that carries the sized tables.
     scenario_id : str
         Scenario id stamped on the sizing and run configs.
     demand_scale_factor : float, optional
@@ -96,7 +96,7 @@ def run_sized_scenario(
         the canonical three phases -- the state is sized for the demand alone,
         so the rebalancer's effect shows up against it instead of being sized
         away.
-    sizing_data : ResolvedModelData, optional
+    sizing_data : ScenarioInputs, optional
         The scenario data the sizing run measures. Default: ``resolved``
         itself, which gives a clean run. Passing different data sizes the
         state on one demand table while the run faces another; the gap

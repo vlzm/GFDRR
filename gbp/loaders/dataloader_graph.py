@@ -4,13 +4,14 @@ The period grid, the historical flow log, the graph entities/attributes, and
 the replay demand the engine consumes.
 
 ``ResolvedModelData`` is built once per scenario from a :class:`RawModelData`
-and exposes the graph tables. The :class:`~engine.Environment` and its phases
-read a narrow subset of them: ``periods_df``, ``initial_inventory_df``,
-``historical_demand_df``, ``historical_od_matrix_df``,
-``facilities_capacities_df``, ``facilities_geo_df`` and ``routes``.
+and exposes the graph tables. The simulator reads a narrow subset of them,
+named by the contract ``ScenarioInputs``
+(``gbp/consumers/simulator/inputs.py``); ``ResolvedModelData`` is one supplier
+of that contract (declared statically at the bottom of this module).
 """
 
 import copy
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import pandera.pandas as pa
@@ -34,6 +35,9 @@ from gbp.model import (
 )
 from gbp.model.journal_schema import check_journal_schema, schema_violations
 from gbp.routing import DEFAULT_OSRM_URL, Routes, RoutingMode
+
+if TYPE_CHECKING:
+    from gbp.consumers.simulator.inputs import ScenarioInputs
 
 # ---------------------------------------------------------------------------
 # Schemas of the tables the engine and its phases read
@@ -781,10 +785,9 @@ class ResolvedModelData:
     """Graph data for one scenario, built from a :class:`RawModelData`.
 
     Exposes the rich graph tables (entities, attributes, historical
-    observations). The engine and its phases read directly: ``periods_df``,
-    ``initial_inventory_df``, ``historical_demand_df``,
-    ``historical_od_matrix_df``, ``facilities_capacities_df``,
-    ``facilities_geo_df`` and ``routes``.
+    observations). The simulator reads only the fields listed by its input
+    contract, :class:`~gbp.consumers.simulator.inputs.ScenarioInputs`; this
+    class is one supplier of that contract.
 
     ``initial_inventory_df`` and ``facilities_capacities_df`` are built for the
     base replay: the smallest state that runs the historical demand with no
@@ -929,6 +932,15 @@ def check_engine_tables(resolved: "ResolvedModelData") -> list[str]:
     for attribute, schema in ENGINE_TABLE_SCHEMAS.items():
         violations += schema_violations(schema, getattr(resolved, attribute))
     return violations
+
+
+def _supplies_scenario_inputs(resolved: ResolvedModelData) -> "ScenarioInputs":
+    """Declare that the loader's product supplies the simulator's input contract.
+
+    Never called. mypy checks the ``return`` here: if ``ResolvedModelData``
+    stops carrying a field of ``ScenarioInputs``, the typecheck fails.
+    """
+    return resolved
 
 
 # ---------------------------------------------------------------------------

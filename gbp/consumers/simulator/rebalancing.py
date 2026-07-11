@@ -44,7 +44,6 @@ import numpy as np
 import pandas as pd
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
-from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import (
     REBALANCE_RANK,
     haversine_km,
@@ -53,6 +52,7 @@ from gbp.model import (
 )
 
 from .config import EnvironmentConfig
+from .inputs import ScenarioInputs
 from .mechanics import dock_up_to_capacity, free_docks
 from .phases import Phase
 from .state import PeriodRow, SimulationState, SimulatorConfigError
@@ -641,7 +641,7 @@ class PlanRebalancingPhase(Phase):
     def execute(
         self,
         state: SimulationState,
-        resolved: ResolvedModelData,
+        resolved: ScenarioInputs,
         period: PeriodRow,
         config: EnvironmentConfig,
     ) -> SimulationState:
@@ -715,7 +715,7 @@ class ApplyRebalancingPhase(Phase):
     def execute(
         self,
         state: SimulationState,
-        resolved: ResolvedModelData,
+        resolved: ScenarioInputs,
         period: PeriodRow,
         config: EnvironmentConfig,
     ) -> SimulationState:

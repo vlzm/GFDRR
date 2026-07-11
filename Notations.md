@@ -449,6 +449,16 @@ inventory only through `min(demand, inventory)`: a real run started from the
 measured state repeats the sizing run's journal exactly, with zero stockout and
 zero dock-full.
 
+### 11.1. Scenario inputs (the tables a run reads)
+
+| Canonical | Meaning | Avoid |
+|---|---|---|
+| `scenario inputs` | The input tables of one scenario — everything the simulator reads during a run. The type `ScenarioInputs` (`gbp/consumers/simulator/inputs.py`) lists the fields in one place: the period grid, the initial inventory, the demand, the OD matrix, the capacities, the geography and `routes` (every run); the facility and commodity lists (the sizing run); the arrivals marginal, the truck tables and `period_len` (the rebalancing phases). The simulator is typed against this contract, not against the loader. | "resolved data" as the name of what the simulator needs; "engine tables" |
+
+Two suppliers of the contract exist: `ResolvedModelData` (the loader's product,
+which carries more fields than the contract) and the synthetic scenarios in
+`tests/scenarios.py`, assembled by hand from a few trips.
+
 ---
 
 ## 12. Run artifacts (the files the UI reads)

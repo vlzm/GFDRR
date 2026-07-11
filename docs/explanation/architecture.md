@@ -59,7 +59,7 @@ flowchart LR
     api["run-artifact API<br/>app/api.py"]
 
     csv -->|"historical trips"| loaders
-    loaders -->|"ResolvedModelData:<br/>the input tables of one scenario"| sim
+    loaders -->|"ResolvedModelData, read through<br/>the ScenarioInputs contract"| sim
     sim -->|"flow journal"| builder
     builder -->|"saved tables + meta.json"| runs
     runs -->|"saved tables"| ui
@@ -72,7 +72,9 @@ flowchart LR
 - The **loaders** ([dataloader.md](dataloader.md)) read the raw trip CSV and
 resolve it into `ResolvedModelData` — the input tables of one scenario:
 facilities, the period grid, the demand, the OD matrix, the initial
-inventory.
+inventory. The simulator does not depend on this class: it is typed against
+`ScenarioInputs` (`gbp/consumers/simulator/inputs.py`), the named list of the
+fields a run reads, and `ResolvedModelData` is one supplier of that contract.
 - The **simulator** ([simulator.md](simulator.md)) plays the scenario period
 by period and produces the flow journal
 ([Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
@@ -127,7 +129,7 @@ flowchart TB
     raw -->|"clean source tables"| resolved
     resolved -->|"builds Routes once per scenario"| routing
     resolved -->|"builds the historical journal with"| flows
-    resolved -->|"ResolvedModelData"| scenario
+    resolved -->|"the scenario inputs<br/>(ScenarioInputs)"| scenario
     scenario -->|"step 1: size the state"| sizing
     sizing -->|"sizing run, saturated state"| engine
     scenario -->|"step 2: the real run"| engine
@@ -204,6 +206,7 @@ interface column longer, review the design.
 | `routing.py`                  | `routes.distance_km(source, target)`, `routes.duration_periods(source, target)` | haversine vs OSRM, the one-shot `/table` fetch, the fallback for pairs OSRM cannot route                                                   |
 | `model/flows.py`              | plain functions: journal-shaped table in, table out                             | `step_id` assignment, phase ordering, inventory reconstruction at any moment, the measure columns                                          |
 | `model/journal_schema.py`     | `check_journal_schema(flows) -> list[str]`                                      | the pandera schema and the row-level rules of the event table                                                                              |
+| `simulator/inputs.py`         | `ScenarioInputs` — the input tables of one scenario                             | nothing, by design: it is the named field list of the loader–simulator seam, so "what does the simulator read" has one answer              |
 | `simulator/scenario.py`       | `run_sized_scenario(resolved, ...) -> ScenarioRun`                              | the fixed order: size, schema-check, copy, run, validate                                                                                   |
 | `simulator/sizing.py`         | `size_state_for_demand(resolved, config) -> two tables`                         | the saturated run and why its journal is the right thing to measure                                                                        |
 | `simulator/engine.py`         | `Environment(resolved, config).run() -> SimulationState`                        | the period loop, the phase-order guard, finalizing the journal on read                                                                     |

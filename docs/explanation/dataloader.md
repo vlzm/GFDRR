@@ -1,7 +1,10 @@
 # The data loaders, step by step
 
 This document explains `gbp/loaders/`: the code that turns the raw Citi Bike
-trip CSV into `ResolvedModelData`, the input tables the simulator reads.
+trip CSV into `ResolvedModelData`, the input tables the simulator reads. The
+simulator reads them through its contract `ScenarioInputs`
+(`gbp/consumers/simulator/inputs.py`); `ResolvedModelData` is one supplier of
+that contract and carries more fields than it.
 
 The loaders do three things:
 

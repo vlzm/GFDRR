@@ -18,6 +18,7 @@ The simulator code is in `gbp/consumers/simulator/`.
 
 | File | Main role |
 |---|---|
+| `inputs.py` | Owns `ScenarioInputs`, the input tables of one scenario — the fields every entry point below is typed against. |
 | `engine.py` | Owns `Environment`, the object that steps periods. |
 | `state.py` | Owns `SimulationState`, inventory arithmetic, and the one journal write path. |
 | `phases.py` | Owns the three user-trip phases. |

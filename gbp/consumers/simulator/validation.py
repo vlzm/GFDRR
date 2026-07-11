@@ -16,7 +16,6 @@ invariant has no effect in an exact replay and only matters above the baseline.
 
 import pandas as pd
 
-from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import (
     check_demand_split,
     check_flow_closure,
@@ -26,6 +25,7 @@ from gbp.model import (
 )
 from gbp.model.journal_schema import check_journal_schema
 
+from .inputs import ScenarioInputs
 from .state import SimulationState
 
 _KEYS = ["facility_id", "commodity_category"]
@@ -37,7 +37,7 @@ class RunInvariantError(AssertionError):
 
 def validate_run(
     state: SimulationState,
-    resolved: ResolvedModelData,
+    resolved: ScenarioInputs,
     demand_scale_factor: float = 1.0,
     number_of_periods: int | None = None,
 ) -> list[str]:
@@ -47,7 +47,7 @@ def validate_run(
     ----------
     state : SimulationState
         The final simulation state (live inventory and in-transit set).
-    resolved : ResolvedModelData
+    resolved : ScenarioInputs
         The scenario inputs (initial inventory and historical demand).
     demand_scale_factor : float, optional
         The run's demand scale (``EnvironmentConfig.demand_scale_factor``). The

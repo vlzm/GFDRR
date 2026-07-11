@@ -10,15 +10,15 @@ and only become meaningful once demand is pushed above the historical baseline.
 
 import pandas as pd
 
-from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import empty_flows_journal, empty_in_transit, finalize_flows
 
 from .config import EnvironmentConfig
+from .inputs import ScenarioInputs
 from .state import PeriodRow, SimulationState, SimulatorConfigError
 from .validation import RunInvariantError, validate_run
 
 
-def init_state(resolved: ResolvedModelData, first_period: PeriodRow) -> SimulationState:
+def init_state(resolved: ScenarioInputs, first_period: PeriodRow) -> SimulationState:
     """Build the starting state for a run: initial inventory and an empty journal."""
     return SimulationState(
         state_period_id_obj=first_period,
@@ -36,7 +36,7 @@ class Environment:
     and advances the clock.
     """
 
-    def __init__(self, resolved: ResolvedModelData, config: EnvironmentConfig) -> None:
+    def __init__(self, resolved: ScenarioInputs, config: EnvironmentConfig) -> None:
         if resolved.historical_demand_df.empty and resolved.initial_inventory_df.empty:
             raise SimulatorConfigError(
                 "Environment requires historical_demand_df or initial_inventory_df."

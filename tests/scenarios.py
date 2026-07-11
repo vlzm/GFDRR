@@ -1,11 +1,12 @@
 """Synthetic, offline simulation scenarios for the test suite.
 
 The real pipeline reads a trip CSV, which a unit test should not depend on.
-These builders construct the small slice of
-``ResolvedModelData`` that the engine and phases actually read -- the period
-grid, initial inventory, dock capacities, geography, and the historical
-marginals (demand and OD matrix) derived from a handful of hand-written trips --
-so every scenario is deterministic and runs in milliseconds.
+These builders assemble the simulator's input contract, ``ScenarioInputs``
+(``gbp/consumers/simulator/inputs.py``), from a handful of hand-written
+trips -- the period grid, initial inventory, dock capacities, geography, and
+the historical marginals (demand and OD matrix) -- so every scenario is
+deterministic and runs in milliseconds. Next to the loader's
+``ResolvedModelData``, this is the second supplier of that contract.
 
 Each scenario is a known story:
 
@@ -33,7 +34,7 @@ import types
 
 import pandas as pd
 
-from gbp.consumers.simulator import canonical_phases
+from gbp.consumers.simulator import ScenarioInputs, canonical_phases
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.engine import Environment
 from gbp.consumers.simulator.phases import Phase
@@ -72,13 +73,14 @@ def build_resolved(
     capacities: dict[str, int] | None = None,
     initial_inventory: dict[str, int] | None = None,
     n_periods: int = 8,
-) -> types.SimpleNamespace:
-    """Assemble the resolved-data slice the engine reads, from synthetic trips.
+) -> ScenarioInputs:
+    """Assemble the ``ScenarioInputs`` the engine reads, from synthetic trips.
 
-    A real ``ResolvedModelData`` carries far more; the engine and the four phases
-    only read the fields set below, so a light namespace is enough to drive a
-    run. ``capacities`` / ``initial_inventory`` default per facility to "very
-    large" / "empty"; pass a dict to make a constraint bind.
+    Sets the fields the canonical phases read; :func:`with_rebalancing_data`
+    adds the rebalancing group of the contract. ``historical_flows_df`` is not
+    part of the contract -- it is kept for tests that assert on the historical
+    journal itself. ``capacities`` / ``initial_inventory`` default per facility
+    to "very large" / "empty"; pass a dict to make a constraint bind.
     """
     capacities = capacities or {}
     initial_inventory = initial_inventory or {}
@@ -124,18 +126,17 @@ def build_resolved(
     # Travel-time fallback for a redirect pair with no OD entry. The synthetic
     # stations above sit ~0.1 km apart, so at 15 km per period every fallback
     # estimate rounds to zero periods and the scenarios keep their stories.
-    resolved.trip_speed_km_per_period = 15.0
     resolved.routes = Routes(
         geo,
         "haversine",
-        trip_speed_km_per_period=resolved.trip_speed_km_per_period,
+        trip_speed_km_per_period=15.0,
         period_len=pd.Timedelta(hours=1),
     )
     return resolved
 
 
 def run(
-    resolved: types.SimpleNamespace,
+    resolved: ScenarioInputs,
     *,
     phases: list[Phase] | None = None,
     demand_scale_factor: float = 1.0,
@@ -161,10 +162,8 @@ def run(
     return env.simulated_flows_df, state
 
 
-def with_rebalancing_data(
-    resolved: types.SimpleNamespace, truck_capacity: int = 20
-) -> types.SimpleNamespace:
-    """Extend a synthetic resolved slice with the tables the rebalancing phases read.
+def with_rebalancing_data(resolved: ScenarioInputs, truck_capacity: int = 20) -> ScenarioInputs:
+    """Fill the rebalancing group of the contract on a synthetic scenario.
 
     Adds one depot (``depot_1``) to the facility tables, one truck
     (``truck_1``) based there, the historical arrivals marginal, and the
@@ -243,7 +242,7 @@ def scripted_stops(
 # ---------------------------------------------------------------------------
 # Named scenarios -- each returns the resolved data ready to run().
 # ---------------------------------------------------------------------------
-def canonical() -> types.SimpleNamespace:
+def canonical() -> ScenarioInputs:
     """Saturated replay: inventory and capacity never bind, so no constraint fires."""
     trips = [
         ("s1", "s2", 0, 1),
@@ -255,7 +254,7 @@ def canonical() -> types.SimpleNamespace:
     return build_resolved(trips, initial_inventory={"s1": 500, "s2": 500, "s3": 500})
 
 
-def overflow() -> types.SimpleNamespace:
+def overflow() -> ScenarioInputs:
     """Six bikes aim at s3, whose docks hold two -- four must redirect elsewhere."""
     trips = [("s1", "s3", 0, 1)] * 3 + [("s2", "s3", 0, 1)] * 3
     return build_resolved(
@@ -263,7 +262,7 @@ def overflow() -> types.SimpleNamespace:
     )
 
 
-def overflow_delayed() -> types.SimpleNamespace:
+def overflow_delayed() -> ScenarioInputs:
     """Bounce a bike onto a leg that takes two periods (scenario 5 of the step-id doc).
 
     Two same-period trips aim at s3, whose single dock holds one -- the other
@@ -275,7 +274,7 @@ def overflow_delayed() -> types.SimpleNamespace:
     return build_resolved(trips, capacities={"s3": 1}, initial_inventory={"s1": 2, "s3": 1})
 
 
-def redirect_chain() -> types.SimpleNamespace:
+def redirect_chain() -> ScenarioInputs:
     """Bounce a delayed leg a second time: it arrives at a station that filled up meanwhile.
 
     The bike bounces off the full s4 and rides toward s3 for two periods (the
@@ -289,13 +288,13 @@ def redirect_chain() -> types.SimpleNamespace:
     )
 
 
-def stockout() -> types.SimpleNamespace:
+def stockout() -> ScenarioInputs:
     """Five want to leave s1, which holds two -- three are lost to a stockout."""
     trips = [("s1", "s2", 0, 1)] * 5
     return build_resolved(trips, initial_inventory={"s1": 2, "s2": 0})
 
 
-def network_full() -> types.SimpleNamespace:
+def network_full() -> ScenarioInputs:
     """Both docks are full (capacity 0), so arriving bikes fit nowhere and are lost."""
     trips = [("s1", "s2", 0, 1)] * 3
     return build_resolved(
@@ -303,7 +302,7 @@ def network_full() -> types.SimpleNamespace:
     )
 
 
-def single_trip() -> types.SimpleNamespace:
+def single_trip() -> ScenarioInputs:
     """Smallest non-empty run: one bike, one normal trip."""
     return build_resolved([("s1", "s2", 0, 1)], initial_inventory={"s1": 5})
 

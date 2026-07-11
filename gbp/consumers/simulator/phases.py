@@ -19,7 +19,6 @@ from typing import Literal
 
 import pandas as pd
 
-from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import (
     DOCK_PREVIOUS_RANK,
     DOCK_SAME_RANK,
@@ -33,6 +32,7 @@ from gbp.model import (
 )
 
 from .config import EnvironmentConfig
+from .inputs import ScenarioInputs
 from .mechanics import (
     dock_up_to_capacity,
     expand_potential_trips,
@@ -65,7 +65,7 @@ class Phase:
     def execute(
         self,
         state: SimulationState,
-        resolved: ResolvedModelData,
+        resolved: ScenarioInputs,
         period: PeriodRow,
         config: EnvironmentConfig,
     ) -> SimulationState:
@@ -77,7 +77,7 @@ class Phase:
     def build_events(
         self,
         state: SimulationState,
-        resolved: ResolvedModelData,
+        resolved: ScenarioInputs,
         period: PeriodRow,
         config: EnvironmentConfig,
     ) -> pd.DataFrame:
@@ -129,7 +129,7 @@ class DockArrivals(Phase):
     def build_events(
         self,
         state: SimulationState,
-        resolved: ResolvedModelData,
+        resolved: ScenarioInputs,
         period: PeriodRow,
         config: EnvironmentConfig,
     ) -> pd.DataFrame:
@@ -206,7 +206,7 @@ class FormDeparturesPhase(Phase):
     def build_events(
         self,
         state: SimulationState,
-        resolved: ResolvedModelData,
+        resolved: ScenarioInputs,
         period: PeriodRow,
         config: EnvironmentConfig,
     ) -> pd.DataFrame:
