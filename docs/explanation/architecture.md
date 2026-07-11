@@ -160,7 +160,7 @@ Three notes on what is not drawn, to keep the picture readable:
 ```mermaid
 flowchart TB
     runner["runner.py<br/>build_graph_data, run_scenario"]
-    artifacts["artifacts.py<br/>build_run_tables, save_run, load_run_*"]
+    artifacts["artifacts.py<br/>save_scenario_run, load_run_*"]
     runs[("data/runs/<br/>one folder per run")]
     api["api.py<br/>six endpoints, one worker thread"]
     client["api_client.py<br/>HTTP calls to the API"]
@@ -230,7 +230,7 @@ interface column longer, review the design.
 | Module               | Interface in one line                                                    | What it hides                                                                                          |
 | -------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | `runner.py`          | `build_graph_data(...)`, `run_scenario(graph_data, ...) -> saved folder` | the stage order and the progress reporting                                                             |
-| `artifacts.py`       | `build_run_tables`, `save_run`, `load_run_table`, `load_run_meta`        | one build function per saved table, the artifact's pandera schemas, the `METRICS` registry, run naming |
+| `artifacts.py`       | `save_scenario_run(result, data, ...)`, `load_run_table`, `load_run_meta` | one build function per saved table, which result field feeds which builder, the artifact's pandera schemas, the `METRICS` registry, run naming |
 | `api.py`             | six HTTP endpoints ([api.md](api.md))                                    | the single worker thread, the run queue, the disk fallback after a restart                             |
 | `api_client.py`      | `list_runs`, `load_table`, `start_run`, `run_status`                     | URL building, the API-key header, response decoding                                                    |
 | `backend.py`         | `current()` — the chosen backend: reads, and `run_and_wait`              | the disk-or-API choice (`API_URL`), local in-process runs vs POST-and-poll over HTTP                   |

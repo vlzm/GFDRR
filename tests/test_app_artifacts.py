@@ -9,6 +9,7 @@ and the comparison view.
 
 import pathlib
 import sys
+import types
 
 import pandas as pd
 import pytest
@@ -40,29 +41,39 @@ def _build_tables(resolved, journal):
 
 
 def _save_run(name, resolved, journal, root):
-    """Build and save one run artifact under ``root``; return its meta.
+    """Save one run artifact under ``root``; return its loaded meta.
 
-    ``build_meta`` is the same builder the runner uses, so the saved folder
-    matches the real ``meta.json`` contract (``t0`` and ``routing_mode``
-    included) and the page tests exercise the same path as a real run.
+    ``save_scenario_run`` is the same operation the runner and the evaluation
+    use, so the saved folder matches the real ``meta.json`` contract (``t0``
+    and ``routing_mode`` included) and the page tests exercise the same path
+    as a real run. The synthetic scenario carries no rates, routing fields,
+    or raw file, so they are supplied here (``trips_path=None`` means no raw
+    file to record in ``inputs``).
     """
-    tables = _build_tables(resolved, journal)
-    meta = artifacts.build_meta(
-        tables,
-        run_name=name,
-        demand_scale_factor=1.0,
-        sizing_scale_factor=1.0,
-        number_of_periods=int(resolved.periods_df["period_id"].max()) + 1,
-        period_len_hours=1.0,
-        routing_mode="haversine",
-        t0=resolved.periods_df["start_timestamp"].iloc[0],
-        # Synthetic scenarios are built from hand-written trips, not a raw
-        # file, so there is nothing to record here.
-        inputs=[],
+    result = types.SimpleNamespace(
+        simulated_flows_df=journal,
+        initial_inventory_df=resolved.initial_inventory_df,
+        facilities_capacities_df=resolved.facilities_capacities_df,
         violations=[],
     )
-    artifacts.save_run(name, tables, meta, root)
-    return meta
+    data = types.SimpleNamespace(
+        facilities_df=resolved.facilities_df,
+        facilities_geo_df=resolved.facilities_geo_df,
+        commodities_categories_rates_df=RATES,
+        period_len=PERIOD_LEN,
+        routes=resolved.routes,
+        routing_mode="haversine",
+        t0=resolved.periods_df["start_timestamp"].iloc[0],
+        trips_path=None,
+    )
+    artifacts.save_scenario_run(
+        result,
+        data,
+        run_name=name,
+        number_of_periods=int(resolved.periods_df["period_id"].max()) + 1,
+        root=root,
+    )
+    return artifacts.load_run_meta(name, root)
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +269,11 @@ def test_meta_carries_t0_and_the_run_parameters():
     # is a commit hash, outside git it is "unknown" -- never empty.
     assert meta.code_version
     assert meta.totals == artifacts.build_totals(tables["panel"], tables["flow_totals"])
+    # The sized state is precomputed into meta.json, so readers (the two-level
+    # evaluation) never sum the panel or the facilities table for it. In a
+    # station-only scenario it equals the sums of the input state tables.
+    assert meta.initial_inventory_bikes == int(resolved.initial_inventory_df["quantity"].sum())
+    assert meta.station_capacity_docks == int(resolved.facilities_capacities_df["capacity"].sum())
     # t0 + period * period_len is what the pages show on the time axis.
     t0 = pd.Timestamp(meta.t0)
     assert t0 + 3 * pd.Timedelta(hours=meta.period_len_hours) == pd.Timestamp("2026-01-01T03:00:00")

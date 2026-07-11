@@ -5,6 +5,11 @@ holding everything the UI needs to draw a finished run: the priced journal,
 the facility period panel, the arcs, the flow totals, the facility attributes,
 and ``meta.json``. The UI only reads these files; it never runs a simulation
 and never recomputes what this module can precompute.
+
+:func:`save_scenario_run` is the one operation that turns a finished run
+(a ``ScenarioRun`` plus its scenario data) into a saved artifact. The terminal
+runner, the two-level evaluation and the test fixtures all call it, so which
+result field feeds which builder argument is written once, here.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ import datetime
 import os
 import pathlib
 import subprocess
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pandera.pandas as pa
@@ -31,6 +36,9 @@ from gbp.model import (
 )
 from gbp.model.journal_schema import FLOW_EVENT_SCHEMA, schema_violations
 from gbp.routing import Routes
+
+if TYPE_CHECKING:
+    from gbp.consumers.simulator import ScenarioRun
 
 #: The parquet tables a run artifact holds, by file stem.
 RUN_TABLES = ("flows", "panel", "arcs", "flow_totals", "facilities")
@@ -548,6 +556,12 @@ class RunMeta(pydantic.BaseModel):
     code_version: str
     violations: list[str]
     rebalancing: RebalancingMeta
+    #: The sized state the run started from, precomputed at save time so no
+    #: reader recovers it from the panel: all bikes at period 0, and the dock
+    #: capacity summed over stations. None only on artifacts saved before
+    #: these fields existed.
+    initial_inventory_bikes: int | None = None
+    station_capacity_docks: int | None = None
     totals: dict[str, float]
 
 
@@ -599,15 +613,19 @@ def build_meta(
 ) -> RunMeta:
     """Build the ``meta.json`` model for one run: parameters, violations, totals.
 
-    This is the one place that defines the ``meta.json`` contract; the runner
-    and the test fixtures both call it, so a saved artifact always carries the
-    same fields (``t0`` and ``routing_mode`` included).
+    This is the one place that defines the ``meta.json`` contract;
+    :func:`save_scenario_run` is its production caller, so a saved artifact
+    always carries the same fields (``t0`` and ``routing_mode`` included).
+    The sized state the run started from (``initial_inventory_bikes``,
+    ``station_capacity_docks``) is computed here, so readers take it from
+    ``meta.json`` instead of summing the panel.
 
     Parameters
     ----------
     tables : dict of str to pandas.DataFrame
-        The run tables from :func:`build_run_tables` (reads ``panel`` and
-        ``flow_totals`` for the totals).
+        The run tables from :func:`build_run_tables` (reads ``panel``,
+        ``flow_totals`` and ``facilities`` for the totals and the sized
+        state).
     run_name : str
         Folder name of the artifact; also written as ``scenario_id``.
     demand_scale_factor, sizing_scale_factor : float
@@ -644,6 +662,9 @@ def build_meta(
     RunMeta
         The validated ``meta.json`` payload for :func:`save_run`.
     """
+    panel = tables["panel"]
+    facilities = tables["facilities"]
+    stations = facilities[facilities["facility_category"] == "station"]
     return RunMeta(
         run_name=run_name,
         scenario_id=run_name,
@@ -662,7 +683,9 @@ def build_meta(
         rebalancing=RebalancingMeta.model_validate(
             rebalancing if rebalancing is not None else {"enabled": False}
         ),
-        totals=build_totals(tables["panel"], tables["flow_totals"]),
+        initial_inventory_bikes=int(panel.loc[panel["period_id"] == 0, "quantity_sop"].sum()),
+        station_capacity_docks=int(stations["capacity"].fillna(0).sum()),
+        totals=build_totals(panel, tables["flow_totals"]),
     )
 
 
@@ -759,6 +782,89 @@ def save_run(
         tables[name].to_parquet(folder / f"{name}.parquet", index=False)
     (folder / "meta.json").write_text(meta.model_dump_json(indent=2))
     return folder
+
+
+def save_scenario_run(
+    result: ScenarioRun,
+    data: Any,
+    *,
+    run_name: str,
+    number_of_periods: int,
+    demand_scale_factor: float = 1.0,
+    sizing_scale_factor: float = 1.0,
+    rebalancing: dict[str, Any] | None = None,
+    demand_source: str = "history",
+    forecast_name: str | None = None,
+    root: pathlib.Path | None = None,
+) -> pathlib.Path:
+    """Save one finished sized run as a run artifact: build the tables, the meta, write.
+
+    This is the one operation that turns a run result and its scenario data
+    into a saved artifact. It reads the journal, the sized state tables and
+    the violations off ``result``, and the facility tables, the rates, the
+    period length, the routes, ``routing_mode``, ``t0`` and ``trips_path``
+    off ``data`` — no caller wires those fields by hand.
+
+    Parameters
+    ----------
+    result : ScenarioRun
+        A finished run from ``run_sized_scenario``.
+    data : scenario data
+        The scenario the run actually used. For a forecast run pass the copy
+        with the forecast demand applied (its period grid and ``t0`` are the
+        forecast horizon's), not the original. ``ResolvedModelData`` carries
+        every field read here; a synthetic supplier must carry
+        ``facilities_df``, ``facilities_geo_df``,
+        ``commodities_categories_rates_df``, ``period_len``, ``routes``,
+        ``routing_mode``, ``t0`` and ``trips_path`` (None when the scenario
+        was built from a synthetic journal, not a raw file).
+    run_name : str
+        Folder name of the artifact; also the name the UI shows.
+    number_of_periods : int
+        How many periods the run stepped.
+    demand_scale_factor, sizing_scale_factor : float, optional
+        The run's demand multipliers (see :func:`build_meta`).
+    rebalancing : dict, optional
+        The run's rebalancing settings (see :func:`build_meta`).
+    demand_source : str, optional
+        Where the demand table came from: ``"history"`` (default) or
+        ``"forecast"``.
+    forecast_name : str, optional
+        The forecast artifact a forecast run used.
+    root : pathlib.Path, optional
+        Runs root override (defaults to :func:`runs_root`).
+
+    Returns
+    -------
+    pathlib.Path
+        The saved artifact folder.
+    """
+    tables = build_run_tables(
+        result.simulated_flows_df,
+        initial_inventory=result.initial_inventory_df,
+        facilities=data.facilities_df,
+        facilities_geo=data.facilities_geo_df,
+        facilities_capacities=result.facilities_capacities_df,
+        rates=data.commodities_categories_rates_df,
+        period_len=data.period_len,
+        routes=data.routes,
+    )
+    meta = build_meta(
+        tables,
+        run_name=run_name,
+        demand_scale_factor=demand_scale_factor,
+        sizing_scale_factor=sizing_scale_factor,
+        number_of_periods=number_of_periods,
+        period_len_hours=data.period_len / pd.Timedelta(hours=1),
+        routing_mode=data.routing_mode,
+        t0=data.t0,
+        inputs=[pathlib.Path(data.trips_path).name] if data.trips_path else [],
+        violations=result.violations,
+        rebalancing=rebalancing,
+        demand_source=demand_source,
+        forecast_name=forecast_name,
+    )
+    return save_run(run_name, tables, meta, root)
 
 
 def load_run_table(run_name: str, table: str, root: pathlib.Path | None = None) -> pd.DataFrame:

@@ -176,7 +176,8 @@ def _ensure_run(
     """Run one evaluation run and save its artifact; skip when it already exists.
 
     The demand goes in through :func:`apply_forecast_demand` — the forecast-run
-    path — and the artifact is saved exactly as the runner saves one. With
+    path — and the artifact is saved through the same
+    :func:`artifacts.save_scenario_run` operation the runner uses. With
     ``sizing_demand_df`` the state is sized on that table instead of the run's
     own demand; the evaluation passes the actual demand there, so every
     forecast runs against the replay state.
@@ -196,31 +197,16 @@ def _ensure_run(
         validate=False,
         sizing_data=sizing_data,
     )
-    tables = artifacts.build_run_tables(
-        result.simulated_flows_df,
-        initial_inventory=result.initial_inventory_df,
-        facilities=data.facilities_df,
-        facilities_geo=data.facilities_geo_df,
-        facilities_capacities=result.facilities_capacities_df,
-        rates=data.commodities_categories_rates_df,
-        period_len=data.period_len,
-        routes=data.routes,
-    )
-    meta = artifacts.build_meta(
-        tables,
+    artifacts.save_scenario_run(
+        result,
+        data,
         run_name=run_name,
-        demand_scale_factor=1.0,
-        sizing_scale_factor=1.0,
         number_of_periods=len(periods_df),
-        period_len_hours=data.period_len / pd.Timedelta(hours=1),
-        routing_mode=data.routing_mode,
-        t0=data.t0,
-        inputs=[pathlib.Path(data.trips_path).name],
-        violations=result.violations,
         demand_source=demand_source,
         forecast_name=forecast_name,
+        root=root,
     )
-    artifacts.save_run(run_name, tables, meta, root)
+    meta = artifacts.load_run_meta(run_name, root)
     log(f"{run_name}: violations={len(result.violations)} totals={meta.totals}")
 
 
@@ -235,22 +221,19 @@ def _panel_departed_mae(panel_df: pd.DataFrame, reference_panel_df: pd.DataFrame
 
 
 def _run_row(run_name: str, root: pathlib.Path | None = None) -> dict[str, object]:
-    """One comparison row read off a saved run: totals plus the sized state.
+    """One comparison row read off a saved run's ``meta.json``: totals plus the sized state.
 
-    The sized state is recovered from the artifact: the initial inventory is
-    the panel's period-0 ``quantity_sop`` sum, the dock capacity is the
-    ``capacity`` sum over stations in the facilities table.
+    The sized state (``initial_inventory_bikes``, ``station_capacity_docks``)
+    is precomputed into ``meta.json`` at save time. A run saved before those
+    fields existed carries None there — delete its folder to rebuild it.
     """
     meta = artifacts.load_run_meta(run_name, root)
-    panel = artifacts.load_run_table(run_name, "panel", root)
-    facilities = artifacts.load_run_table(run_name, "facilities", root)
-    stations = facilities[facilities["facility_category"] == "station"]
     return {
         "run_name": run_name,
         "violations": len(meta.violations),
         **meta.totals,
-        "initial_inventory_bikes": int(panel.loc[panel["period_id"] == 0, "quantity_sop"].sum()),
-        "station_capacity_docks": int(stations["capacity"].fillna(0).sum()),
+        "initial_inventory_bikes": meta.initial_inventory_bikes,
+        "station_capacity_docks": meta.station_capacity_docks,
     }
 
 

@@ -40,7 +40,7 @@ One saved run is a folder `data/runs/<run_name>/` with six files:
 
 | File | One row per | Built by |
 |---|---|---|
-| `meta.json` | — (parameters, `inputs` — raw file names, `code_version` — git commit, invariant `violations`, whole-run `totals`) | `build_meta` |
+| `meta.json` | — (parameters, `inputs` — raw file names, `code_version` — git commit, invariant `violations`, whole-run `totals`, the sized state: `initial_inventory_bikes`, `station_capacity_docks`) | `build_meta` |
 | `flows.parquet` | flow event (the journal widened with the measures) | `flows_with_measures` |
 | `panel.parquet` | `(period_id, facility_id, commodity_category)` | `flows_to_panel` (model layer) |
 | `arcs.parquet` | arc — a `(flow_id, move_id)` physical edge of a trip | `build_arcs` |
@@ -72,12 +72,13 @@ one run against loaded data:
    `sizing_scale_factor`, run the demand at `demand_scale_factor`, collect
    the invariant violations. It is called with `validate=False`, so a
    violated invariant is recorded in `meta.json` instead of raising.
-3. Build the five tables with `artifacts.build_run_tables`.
-4. Build `meta.json` with `artifacts.build_meta`. Besides the run parameters
-   it records where the run came from: `inputs` (the raw file name, taken
-   from `graph_data.trips_path`) and `code_version` (the git commit,
-   `-dirty` when the working tree had uncommitted changes).
-5. Save the folder with `artifacts.save_run`.
+3. Save the folder with `artifacts.save_scenario_run` — the one operation
+   that builds the five tables (`build_run_tables`) and `meta.json`
+   (`build_meta`) from the run result and the scenario data, then writes
+   them (`save_run`). Besides the run parameters, `meta.json` records where
+   the run came from: `inputs` (the raw file name, taken from
+   `data.trips_path`) and `code_version` (the git commit, `-dirty` when the
+   working tree had uncommitted changes).
 
 Note: `run_scenario` must not modify `graph_data`. The Run page shares one
 cached `ResolvedModelData` across runs, so the sized state stays inside

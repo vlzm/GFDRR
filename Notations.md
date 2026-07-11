@@ -471,7 +471,7 @@ happens while a page renders. One saved run is a **run artifact**: a folder
 
 | Canonical | Meaning |
 |---|---|
-| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6, `routing_mode` — see §13, `demand_source` — `history` or `forecast`, and `forecast_name` — the forecast a forecast run used, see §11/§17, `rebalancing` — see §14: `enabled`, and when on also `truck_homes` and `truck_capacity_bikes`), the run's origin (`inputs` — file names of the raw source files the run was built from; `code_version` — the git commit of the code, with `-dirty` appended when there were uncommitted changes), the invariant `violations` list from `validate_run` (empty = valid), and `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km). Parameters + `inputs` + `code_version` together make a run reproducible: they name what was computed, from which data, by which code. |
+| `meta.json` | The run's parameters (`scenario_id`, `demand_scale_factor`, `sizing_scale_factor`, `number_of_periods`, `period_len`, `t0` — see §6, `routing_mode` — see §13, `demand_source` — `history` or `forecast`, and `forecast_name` — the forecast a forecast run used, see §11/§17, `rebalancing` — see §14: `enabled`, and when on also `truck_homes` and `truck_capacity_bikes`), the run's origin (`inputs` — file names of the raw source files the run was built from; `code_version` — the git commit of the code, with `-dirty` appended when there were uncommitted changes), the invariant `violations` list from `validate_run` (empty = valid), `totals` — whole-run sums (demand, departed, arrived, redirected, lost_demand, lost_dock_full, cost, distance_km), and the sized state the run started from (`initial_inventory_bikes` — all bikes at period 0, `station_capacity_docks` — dock capacity summed over stations), precomputed at save so a reader never sums the panel or the facilities table for it. Parameters + `inputs` + `code_version` together make a run reproducible: they name what was computed, from which data, by which code. |
 | `flows.parquet` | The finalized journal of the run, widened by `flows_with_measures` with the measures (§6.1): `rate`, `elapsed_periods`, `cost`, the planned/realized `duration_periods` and `distance_km` pairs. |
 | `panel.parquet` | The **facility period panel**: one row per `(period_id, facility_id, commodity_category)` with that period's values side by side — `quantity_sop`, `quantity_eop` (§9 inventory), `demand`, `departed`, `arrived`, `redirected` (bounces at this facility as the full planned target), `lost_demand`, `lost_dock_full`. Every map view and hover box is a slice of this one table. |
 | `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0). Carries `flow_type` (`user_trip` or `rebalance` — §14) and `resource_id` (the truck on a rebalance arc, NA otherwise), `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, `distance_km` (measured by the run's `routing_mode` — §13), and the endpoint coordinates (`source_lat`, `source_lng`, `target_lat`, `target_lng`), so the trips map draws arcs without joining another table. |
@@ -483,7 +483,10 @@ with the nested `RebalancingMeta` block): `build_meta` constructs it,
 `save_run` writes it, and `load_run_meta` validates it back — an artifact
 missing a field fails at load, with the field named. Each parquet table has a
 pandera schema (`RUN_TABLE_SCHEMAS`, same file), checked in `save_run` before
-writing; loading is not re-checked.
+writing; loading is not re-checked. `save_scenario_run` (same file) is the one
+operation that saves a finished run: it builds the tables and the meta from a
+`ScenarioRun` and its scenario data, then writes the folder — the runner, the
+two-level evaluation and the test fixtures all call it.
 
 Chart attribution rule: a flow's `cost`, `distance_km` and `duration_periods`
 belong to its **origin facility** (`source_id`) and its **`start_period`** — the

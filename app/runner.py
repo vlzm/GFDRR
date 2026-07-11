@@ -204,38 +204,24 @@ def run_scenario(
     )
 
     progress("Building and saving the run artifact")
-    tables = artifacts.build_run_tables(
-        result.simulated_flows_df,
-        initial_inventory=result.initial_inventory_df,
-        facilities=data.facilities_df,
-        facilities_geo=data.facilities_geo_df,
-        facilities_capacities=result.facilities_capacities_df,
-        rates=data.commodities_categories_rates_df,
-        period_len=data.period_len,
-        routes=data.routes,
-    )
     rebalancing_meta: dict = {"enabled": rebalancing}
     if rebalancing:
         rebalancing_meta["truck_homes"] = homes
         rebalancing_meta["truck_capacity_bikes"] = truck_capacity_bikes
-    meta = artifacts.build_meta(
-        tables,
+    # A forecast run's grid and t0 are the forecast horizon's, so the artifact
+    # is built from `data` (the copy the run actually used), not `graph_data`.
+    return artifacts.save_scenario_run(
+        result,
+        data,
         run_name=run_name,
+        number_of_periods=number_of_periods,
         demand_scale_factor=demand_scale_factor,
         sizing_scale_factor=sizing_scale_factor,
-        number_of_periods=number_of_periods,
-        # A forecast run's grid and t0 are the forecast horizon's, so read
-        # them off `data` (the copy the run actually used), not `graph_data`.
-        period_len_hours=data.period_len / pd.Timedelta(hours=1),
-        routing_mode=data.routing_mode,
-        t0=data.t0,
-        inputs=[pathlib.Path(data.trips_path).name],
-        violations=result.violations,
         rebalancing=rebalancing_meta,
         demand_source=demand_source,
         forecast_name=forecast_name,
+        root=root,
     )
-    return artifacts.save_run(run_name, tables, meta, root)
 
 
 def main() -> None:
