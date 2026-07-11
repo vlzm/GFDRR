@@ -18,7 +18,12 @@ import pandas as pd
 import plotly.express as px
 import pydeck as pdk
 import streamlit as st
-from artifacts import METRICS, PANEL_KEYS, PANEL_VALUES  # noqa: F401  (re-exported to pages)
+from artifacts import (  # noqa: F401  (re-exported to pages)
+    METRICS,
+    PANEL_FLOW_VALUES,
+    PANEL_KEYS,
+    PANEL_VALUES,
+)
 
 # --- Palette (validated with the data-viz checks) --------------------------
 SCENARIO_A_COLOR = "#2a78d6"
@@ -256,7 +261,7 @@ def kpi_row(meta_a: artifacts.RunMeta, meta_b: artifacts.RunMeta | None = None) 
     """Whole-run totals as metric tiles; with B chosen, the delta is B − A.
 
     The tiles come from the one METRICS table (``kpi=True`` entries); the tile
-    label is the metric's full label without the braces part.
+    label is the metric's ``title``.
     """
     totals_a = meta_a.totals
     totals_b = meta_b.totals if meta_b else None
@@ -273,8 +278,7 @@ def kpi_row(meta_a: artifacts.RunMeta, meta_b: artifacts.RunMeta | None = None) 
             delta = f"{delta_b_minus_a(totals_a[metric.name], totals_b[metric.name], fmt)} (B − A)"
             # ``inverse`` marks "more is worse" numbers (losses, redirects, cost).
             color = ("inverse" if metric.more_is_worse else "off") if diff != 0 else "off"
-        label = metric.label.split(" (")[0]
-        column.metric(label, fmt(totals_a[metric.name]), delta=delta, delta_color=color)
+        column.metric(metric.title, fmt(totals_a[metric.name]), delta=delta, delta_color=color)
 
 
 def validation_badge(meta: artifacts.RunMeta, label: str) -> None:
@@ -308,6 +312,44 @@ def panel_commodity_slice(
 def panel_slice(panel: pd.DataFrame, period: int, commodity: str | None) -> pd.DataFrame:
     """One row per facility at one period; sums over commodities unless one is chosen."""
     return panel_commodity_slice(panel[panel["period_id"] == period], commodity, ["facility_id"])
+
+
+def value_b(name: str) -> str:
+    """Column that holds scenario B's copy of a panel value in a comparison frame."""
+    return f"{name}_b"
+
+
+def value_diff(name: str) -> str:
+    """Column that holds the B − A difference of a panel value in a comparison frame."""
+    return f"{name}_diff"
+
+
+#: B's copies and the B − A differences of every panel value column, in
+#: ``PANEL_VALUES`` order — the columns :func:`panel_slice_pair` adds.
+PANEL_VALUES_B = [value_b(name) for name in PANEL_VALUES]
+PANEL_VALUES_DIFF = [value_diff(name) for name in PANEL_VALUES]
+
+
+def panel_slice_pair(
+    panel_a: pd.DataFrame, panel_b: pd.DataFrame, period: int, commodity: str | None
+) -> pd.DataFrame:
+    """One row per facility at one period, with both runs' values and their difference.
+
+    The comparison convention of two panels lives here: run A's values keep
+    their column names, run B's copies are named by :func:`value_b`, and the
+    differences (always B − A, like every comparison in the app) by
+    :func:`value_diff`. A facility only one run touched reads as zeros in the
+    other run.
+    """
+    slice_a = panel_slice(panel_a, period, commodity)
+    slice_b = panel_slice(panel_b, period, commodity).rename(
+        columns={name: value_b(name) for name in PANEL_VALUES}
+    )
+    pair = slice_a.merge(slice_b, on="facility_id", how="outer")
+    pair[PANEL_VALUES + PANEL_VALUES_B] = pair[PANEL_VALUES + PANEL_VALUES_B].fillna(0)
+    for name in PANEL_VALUES:
+        pair[value_diff(name)] = pair[value_b(name)] - pair[name]
+    return pair
 
 
 def commodity_options(panel: pd.DataFrame) -> list[str]:

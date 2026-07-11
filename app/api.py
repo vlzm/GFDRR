@@ -205,7 +205,7 @@ def get_run_table(run_name: str, table: str) -> Response:
     """
     if table not in artifacts.RUN_TABLES or run_name not in artifacts.list_runs():
         raise HTTPException(status_code=404, detail=f"unknown run or table {run_name!r}/{table!r}")
-    path = artifacts.run_dir(run_name) / f"{table}.parquet"
+    path = artifacts.table_path(run_name, table)
     return Response(content=path.read_bytes(), media_type=PARQUET_MEDIA_TYPE)
 
 

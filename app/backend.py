@@ -57,7 +57,7 @@ class DiskBackend:
 
     def table_cache_key(self, run_name: str, table: str) -> float:
         """Return the file's mtime: a local file can be rewritten, so it keys the cache."""
-        return (artifacts.run_dir(run_name) / f"{table}.parquet").stat().st_mtime
+        return artifacts.table_path(run_name, table).stat().st_mtime
 
     def load_meta(self, run_name: str) -> artifacts.RunMeta:
         """Read one saved run's ``meta.json``."""
@@ -65,7 +65,7 @@ class DiskBackend:
 
     def meta_cache_key(self, run_name: str) -> float:
         """Return the file's mtime, for the same reason as :meth:`table_cache_key`."""
-        return (artifacts.run_dir(run_name) / "meta.json").stat().st_mtime
+        return artifacts.meta_path(run_name).stat().st_mtime
 
     def list_forecasts(self) -> list[str]:
         """Names of the saved forecasts (``data/ml/forecasts/``) a run can use."""

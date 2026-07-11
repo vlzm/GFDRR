@@ -214,6 +214,13 @@ def test_save_and_load_round_trip(tmp_path):
     panel = artifacts.load_run_table("overflow", "panel", tmp_path)
     assert panel["demand"].sum() == meta.totals["demand"]
     assert artifacts.load_run_meta("overflow", tmp_path).run_name == "overflow"
+    # The file paths of an artifact come from artifacts.py alone; every table
+    # the saver wrote sits where table_path points.
+    for table in artifacts.RUN_TABLES:
+        assert artifacts.table_path("overflow", table, tmp_path).exists()
+    assert artifacts.meta_path("overflow", tmp_path).exists()
+    with pytest.raises(ValueError):
+        artifacts.table_path("overflow", "not_a_table", tmp_path)
 
 
 def test_next_free_run_name_versions_taken_names(tmp_path):
@@ -390,6 +397,54 @@ def test_arc_map_rows_sums_quantity_and_keeps_endpoints():
     assert rows["trips"].tolist() == [2, 1]
     assert rows["target_lat"].tolist() == [40.1, 40.2]
     assert rows["distance_km"].tolist() == [2.0, 4.0]
+
+
+def test_metric_labels_and_flow_values_come_from_metrics():
+    # The KPI tile shows the metric's title; the full picker label adds the
+    # canonical column name in braces. No page parses one out of the other.
+    demand = next(metric for metric in artifacts.METRICS if metric.name == "demand")
+    assert demand.title == "Demand"
+    assert demand.label == "Demand (demand)"
+    # The inventory flag lives in METRICS, so a page picks the per-period flow
+    # columns without naming quantity_sop / quantity_eop itself.
+    assert set(artifacts.PANEL_VALUES) - set(artifacts.PANEL_FLOW_VALUES) == {
+        "quantity_sop",
+        "quantity_eop",
+    }
+
+
+def _tiny_panel(demand: dict[str, int]) -> pd.DataFrame:
+    """One-period panel with the given demand per facility, zeros elsewhere."""
+    frame = pd.DataFrame(
+        {
+            "period_id": 0,
+            "facility_id": list(demand),
+            "commodity_category": "classic_bike",
+            **dict.fromkeys(artifacts.PANEL_VALUES, 0),
+        }
+    )
+    frame["demand"] = list(demand.values())
+    return frame
+
+
+def test_panel_slice_pair_carries_a_b_and_the_difference():
+    import ui_shared
+
+    pair = ui_shared.panel_slice_pair(
+        _tiny_panel({"s1": 2, "s2": 3}),
+        _tiny_panel({"s1": 5, "s3": 7}),
+        period=0,
+        commodity=None,
+    ).set_index("facility_id")
+
+    assert pair.loc["s1", "demand"] == 2
+    assert pair.loc["s1", ui_shared.value_b("demand")] == 5
+    assert pair.loc["s1", ui_shared.value_diff("demand")] == 3
+    # A facility only one run touched reads as zeros in the other run.
+    assert pair.loc["s2", ui_shared.value_b("demand")] == 0
+    assert pair.loc["s2", ui_shared.value_diff("demand")] == -3
+    assert pair.loc["s3", "demand"] == 0
+    assert pair.loc["s3", ui_shared.value_diff("demand")] == 7
 
 
 def test_build_totals_covers_every_metric_with_a_total():

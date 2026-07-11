@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 import ui_shared
-from ui_shared import PANEL_KEYS, PANEL_VALUES
+from ui_shared import PANEL_FLOW_VALUES, PANEL_KEYS, PANEL_VALUES
 
 st.title("Single facility")
 
@@ -46,7 +46,7 @@ x, x_title = "period_start", "Period start time"
 
 color_map = ui_shared.scenario_color_map(run_a, run_b)
 
-st.subheader("Inventory at period end (quantity_eop)")
+st.subheader(ui_shared.METRIC_LABELS["quantity_eop"])
 fig = px.line(
     data,
     x=x,
@@ -69,7 +69,7 @@ st.plotly_chart(fig, width="stretch")
 st.subheader("Metric per period")
 metric = st.selectbox(
     "Metric",
-    [name for name in PANEL_VALUES if name not in ("quantity_sop", "quantity_eop")],
+    PANEL_FLOW_VALUES,
     format_func=ui_shared.METRIC_LABELS.get,
 )
 bars = px.bar(

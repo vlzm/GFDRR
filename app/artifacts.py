@@ -179,39 +179,45 @@ class Metric:
     """
 
     name: str
-    label: str  # full label; the canonical column name is kept in braces
+    title: str  # display words alone, no column name (the KPI tile label)
     short: str  # short label for the map hover box
     unit: str = "count"  # "count", "dollars", "km" or "periods" -- picks the KPI format
     panel_value: bool = False  # a value column of panel.parquet
+    inventory: bool = False  # an inventory level at a moment, not a per-period count
     panel_total: bool = False  # summed over the panel into meta["totals"]
     kpi: bool = False  # shown as a tile in the KPI row
     more_is_worse: bool = False  # the KPI delta turns red when it grows
     flow_value: str | None = None  # flow_totals column its total aggregates
     flow_agg: str = "sum"  # how that column is aggregated ("sum" or "mean")
 
+    @property
+    def label(self) -> str:
+        """Full picker label: the title plus the canonical column name in braces."""
+        return f"{self.title} ({self.name})"
+
 
 #: Every metric of a run, in display and storage order.
 METRICS = [
     Metric(
         "quantity_sop",
-        "Inventory at period start (quantity_sop)",
+        "Inventory at period start",
         "Inventory, start",
         panel_value=True,
+        inventory=True,
     ),
     Metric(
         "quantity_eop",
-        "Inventory at period end (quantity_eop)",
+        "Inventory at period end",
         "Inventory, end",
         panel_value=True,
+        inventory=True,
     ),
-    Metric("demand", "Demand (demand)", "Demand", panel_value=True, panel_total=True, kpi=True),
-    Metric(
-        "departed", "Departed (departed)", "Departed", panel_value=True, panel_total=True, kpi=True
-    ),
-    Metric("arrived", "Arrived (arrived)", "Arrived", panel_value=True, panel_total=True, kpi=True),
+    Metric("demand", "Demand", "Demand", panel_value=True, panel_total=True, kpi=True),
+    Metric("departed", "Departed", "Departed", panel_value=True, panel_total=True, kpi=True),
+    Metric("arrived", "Arrived", "Arrived", panel_value=True, panel_total=True, kpi=True),
     Metric(
         "redirected",
-        "Redirected (redirected)",
+        "Redirected",
         "Redirected",
         panel_value=True,
         panel_total=True,
@@ -220,7 +226,7 @@ METRICS = [
     ),
     Metric(
         "lost_demand",
-        "Lost demand (lost_demand)",
+        "Lost demand",
         "Lost (stockout)",
         panel_value=True,
         panel_total=True,
@@ -229,7 +235,7 @@ METRICS = [
     ),
     Metric(
         "lost_dock_full",
-        "Lost at full docks (lost_dock_full)",
+        "Lost at full docks",
         "Lost (dock_full)",
         panel_value=True,
         panel_total=True,
@@ -250,7 +256,7 @@ METRICS = [
     ),
     Metric(
         "mean_duration_periods",
-        "Mean trip duration, periods (mean_duration_periods)",
+        "Mean trip duration, periods",
         "Mean duration",
         unit="periods",
         flow_value="duration_periods",
@@ -260,6 +266,10 @@ METRICS = [
 
 #: The panel's value columns, in storage order (built from ``METRICS``).
 PANEL_VALUES = [metric.name for metric in METRICS if metric.panel_value]
+
+#: The panel's value columns that count what happened during the period --
+#: every panel value except the inventory levels (``inventory=True``).
+PANEL_FLOW_VALUES = [m.name for m in METRICS if m.panel_value and not m.inventory]
 
 _DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[1] / "data"
 
@@ -284,12 +294,29 @@ def run_dir(run_name: str, root: pathlib.Path | None = None) -> pathlib.Path:
     return (root or runs_root()) / run_name
 
 
+def table_path(run_name: str, table: str, root: pathlib.Path | None = None) -> pathlib.Path:
+    """File of one saved table: ``<run folder>/<table>.parquet``.
+
+    The one place that file name is spelled: the saver, the local loader, the
+    cache keys and the API all take the path from here. ``table`` must be a
+    ``RUN_TABLES`` stem.
+    """
+    if table not in RUN_TABLES:
+        raise ValueError(f"unknown run table {table!r}; expected one of {RUN_TABLES}")
+    return run_dir(run_name, root) / f"{table}.parquet"
+
+
+def meta_path(run_name: str, root: pathlib.Path | None = None) -> pathlib.Path:
+    """File of one saved run's ``meta.json`` (its existence marks a complete artifact)."""
+    return run_dir(run_name, root) / "meta.json"
+
+
 def list_runs(root: pathlib.Path | None = None) -> list[str]:
     """Names of every saved run (folders with a ``meta.json``), sorted."""
     base = root or runs_root()
     if not base.exists():
         return []
-    return sorted(p.name for p in base.iterdir() if (p / "meta.json").exists())
+    return sorted(p.name for p in base.iterdir() if meta_path(p.name, base).exists())
 
 
 def next_free_run_name(base: str, root: pathlib.Path | None = None) -> str:
@@ -779,8 +806,8 @@ def save_run(
     folder = run_dir(run_name, root)
     folder.mkdir(parents=True, exist_ok=True)
     for name in RUN_TABLES:
-        tables[name].to_parquet(folder / f"{name}.parquet", index=False)
-    (folder / "meta.json").write_text(meta.model_dump_json(indent=2))
+        tables[name].to_parquet(table_path(run_name, name, root), index=False)
+    meta_path(run_name, root).write_text(meta.model_dump_json(indent=2))
     return folder
 
 
@@ -869,9 +896,7 @@ def save_scenario_run(
 
 def load_run_table(run_name: str, table: str, root: pathlib.Path | None = None) -> pd.DataFrame:
     """Read one parquet table of a saved run (``table`` is a ``RUN_TABLES`` stem)."""
-    if table not in RUN_TABLES:
-        raise ValueError(f"unknown run table {table!r}; expected one of {RUN_TABLES}")
-    return pd.read_parquet(run_dir(run_name, root) / f"{table}.parquet")
+    return pd.read_parquet(table_path(run_name, table, root))
 
 
 def load_run_meta(run_name: str, root: pathlib.Path | None = None) -> RunMeta:
@@ -880,4 +905,4 @@ def load_run_meta(run_name: str, root: pathlib.Path | None = None) -> RunMeta:
     An artifact missing a field fails here, at load, with a pydantic error
     naming the field -- not later, while a page renders.
     """
-    return RunMeta.model_validate_json((run_dir(run_name, root) / "meta.json").read_text())
+    return RunMeta.model_validate_json(meta_path(run_name, root).read_text())
