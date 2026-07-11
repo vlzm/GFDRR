@@ -281,6 +281,19 @@ Done when: after dropping one new month of raw data, one command retrains,
 compares, and either promotes or keeps the champion — with the decision and
 the reason recorded.
 
+Done on 2026-07-11: the registered model `demand-model` lives in the MLflow
+registry (`gbp/ml/registry.py`); `python -m gbp.ml.forecast --champion`
+resolves the model by the `champion` alias. `python -m gbp.ml.pipeline` runs
+the five steps (`--steps` runs them singly); the trigger asked the bucket
+and found 202602..202606 published. Verified on real data: the first run
+trained LightGBM on 202502..202601 and promoted it as version 1 (no champion
+yet); `python -m gbp.ml.pipeline --months 202602` then downloaded the new
+month, rebuilt the table, refreshed the `.dvc` files, trained version 2, and
+promoted it on the tie rule (equal score over the same splits, newer data
+version wins). A rerun with no new data reused version 2, skipped the
+backtest, and kept the champion. Each of the three decisions is one row in
+`data/ml/pipeline_log.csv`.
+
 ## Phase 7 — monitoring
 
 Goal: the system notices when the model gets worse, and shows it.

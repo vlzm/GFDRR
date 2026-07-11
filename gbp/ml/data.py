@@ -158,6 +158,19 @@ def month_csvs(month: str, raw: pathlib.Path | None = None) -> list[pathlib.Path
     return sorted(p for p in base.glob("*.csv") if f"{month}-citibike-tripdata" in p.name)
 
 
+def raw_trip_months(raw: pathlib.Path | None = None) -> list[str]:
+    """Return the months whose trip CSVs are on disk, sorted, as ``YYYYMM``.
+
+    Reads the months off the published file naming, the same match
+    :func:`month_csvs` uses per month.
+    """
+    base = raw or raw_dir()
+    if not base.exists():
+        return []
+    found = re.findall(r"(\d{6})-citibike-tripdata", " ".join(p.name for p in base.glob("*.csv")))
+    return sorted(set(found))
+
+
 def _list_bucket_keys(prefix: str) -> list[str]:
     """List the bucket keys under one prefix (the S3 ``list-type=2`` API)."""
     response = requests.get(

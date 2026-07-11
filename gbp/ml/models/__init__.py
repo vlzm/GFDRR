@@ -70,4 +70,31 @@ def create_model(
     raise ValueError(f"unknown model family {name!r}; known: {', '.join(MODEL_FAMILIES)}")
 
 
-__all__ = ["MODEL_FAMILIES", "DemandModel", "create_model"]
+def load_model(name: str, folder: pathlib.Path) -> DemandModel:
+    """Read a fitted model of the given family from a folder ``save`` wrote.
+
+    The counterpart of :func:`create_model` for models that are already
+    trained — the model registry (``gbp/ml/registry.py``) loads a registered
+    version through this function, naming the family by its ``model_family``
+    tag. Imports are lazy for the same reason as in :func:`create_model`.
+    """
+    if name == "seasonal_naive":
+        from gbp.ml.models.seasonal_naive import SeasonalNaiveModel
+
+        return SeasonalNaiveModel.load(folder)
+    if name == "sarimax":
+        from gbp.ml.models.sarimax import SarimaxTotalModel
+
+        return SarimaxTotalModel.load(folder)
+    if name == "lightgbm":
+        from gbp.ml.models.boosting import LightGbmModel
+
+        return LightGbmModel.load(folder)
+    if name == "graphsage":
+        from gbp.ml.models.graph import GraphSageModel
+
+        return GraphSageModel.load(folder)
+    raise ValueError(f"unknown model family {name!r}; known: {', '.join(MODEL_FAMILIES)}")
+
+
+__all__ = ["MODEL_FAMILIES", "DemandModel", "create_model", "load_model"]

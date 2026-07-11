@@ -11,12 +11,15 @@ artifact — the folder ``data/ml/forecasts/<forecast_name>/`` with
 ``demand.parquet`` and ``meta.json`` that a forecast run (Notations.md §11)
 is loaded from.
 
-Two builders save an artifact:
+Three builders save an artifact:
 
 - :func:`build_seasonal_naive_forecast` — the phase-1 path: from one trip
   CSV's demand and period grid, seasonal naive only.
 - :func:`build_model_forecast` — from the training partitions, any model
-  family by name.
+  family by name, fitted on the spot.
+- :func:`build_champion_forecast` — the platform's path (plan, phase 6):
+  the fitted champion resolved from the model registry by its alias
+  (Notations.md §17), never by a file path.
 
 Terminal use (one command each; wrapped here for width)::
 
@@ -25,6 +28,9 @@ Terminal use (one command each; wrapped here for width)::
 
     python -m gbp.ml.forecast --model lightgbm --months 202502 ... 202512
         --forecast-name lightgbm_202601 --horizon-periods 744
+
+    python -m gbp.ml.forecast --champion --forecast-name champion_202602
+        --horizon-periods 744
 """
 
 from __future__ import annotations
@@ -345,6 +351,30 @@ def build_seasonal_naive_forecast(
     return save_forecast(forecast_demand_df, meta, root)
 
 
+def _horizon_weather(
+    t0: pd.Timestamp,
+    horizon_end: pd.Timestamp,
+    raw: pathlib.Path | None,
+    weather_df: pd.DataFrame | None,
+    log: Callable[[str], None],
+) -> pd.DataFrame | None:
+    """Return the horizon's published daily weather, or None when unreachable.
+
+    A true future horizon has no published weather; whatever NOAA has for the
+    horizon dates is used, unpublished dates leave the weather features NaN,
+    and a fully unreachable weather source is skipped with a note — the
+    models accept missing values. A caller-supplied ``weather_df`` is
+    returned unchanged.
+    """
+    if weather_df is not None:
+        return weather_df
+    try:
+        return load_weather_daily(t0, horizon_end - pd.Timedelta(days=1), raw)
+    except OSError as error:
+        log(f"weather unavailable, features stay NaN: {error}")
+        return None
+
+
 def build_model_forecast(
     model_name: str,
     train_months: list[str],
@@ -406,12 +436,7 @@ def build_model_forecast(
     t0 = month_bounds(months[-1])[1]
     forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, DEFAULT_PERIOD_LEN)
     horizon_end = forecast_periods_df["end_timestamp"].iloc[-1]
-    if weather_df is None:
-        try:
-            weather_df = load_weather_daily(t0, horizon_end - pd.Timedelta(days=1), raw)
-        except OSError as error:
-            log(f"weather unavailable, features stay NaN: {error}")
-            weather_df = None
+    weather_df = _horizon_weather(t0, horizon_end, raw, weather_df, log)
     history = load_history_counts(t0.strftime("%Y%m"), training_root)
     log(f"Predicting {horizon_periods} periods from {t0} ...")
     fractional = model.predict(forecast_input(history, forecast_periods_df, weather_df))
@@ -431,18 +456,114 @@ def build_model_forecast(
     return save_forecast(forecast_demand_df, meta, root)
 
 
+def build_champion_forecast(
+    *,
+    horizon_periods: int,
+    forecast_name: str,
+    t0_month: str | None = None,
+    root: pathlib.Path | None = None,
+    training_root: pathlib.Path | None = None,
+    raw: pathlib.Path | None = None,
+    tracking_dir: pathlib.Path | None = None,
+    weather_df: pd.DataFrame | None = None,
+    log: Callable[[str], None] = print,
+) -> pathlib.Path:
+    """Build a forecast with the champion, resolved from the registry by its alias.
+
+    The platform's forecast path (plan, phase 6): the model is the fitted
+    version the ``champion`` alias points at (``resolve_champion`` in
+    ``gbp/ml/registry.py``) — no refitting, no file paths. The saved
+    ``meta.json`` records the family as ``model_name`` and the registry
+    version number as ``model_version``; the version's own training months
+    live on its registry tags. The ``history_*`` fields and ``inputs`` name
+    what the forecast input read: the training partitions of the
+    ``HISTORY_WEEKS`` window before the horizon.
+
+    Parameters
+    ----------
+    horizon_periods : int
+        How many one-hour periods the forecast covers.
+    forecast_name : str
+        Folder name of the forecast artifact.
+    t0_month : str, optional
+        The month the horizon starts at, as ``YYYYMM`` — the forecast then
+        starts at that month's first hour. Default: right after the newest
+        training partition on disk.
+    root, training_root, raw, tracking_dir : pathlib.Path, optional
+        Folder overrides for the forecast artifacts, the training
+        partitions, the raw files, and the MLflow store.
+    weather_df : pandas.DataFrame, optional
+        Daily weather for the horizon dates; without it the published
+        weather is loaded (and missing dates stay NaN).
+    log : callable, optional
+        Where progress notes go (default: ``print``).
+
+    Returns
+    -------
+    pathlib.Path
+        The saved forecast artifact folder.
+    """
+    # Imported here, not at the top: the registry drags in MLflow and the
+    # training module is the partition builder — only this builder needs them.
+    from gbp.ml.registry import resolve_champion
+    from gbp.ml.training import history_months, load_history_counts, partition_path, training_dir
+
+    model, version = resolve_champion(tracking_dir)
+    log(f"Champion: {model.name} version {version.version}")
+
+    if t0_month is None:
+        partitions = sorted((training_root or training_dir()).glob("*.parquet"))
+        if not partitions:
+            raise FileNotFoundError(
+                "no training partitions; build them first (python -m gbp.ml.training)"
+            )
+        t0_month = partitions[-1].stem
+        t0 = month_bounds(t0_month)[1]
+        t0_month = t0.strftime("%Y%m")
+    else:
+        t0 = month_bounds(t0_month)[0]
+
+    forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, DEFAULT_PERIOD_LEN)
+    horizon_end = forecast_periods_df["end_timestamp"].iloc[-1]
+    weather_df = _horizon_weather(t0, horizon_end, raw, weather_df, log)
+    history = load_history_counts(t0_month, training_root)
+    log(f"Predicting {horizon_periods} periods from {t0} ...")
+    fractional = model.predict(forecast_input(history, forecast_periods_df, weather_df))
+    forecast_demand_df = round_forecast_demand(fractional)
+    window = [m for m in history_months(t0_month) if partition_path(m, training_root).exists()]
+    meta = ForecastMeta(
+        forecast_name=forecast_name,
+        model_name=model.name,
+        model_version=str(version.version),
+        created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+        t0=pd.Timestamp(t0).isoformat(),
+        horizon_periods=horizon_periods,
+        period_len_hours=DEFAULT_PERIOD_LEN / pd.Timedelta(hours=1),
+        history_start=pd.Timestamp(month_bounds(window[0])[0] if window else t0).isoformat(),
+        history_end=pd.Timestamp(t0).isoformat(),
+        inputs=[f"{month}.parquet" for month in window],
+    )
+    return save_forecast(forecast_demand_df, meta, root)
+
+
 def main() -> None:
     """Terminal entry point: build one forecast artifact.
 
-    Two modes: ``--trips-path`` builds the phase-1 seasonal naive from one
+    Three modes: ``--trips-path`` builds the phase-1 seasonal naive from one
     raw trip CSV; ``--months`` (with ``--model``) trains any model family on
-    the training partitions.
+    the training partitions; ``--champion`` predicts with the fitted version
+    the registry's champion alias points at.
     """
     parser = argparse.ArgumentParser(description="Build a forecast demand table and save it.")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--trips-path", help="raw trip CSV path (seasonal naive only)")
     source.add_argument(
         "--months", nargs="+", help="training months, as YYYYMM or YYYY-MM (any --model)"
+    )
+    source.add_argument(
+        "--champion",
+        action="store_true",
+        help="predict with the registry champion, no refitting",
     )
     parser.add_argument(
         "--model", default="seasonal_naive", help="model family name (default: seasonal_naive)"
@@ -452,12 +573,30 @@ def main() -> None:
         "--horizon-periods", type=int, default=168, help="periods to forecast (default: one week)"
     )
     parser.add_argument(
+        "--t0-month",
+        default=None,
+        help="month the horizon starts at, as YYYYMM (--champion mode only; "
+        "default: right after the newest training partition)",
+    )
+    parser.add_argument(
         "--period-len-hours",
         type=float,
         default=1.0,
         help="wall-clock length of one period (--trips-path mode only)",
     )
     args = parser.parse_args()
+
+    if args.champion:
+        folder = build_champion_forecast(
+            horizon_periods=args.horizon_periods,
+            forecast_name=args.forecast_name,
+            t0_month=args.t0_month,
+        )
+        _, meta = load_forecast(args.forecast_name)
+        print(f"Saved {folder}")
+        print(f"Model: {meta.model_name} version {meta.model_version}")
+        print(f"Horizon: {meta.horizon_periods} periods from {meta.t0}")
+        return
 
     if args.months:
         folder = build_model_forecast(

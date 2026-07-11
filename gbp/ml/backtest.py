@@ -50,10 +50,11 @@ import mlflow
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN, get_forecast_periods_df
-from gbp.ml.data import load_weather_daily, ml_dir, month_bounds, normalize_month
+from gbp.ml.data import load_weather_daily, month_bounds, normalize_month
 from gbp.ml.forecast import forecast_input
 from gbp.ml.metrics import forecast_metrics
 from gbp.ml.models import MODEL_FAMILIES, create_model
+from gbp.ml.registry import configure_mlflow, ensure_experiment
 from gbp.ml.training import (
     load_history_counts,
     load_training_table,
@@ -202,14 +203,8 @@ def run_backtest(
     splits = backtest_splits(months, n_splits)
     version = data_version()
 
-    # The local store: runs in one SQLite file, artifacts in a folder next
-    # to it (MLflow 3 no longer accepts a plain-directory store).
-    store = (tracking_dir or (ml_dir() / "mlflow")).resolve()
-    store.mkdir(parents=True, exist_ok=True)
-    mlflow.set_tracking_uri(f"sqlite:///{store / 'mlflow.db'}")
-    if mlflow.get_experiment_by_name(EXPERIMENT_NAME) is None:
-        mlflow.create_experiment(EXPERIMENT_NAME, artifact_location=(store / "artifacts").as_uri())
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    store = configure_mlflow(tracking_dir)
+    ensure_experiment(EXPERIMENT_NAME, store)
 
     records: list[dict[str, object]] = []
     for index, split in enumerate(splits):
