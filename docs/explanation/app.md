@@ -29,6 +29,7 @@ describes the local backend; the switch and the server side are in
 |---|---|
 | `runner.py` | Owns `build_graph_data` and `run_scenario`; the terminal entry point. |
 | `artifacts.py` | Owns the `build_*` functions, the `METRICS` table, and save/load. |
+| `evaluate.py` | The two-level evaluation (Notations.md §17): a second terminal entry point that runs the simulator on the actual demand and on each model's forecast, saves normal run artifacts, and writes `data/ml/evaluation/<month>/comparison.csv`. |
 | `main.py` | The Streamlit entry point: the page list and navigation. |
 | `backend.py` | The one place the app chooses its backend — local files, or HTTP when `API_URL` is set — for reading runs and for starting them. |
 | `ui_shared.py` | Shared page helpers: cached loaders, scenario pickers, the KPI row, colors, charts. |
@@ -65,20 +66,27 @@ the run parameters, so callers run it once and reuse the result.
 `run_scenario(graph_data, run_name=..., demand_scale_factor=..., ...)` does
 one run against loaded data:
 
-1. If rebalancing is on, apply the truck fleet to a shallow copy
+1. If `demand_source="forecast"`, load the named forecast from
+   `data/ml/forecasts/` and put its demand table in place of the historical
+   one (`apply_forecast_demand`, see [dataloader.md](dataloader.md)). The
+   run becomes a forecast run (Notations.md §11): its period grid is the
+   forecast horizon, and the OD matrix is the historical one pooled per
+   hour of week.
+2. If rebalancing is on, apply the truck fleet to a shallow copy
    (`apply_truck_fleet`) and append the two rebalancing phases to
    `canonical_phases()`.
-2. Call `run_sized_scenario`: size the initial state against
+3. Call `run_sized_scenario`: size the initial state against
    `sizing_scale_factor`, run the demand at `demand_scale_factor`, collect
    the invariant violations. It is called with `validate=False`, so a
    violated invariant is recorded in `meta.json` instead of raising.
-3. Save the folder with `artifacts.save_scenario_run` — the one operation
+4. Save the folder with `artifacts.save_scenario_run` — the one operation
    that builds the five tables (`build_run_tables`) and `meta.json`
    (`build_meta`) from the run result and the scenario data, then writes
    them (`save_run`). Besides the run parameters, `meta.json` records where
    the run came from: `inputs` (the raw file name, taken from
-   `data.trips_path`) and `code_version` (the git commit, `-dirty` when the
-   working tree had uncommitted changes).
+   `data.trips_path`), `code_version` (the git commit, `-dirty` when the
+   working tree had uncommitted changes), `demand_source`, and — for a
+   forecast run — `forecast_name`.
 
 Note: `run_scenario` must not modify `graph_data`. The Run page shares one
 cached `ResolvedModelData` across runs, so the sized state stays inside
@@ -100,6 +108,8 @@ The full flag list of `app/runner.py`:
 | `--sizing-scale` | Demand the state is sized for (`sizing_scale_factor`). | `1.0` |
 | `--periods` | How many periods to step. | `50` |
 | `--trips-path` | Path to the raw trip CSV. | `data/raw/202601-citibike-tripdata_1.csv` |
+| `--demand-source` | Where the demand table comes from: `history` or `forecast`. | `history` |
+| `--forecast-name` | Saved forecast to run on (a folder under `data/ml/forecasts/`); required with `--demand-source forecast`. | — |
 | `--rebalancing` | Run with the two overnight rebalancing phases. | off |
 | `--truck-homes` | Home depot per truck, comma-separated; the list length is the fleet size. | 5 trucks at `depot_1` |
 | `--truck-capacity` | Bikes one truck can carry. | `20` |
@@ -173,13 +183,18 @@ when the run ends (no terminal event yet).
 ### The `METRICS` Table
 
 A metric is one value the UI can show. The `Metric` dataclass describes each
-one once — column name, full label, short label, unit, and whether it is a
-panel column, enters `meta["totals"]`, or gets a KPI tile:
+one once — the column name (`name`), the display title (`title`), the short
+label for the map hover box (`short`), the unit, and whether it is a panel
+column, enters `meta["totals"]`, or gets a KPI tile:
 
 ```python
-Metric("lost_demand", "Lost demand (lost_demand)", "Lost (stockout)",
+Metric("lost_demand", "Lost demand", "Lost (stockout)",
        panel_value=True, panel_total=True, kpi=True, more_is_worse=True),
 ```
+
+The full picker label — the title plus the column name in braces, here
+"Lost demand (lost_demand)" — is not stored; the property `Metric.label`
+builds it from the two fields.
 
 `PANEL_VALUES`, the UI label dictionaries, the KPI row and the totals in
 `meta.json` are all built from this one list. A metric with `panel_value=True`,
@@ -192,11 +207,17 @@ picker, KPI and totals lists.
 
 ### Save And Load
 
-`save_run` writes the five parquet files first and `meta.json` last, so a
-folder with a `meta.json` is always a complete artifact — `list_runs` keys on
-that file. `load_run_table` and `load_run_meta` are the raw file reads.
-`load_run_table` is called only by the `ui_shared` loader (pages go through
-its typed accessors). `load_run_meta` has more callers: the API endpoints in
+Before writing anything, `save_run` checks every table against its pandera
+schema (`RUN_TABLE_SCHEMAS`); a wrong column set raises "run tables break
+their schemas" and no file is written. Then it writes the five parquet files
+first and `meta.json` last, so a folder with a `meta.json` is always a
+complete artifact — `list_runs` keys on that file.
+
+`load_run_table` and `load_run_meta` are the raw file reads. Pages never
+call `load_run_table` themselves: they go through the `ui_shared` typed
+accessors, which reach it via the disk backend (`backend.py`). Outside the
+UI it is called by `app/evaluate.py`, which compares the panels of its
+evaluation runs. `load_run_meta` has more callers: the API endpoints in
 `app/api.py` and the runner's terminal entry point, which prints the totals
 of the run it just saved.
 
@@ -258,6 +279,7 @@ The pages, and which artifact tables each reads:
 | Costs | `views/costs.py` | `flow_totals` |
 | Distance & duration | `views/distance_duration.py` | `flow_totals` |
 | Single facility | `views/facility_detail.py` | `panel`, `facilities` |
+| Model monitoring | `views/model_monitoring.py` | not run artifacts: the metrics table and drift reports in `data/ml/monitoring/`, saved by `python -m gbp.ml.monitoring` |
 | Download data | `views/downloads.py` | `flow_totals`, `panel` as CSV downloads |
 
 "Run scenario" is the one page that starts anything slow: it calls

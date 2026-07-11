@@ -22,18 +22,25 @@ in [scenarios.md](scenarios.md).
 
 ## Code Map
 
-Everything lives in one file, `gbp/model/flows.py`. Its parts, top to bottom:
+The model layer is two files in `gbp/model/`. `journal_schema.py` holds the
+shape contract of the event table: the pandera schema
+(`FLOW_EVENT_SCHEMA`), the canonical value sets (`EVENT_TYPES`,
+`FLOW_TYPES`, `LOSS_REASONS`), and `check_journal_schema` /
+`schema_violations`. Everything else lives in `flows.py`. Its parts, top to
+bottom:
 
 | Part | Names |
 |---|---|
 | Schema | `FLOW_EVENT_COLUMNS`, `FLOW_EVENT_DTYPES`, the `*_RANK` constants, `DOCKING_EVENT_TYPES` |
 | Inventory predicates | `is_undocking`, `is_user_departure`, `is_docking` |
 | Inventory delta rule | `_event_deltas` (the one `+1`/`-1` rule), `inventory_deltas_from_events` (the write-time batch form, used by `SimulationState.apply_step_events`) |
+| Occupancy | `occupancy_per_facility` — inventory summed across commodities, because the docks are shared |
 | Event builders | `departed_events`, `arrived_events`, `redirected_events`, `redirect_leg_events`, `lost_events`, `rebalance_departed_events`, `rebalance_arrived_events` |
 | Empty frames | `empty_in_transit`, `empty_flows_journal` |
 | In-transit set | `in_transit_after_events` (the working set after one event batch) |
 | Finalizing | `phase_rank_by_timing`, `stamp_history_ordering` (the history rule for the order columns), `finalize_flows` |
-| Marginals | `flows_to_departures`, `flows_to_arrivals`, `flows_to_redirects`, `flows_to_losses`, `flows_to_od_matrix`, `flows_to_panel`, `get_inventory_df`, `inventory_at_moments` |
+| Marginals | `flows_to_departures`, `flows_to_arrivals`, `flows_to_redirects`, `flows_to_losses`, `flows_to_od_matrix`, `get_inventory_df`, `inventory_at_moments` |
+| The panel | `flows_to_panel`, with its column lists `PANEL_KEYS` / `PANEL_VALUES` |
 | Wide views | `flows_with_inventory`, `flows_with_costs`, `flows_with_measures` |
 | Geometry helpers | `haversine_km`, `neighbor_distance_sq` |
 | Redirect explainer | `redirect_neighbor_table` |
@@ -241,6 +248,20 @@ Because both the historical and the simulated journal go through these same
 functions, an exact replay produces equal historical and simulated marginals
 by construction.
 
+### The Panel (`flows_to_panel`)
+
+`flows_to_panel(flows, initial_inventory)` is the consolidated read-model:
+one row per `(period_id, facility_id, commodity_category)` with the period's
+values side by side. It starts from `get_inventory_df` (`quantity_sop` /
+`quantity_eop`), merges one marginal per column — `departed`, `arrived`,
+`redirected`, `lost_demand`, `lost_dock_full` — and sets
+`demand = departed + lost_demand`. After each merge it checks that the merge
+dropped no events; a mismatch means an event happened at a
+`(facility, commodity)` pair the inventory grid does not know, and it raises.
+The exported lists `PANEL_KEYS` / `PANEL_VALUES` name its key and value
+columns. This is the table the artifact builder saves as `panel.parquet` and
+every map view of the UI slices.
+
 ### Inventory
 
 Inventory is not stored per period anywhere. It is computed from the journal
@@ -352,6 +373,11 @@ A `redirected` is not terminal — the flow rides on. A flow whose latest leg is
 due past the last period is legitimately still in transit. Zero terminals for
 a due flow means a bike vanished; more than one means a double close.
 
+The shape rules of a single row — the columns, the value sets, `move_id ==
+event_id // 2`, which fields each event type fills — live in
+`gbp/model/journal_schema.py` as `check_journal_schema`. The simulator-level
+`validate_run` runs that shape check first, then I1–I5.
+
 The other run invariants (I3–I5) need the live simulator state, so they live
 in `gbp/consumers/simulator/validation.py` and are described in
 [simulator.md](simulator.md#invariants).
@@ -360,10 +386,10 @@ in `gbp/consumers/simulator/validation.py` and are described in
 
 | Caller | Uses |
 |---|---|
-| `gbp/loaders/dataloader_graph.py` | builders and `finalize_flows` to build the historical journal; the marginals for the historical tables; `inventory_at_moments` for the replay sizing |
-| `gbp/consumers/simulator/` | builders inside the phases; `flows_to_departures` and friends as the live read-models on the state; `neighbor_distance_sq` in the redirect mechanics; `finalize_flows` at run end |
-| `gbp/consumers/simulator/validation.py` | `check_demand_split`, `check_flow_closure`, `get_inventory_df`, `inventory_at_moments` |
-| `app/artifacts.py` | `flows_with_measures`, `get_inventory_df`, the marginals — to build the saved run tables |
+| `gbp/loaders/dataloader_graph.py` | builders, `stamp_history_ordering` and `finalize_flows` to build the historical journal; the marginals and `get_inventory_df` for the historical tables and, in `attach_simulation`, for their simulated twins; `inventory_at_moments` for the replay sizing |
+| `gbp/consumers/simulator/` | builders inside the phases; `inventory_deltas_from_events` and `in_transit_after_events` in `SimulationState.apply_step_events`; `neighbor_distance_sq` in the redirect mechanics; `finalize_flows` at run end. The simulated marginals are not computed here — the loader's `attach_simulation` builds them after the run. |
+| `gbp/consumers/simulator/validation.py` | `check_demand_split`, `check_flow_closure`, `get_inventory_df`, `inventory_at_moments` — after `check_journal_schema` from `journal_schema.py` |
+| `app/artifacts.py` | `flows_with_measures` for `flows.parquet`; `flows_to_panel` for `panel.parquet` (it wraps `get_inventory_df` and the marginals) |
 
 ## Why It Is Built This Way
 

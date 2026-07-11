@@ -16,6 +16,10 @@ The loaders do three things:
    from the journal, such as inventory, departures, arrivals, or the OD matrix.
 3. They compute `initial_inventory_df` for the base replay and provide the
    sizing helpers that `size_state_for_demand` uses for scaled runs.
+4. They own the two run-parameter substitutions, each a shallow copy with a
+   few tables replaced: `apply_truck_fleet` replaces the truck fleet, and
+   `apply_forecast_demand` replaces the demand with a saved forecast (see
+   "Running On Forecast Demand").
 
 The terms are the same as in [`Notations.md`](../../Notations.md). What the
 simulator does with these tables is [simulator.md](simulator.md). The journal
@@ -26,7 +30,7 @@ functions used here are explained in [flow_journal.md](flow_journal.md).
 | File | Main role |
 |---|---|
 | `dataloader_raw.py` | Reads the trip CSV, builds raw tables, and owns `RawModelData`. |
-| `dataloader_graph.py` | Builds `ResolvedModelData` from `RawModelData`; owns `apply_truck_fleet` and `attach_simulation`. |
+| `dataloader_graph.py` | Builds `ResolvedModelData` from `RawModelData`; owns `apply_truck_fleet`, `apply_forecast_demand`, and `attach_simulation`. |
 
 One scenario flows through the two files like this:
 
@@ -132,7 +136,7 @@ into one flow with two events:
 departed = departed_events(trips)
 arrived = arrived_events(trips, trips["planned_end_period"])
 journal = pd.concat([departed, arrived], ignore_index=True)
-journal["phase_rank"] = phase_rank_by_timing(journal)
+journal = stamp_history_ordering(journal)
 flows = finalize_flows(journal)
 violations = check_journal_schema(flows)
 if violations:
@@ -336,6 +340,55 @@ function rejects an empty list and any home that is not a depot facility. Other
 resolved tables are shared with the original object, so changing the fleet does
 not rebuild them. The Run page of the UI and the `--truck-homes` runner flag
 call this function.
+
+## Running On Forecast Demand
+
+A forecast run ([Notations.md §11](../../Notations.md#11-run-kinds)) replays
+a forecast demand table — demand predicted by a model
+([Notations.md §17](../../Notations.md#17-demand-forecasting-the-model-around-the-simulator)) —
+instead of history. `apply_forecast_demand(resolved, forecast_demand_df,
+forecast_periods_df)` is a sibling of `apply_truck_fleet`: it returns a
+shallow copy with four fields replaced.
+
+```python
+out = copy.copy(resolved)
+out.periods_df = forecast_periods_df
+out.t0 = forecast_periods_df["start_timestamp"].iloc[0]
+out.historical_demand_df = forecast_demand_df
+out.historical_od_matrix_df = od_matrix_df
+return out
+```
+
+The forecast table sits in the `historical_demand_df` slot because that is
+the one demand slot the engine reads. The period grid becomes the forecast
+horizon, built by `get_forecast_periods_df(t0, number_of_periods,
+period_len)`: period ids restart at 0, because a forecast run is its own
+scenario with its own clock. Facilities, capacities, routes, and the
+historical observations are shared with the original object, unchanged.
+
+Forecast periods have no history, so they have no OD matrix of their own.
+`map_od_matrix_by_hour_of_week` builds one from the historical matrix. The
+key is the hour of week — `weekday * 24 + hour`, 0..167, computed by
+`hour_of_week`. The historical OD rows that share an hour of week form one
+pool (Monday 08:00 across all weeks is one pool), and every forecast period
+gets the pool of its own hour of week. Within a pool, per `(source, target,
+commodity)`: `count` is the sum of the historical counts, `duration` is the
+count-weighted mean of the historical mean durations (rounded to whole
+periods), and `probability` is recomputed as the pair's share of the pool's
+total, so the shares sum to 1 again.
+
+Like the loader itself, `apply_forecast_demand` is a load boundary. It
+checks the two incoming tables against their schemas (`PERIODS_SCHEMA`,
+`HISTORICAL_DEMAND_SCHEMA`), rejects a forecast grid whose period length
+differs from the scenario's, and adds two cross-table checks a schema cannot
+express: every demand facility must exist in the facility table, and every
+demanded `(facility, commodity, period)` must have OD rows — otherwise the
+engine would silently drop those departures and break the demand-split
+invariant (I1).
+
+The callers are `app/runner.py` (`--demand-source forecast`, which loads the
+named forecast from `data/ml/forecasts/`) and `app/evaluate.py` (the
+two-level evaluation).
 
 ## After A Run: `attach_simulation`
 

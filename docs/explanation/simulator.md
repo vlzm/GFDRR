@@ -191,6 +191,15 @@ The sizing run always uses the canonical three user-trip phases. If the real run
 uses rebalancing, the rebalancing effect is measured against the sized user-trip
 state instead of being hidden by the sizing step.
 
+One more parameter separates what is sized from what runs: `sizing_data`.
+By default the sizing run measures `resolved` itself. Passing different data
+sizes the state on one demand table while the run faces another; the gap
+between the two shows up as lost and redirected events. The two-level
+evaluation uses this for its replay-state forecast runs (Notations.md §11):
+the state is sized on the month's actual demand (`sizing_data`), the run
+faces a model's forecast (`resolved`). The two must describe the same
+scenario — same facilities, period grid, and OD matrix.
+
 ## The Phase List
 
 The canonical phase list is:
@@ -222,7 +231,9 @@ So one full period can have five phases:
 | 4 | `PlanRebalancingPhase(params)` | 3 | Only at `window_start_hour` |
 | 5 | `ApplyRebalancingPhase()` | 3 | Only when rebalancing is enabled and work exists |
 
-Each phase class declares its `phase_rank` once, as a class attribute. A normal
+Each phase declares its `phase_rank` once. Three classes set it as a class
+attribute; `DockArrivals` sets it in `__init__`, because the rank depends on
+the `when` argument (`"previous"` → 0, `"same"` → 2). A normal
 phase implements one method, `build_events`: it reads the state and returns
 this period's events. The base class writes them through `apply_step_events`
 with the declared rank. The two rebalancing phases override `execute` instead,
@@ -411,8 +422,8 @@ It does this:
 3. Build `imbalance`: positive values mean pickup side, negative values mean
    dropoff side.
 4. Reduce planned dropoffs to the free docks available at planning time.
-5. Split large pickup and dropoff amounts into nodes.
-6. Match total pickup and dropoff amounts per commodity.
+5. Match total pickup and dropoff amounts per commodity.
+6. Split large pickup and dropoff amounts into nodes.
 7. Route trucks through the nodes.
 8. Convert route stops into a bike-level `rebalance_plan`.
 

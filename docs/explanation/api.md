@@ -123,6 +123,8 @@ Starts one run. The body mirrors the keyword parameters of
   "demand_scale_factor": 2.0,
   "sizing_scale_factor": 1.0,
   "number_of_periods": 50,
+  "demand_source": "history",
+  "forecast_name": null,
   "rebalancing": false,
   "truck_homes": null,
   "truck_capacity_bikes": 20
@@ -132,6 +134,17 @@ Starts one run. The body mirrors the keyword parameters of
 `run_name` must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` — plain file-name
 characters, so it always names a folder inside the runs root. A name outside
 the pattern is rejected with a validation error before anything is queued.
+
+`demand_source` picks where the demand comes from: `"history"` (the default)
+replays the historical demand; `"forecast"` starts a forecast run
+([Notations.md §11](../../Notations.md#11-run-kinds)) — the run reads a saved
+forecast demand table instead of history. `forecast_name` then names a
+forecast artifact on the **server's** disk (`data/ml/forecasts/<forecast_name>/`,
+[Notations.md §17](../../Notations.md#17-demand-forecasting-the-model-around-the-simulator)).
+Like the trips path, the forecast list is a server matter: there is no
+list-forecasts endpoint, the client sends a name, and an unknown name fails
+the run (the `status` endpoint reports `failed` with the error text). The
+run's `meta.json` records both fields.
 
 The server resolves the final name itself and answers `202` with it:
 
@@ -205,7 +218,11 @@ the pages, pickers, KPI row, and charts are the same in both backends.
   and resolves the name with `next_free_run_name`; on the API backend it
   sends `POST /runs` and polls `GET /runs/{run_name}/status` (the server
   resolves the final run name). Both stream the same `progress` lines into
-  the page's status box.
+  the page's status box. Two inputs are server settings on the API backend:
+  the trips path (`TRIPS_PATH`) and the forecast list (`data/ml/forecasts/`
+  on the server's disk). The backend methods `default_trips_path()` and
+  `list_forecasts()` return `None` there, so the page shows a plain
+  forecast-name text field instead of a picker.
 
 Local development stays a one-process command: `streamlit run app/main.py`
 with no `API_URL` reads the disk directly. The server runs both processes and
