@@ -98,13 +98,14 @@ def run_sized_scenario(
         away.
     sizing_data : ResolvedModelData, optional
         The scenario data the sizing run measures. Default: ``resolved``
-        itself, which gives a clean run. Passing different data gives a
-        forecast-sized run (Notations.md §11): the state is sized for the
-        demand in ``sizing_data`` (a forecast), the run faces the demand in
-        ``resolved`` (the actual), and the gap between the two shows up as
-        lost and redirected events. The two must describe the same scenario
-        — same facilities, period grid, and OD matrix — or the sized state
-        is meaningless.
+        itself, which gives a clean run. Passing different data sizes the
+        state on one demand table while the run faces another; the gap
+        between the two shows up as lost and redirected events. The
+        two-level evaluation uses this for its replay-state forecast runs
+        (Notations.md §11): the state is sized on the actual demand
+        (``sizing_data``), the run faces a forecast (``resolved``). The two
+        must describe the same scenario — same facilities, period grid, and
+        OD matrix — or the sized state is meaningless.
 
     Returns
     -------

@@ -140,11 +140,14 @@ def ensure_forecast(
 
     The forecast is named ``<model>_<month>`` and trains on every training
     partition before the month — the same window as the backtest split that
-    tests this month. An existing artifact is checked, not rebuilt: its
-    horizon must start at the month's first hour and cover the month.
+    tests this month. A missing artifact is built for the whole month, so
+    one artifact serves any evaluation window. An existing artifact is
+    checked, not rebuilt: its horizon must start at the month's first hour
+    and cover ``horizon_periods``.
     """
     month = normalize_month(month)
     name = f"{model_name}_{month}"
+    start, end = month_bounds(month)
     if name not in forecast.list_forecasts():
         train_months = [p.stem for p in sorted(training_dir().glob("*.parquet")) if p.stem < month]
         if not train_months:
@@ -152,12 +155,11 @@ def ensure_forecast(
         forecast.build_model_forecast(
             model_name,
             train_months,
-            horizon_periods=horizon_periods,
+            horizon_periods=int((end - start) / pd.Timedelta(hours=1)),
             forecast_name=name,
             log=log,
         )
     _, meta = forecast.load_forecast(name)
-    start, _ = month_bounds(month)
     if pd.Timestamp(meta.t0) != start or meta.horizon_periods < horizon_periods:
         raise ValueError(
             f"forecast {name} covers {meta.horizon_periods} periods from {meta.t0}; "
@@ -183,7 +185,8 @@ def _ensure_run(
     The demand goes in through :func:`apply_forecast_demand` — the forecast-run
     path — and the artifact is saved exactly as the runner saves one. With
     ``sizing_demand_df`` the state is sized on that table instead of the run's
-    own demand (a forecast-sized run).
+    own demand; the evaluation passes the actual demand there, so every
+    forecast runs against the replay state.
     """
     if run_name in artifacts.list_runs(root):
         log(f"{run_name}: exists, skipping")
@@ -263,6 +266,7 @@ def evaluate_month(
     model_names: list[str],
     trips_path: str | None = None,
     root: pathlib.Path | None = None,
+    n_periods: int | None = None,
     log: Callable[[str], None] = print,
 ) -> pd.DataFrame:
     """Build every evaluation run for one held-out month and compare them.
@@ -270,17 +274,28 @@ def evaluate_month(
     The steps, in order: resolve the scenario from the canonical trip CSV,
     cut the actual demand and every model's forecast to the scenario
     (:func:`restrict_demand_to_scenario`), save the reference run, then per
-    model the forecast run and the forecast-sized run, and read one
-    comparison row off every saved run. Level-1 metrics are computed on the
-    restricted whole-bike tables — the exact tables the runs consumed.
+    model one replay-state forecast run — the forecast demand against the
+    state sized on the actual demand — and read one comparison row off
+    every saved run. Level-1 metrics are computed on the restricted
+    whole-bike tables — the exact tables the runs consumed.
+
+    ``n_periods`` shortens the window: only the first ``n_periods`` hours of
+    the month are compared (default: the whole month). A shortened window
+    runs proportionally faster; its runs and its comparison file carry the
+    window in their names (``eval_<month>_<N>p_...``,
+    ``comparison_<N>p.csv``), so they never mix with the full-month ones.
 
     Returns the comparison table and writes it to
-    ``data/ml/evaluation/<month>/comparison.csv``.
+    ``data/ml/evaluation/<month>/``.
     """
     month = normalize_month(month)
     start, end = month_bounds(month)
-    horizon_periods = int((end - start) / pd.Timedelta(hours=1))
+    month_hours = int((end - start) / pd.Timedelta(hours=1))
+    horizon_periods = month_hours if n_periods is None else min(n_periods, month_hours)
     periods_df = get_forecast_periods_df(start, horizon_periods, pd.Timedelta(hours=1))
+    prefix = (
+        f"eval_{month}" if horizon_periods == month_hours else f"eval_{month}_{horizon_periods}p"
+    )
 
     forecast_names = {
         name: ensure_forecast(name, month, horizon_periods, log) for name in model_names
@@ -289,13 +304,13 @@ def evaluate_month(
     log("Resolving the scenario from the canonical trip CSV ...")
     graph_data = build_graph_data(trips_path) if trips_path else build_graph_data()
 
-    actual_df, dropped = restrict_demand_to_scenario(
-        actual_demand_table(month), graph_data, periods_df
-    )
+    actual_month_df = actual_demand_table(month)
+    actual_month_df = actual_month_df[actual_month_df["period_id"] < horizon_periods]
+    actual_df, dropped = restrict_demand_to_scenario(actual_month_df, graph_data, periods_df)
     log(f"actual demand: {actual_df['quantity'].sum():,} bikes ({dropped:.2%} dropped by the cut)")
     busy = busy_facility_ids(actual_df)
 
-    reference_name = f"eval_{month}_reference"
+    reference_name = f"{prefix}_reference"
     _ensure_run(
         graph_data,
         actual_df,
@@ -309,6 +324,7 @@ def evaluate_month(
     rows = [
         {
             "month": month,
+            "periods": horizon_periods,
             "model": "actual",
             "run_kind": "reference",
             **_run_row(reference_name, root),
@@ -317,6 +333,7 @@ def evaluate_month(
 
     for model_name in model_names:
         forecast_demand_df, _ = forecast.load_forecast(forecast_names[model_name])
+        forecast_demand_df = forecast_demand_df[forecast_demand_df["period_id"] < horizon_periods]
         forecast_df, dropped = restrict_demand_to_scenario(
             forecast_demand_df, graph_data, periods_df
         )
@@ -326,7 +343,10 @@ def evaluate_month(
             f"({dropped:.2%} dropped by the cut), mae={level_1['mae']:.4f}"
         )
 
-        run_name = f"eval_{month}_{model_name}_forecast"
+        # The replay-state forecast run: the state is sized on the actual
+        # demand (the same state the reference run used), only the demand
+        # table is the model's.
+        run_name = f"{prefix}_{model_name}_forecast"
         _ensure_run(
             graph_data,
             forecast_df,
@@ -334,30 +354,7 @@ def evaluate_month(
             run_name=run_name,
             demand_source="forecast",
             forecast_name=forecast_names[model_name],
-            root=root,
-            log=log,
-        )
-        panel = artifacts.load_run_table(run_name, "panel", root)
-        rows.append(
-            {
-                "month": month,
-                "model": model_name,
-                "run_kind": "forecast",
-                **_run_row(run_name, root),
-                **{f"level1_{key}": value for key, value in level_1.items()},
-                "panel_departed_mae": _panel_departed_mae(panel, reference_panel),
-            }
-        )
-
-        run_name = f"eval_{month}_{model_name}_forecast_sized"
-        _ensure_run(
-            graph_data,
-            actual_df,
-            periods_df,
-            run_name=run_name,
-            demand_source="history",
-            forecast_name=forecast_names[model_name],
-            sizing_demand_df=forecast_df,
+            sizing_demand_df=actual_df,
             root=root,
             log=log,
         )
@@ -367,9 +364,12 @@ def evaluate_month(
         rows.append(
             {
                 "month": month,
+                "periods": horizon_periods,
                 "model": model_name,
-                "run_kind": "forecast_sized",
+                "run_kind": "forecast",
                 **_run_row(run_name, root),
+                **{f"level1_{key}": value for key, value in level_1.items()},
+                "panel_departed_mae": _panel_departed_mae(panel, reference_panel),
                 "lost_demand_busy_share": (
                     float(lost[lost.index.isin(busy)].sum() / total_lost) if total_lost else 0.0
                 ),
@@ -379,8 +379,11 @@ def evaluate_month(
     table = pd.DataFrame(rows)
     out = evaluation_dir(month)
     out.mkdir(parents=True, exist_ok=True)
-    table.to_csv(out / "comparison.csv", index=False)
-    log(f"Saved {out / 'comparison.csv'}")
+    csv_name = (
+        "comparison.csv" if horizon_periods == month_hours else f"comparison_{horizon_periods}p.csv"
+    )
+    table.to_csv(out / csv_name, index=False)
+    log(f"Saved {out / csv_name}")
     return table
 
 
@@ -397,9 +400,16 @@ def main() -> None:
         help="model families to evaluate (default: all four)",
     )
     parser.add_argument("--trips-path", default=None, help="scenario trip CSV override")
+    parser.add_argument(
+        "--periods",
+        type=int,
+        default=None,
+        help="hours to evaluate from the month start, e.g. 168 for one week "
+        "(default: the whole month)",
+    )
     args = parser.parse_args()
 
-    table = evaluate_month(args.month, args.models, args.trips_path)
+    table = evaluate_month(args.month, args.models, args.trips_path, n_periods=args.periods)
     with pd.option_context("display.width", 200):
         print(table.to_string(index=False))
 

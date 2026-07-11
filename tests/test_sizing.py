@@ -60,19 +60,20 @@ def test_sized_inventory_grows_with_the_demand_scale():
     assert int(inventory_2x["quantity"].sum()) > int(inventory_1x["quantity"].sum())
 
 
-def test_forecast_sized_run_loses_the_underpredicted_demand():
-    # A forecast-sized run (Notations.md §11): the state is sized on one demand
-    # table (the forecast), the run faces another (the actual). Here the
-    # "forecast" sees 2 of the 5 stockout-scenario departures, so the sized
-    # inventory holds 2 bikes and the other 3 departures are lost — and the
-    # run invariants still hold (losses are legal outcomes, not violations).
+def test_sizing_data_sizes_the_state_on_another_demand_table():
+    # ``sizing_data`` sizes the state on one demand table while the run faces
+    # another — the seam the replay-state forecast runs (Notations.md §11) go
+    # through. Here the sizing table sees 2 of the 5 stockout-scenario
+    # departures, so the sized inventory holds 2 bikes and the other 3
+    # departures are lost — and the run invariants still hold (losses are
+    # legal outcomes, not violations).
     resolved = scenarios.stockout()
     underprediction = copy.copy(resolved)
     underprediction.historical_demand_df = resolved.historical_demand_df.assign(quantity=2)
 
     result = run_sized_scenario(
         resolved,
-        scenario_id="forecast_sized_test",
+        scenario_id="sizing_data_test",
         number_of_periods=len(resolved.periods_df),
         validate=False,
         sizing_data=underprediction,

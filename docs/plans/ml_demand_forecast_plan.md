@@ -246,12 +246,14 @@ metrics. This is the second level of the two-level evaluation.
 Done when: the report exists for at least two models and states which model
 the platform should use and why.
 
-Done on 2026-07-11: `python app/evaluate.py --month 202601` builds the
-reference run and, per model, a forecast run and a forecast-sized run
-(actual demand against a state sized on the forecast — this is where
-forecast errors become losses). The report for all four families is
-`docs/reports/model_evaluation_202601.md`; it picks SARIMAX for now and
-names LightGBM the candidate once its volume bias is fixed.
+Done on 2026-07-11: `python app/evaluate.py --month 202601 --periods 168`
+builds the reference run and, per model, one replay-state forecast run —
+the physics (initial inventory and dock capacities, sized on the actual
+demand) is the same in every run, only the demand table changes, so the
+difference in run totals against the reference comes from the forecast
+alone. The report for all four families over the month's first week is
+`docs/reports/model_evaluation_202601.md`; the same command without
+`--periods` reruns it on the full month.
 
 ## Phase 6 — model registry and the retraining pipeline
 
