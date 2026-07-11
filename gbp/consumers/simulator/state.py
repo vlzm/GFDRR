@@ -11,9 +11,12 @@ of truth); the rules that mutate the state in a period live in :mod:`mechanics`.
 the in-transit change from the events themselves (the model-layer rules
 :func:`gbp.model.inventory_deltas_from_events` and
 :func:`gbp.model.in_transit_after_events`), so a phase cannot write events that
-disagree with the projections. The marginal observations are exposed as
-read-only properties derived on demand through :mod:`flows`. Dependency
-direction: ``journal <- state <- mechanics <- phases <- engine``.
+disagree with the projections. A decision in the middle of a phase reads the
+inventory through :meth:`SimulationState.inventory_after_events` -- the events
+built so far, applied by the same rule the write applies. The marginal
+observations are exposed as read-only properties derived on demand through
+:mod:`flows`. Dependency direction:
+``journal <- state <- mechanics <- phases <- engine``.
 """
 
 import dataclasses
@@ -32,7 +35,7 @@ from gbp.model import (
 
 
 # ---------------------------------------------------------------------------
-# Inventory arithmetic (also used by phases/mechanics for local decision copies)
+# Inventory arithmetic (also used by mechanics for the redirect's round loop)
 # ---------------------------------------------------------------------------
 def adjust_inventory(inventory: pd.DataFrame, deltas: pd.DataFrame) -> pd.DataFrame:
     """Add signed ``delta`` per (facility_id, commodity_category)."""
@@ -191,6 +194,24 @@ class SimulationState:
         """
         return self.next_step_id, dataclasses.replace(self, next_step_id=self.next_step_id + 1)
 
+    def inventory_after_events(self, new_flows: pd.DataFrame) -> pd.DataFrame:
+        """Inventory as it will stand once these events are written.
+
+        The read for a decision taken in the middle of a phase. A phase writes
+        its events once, at the end (:meth:`apply_step_events`), but a decision
+        inside the phase may depend on the events already built -- where a
+        bounced bike can dock depends on the docks the same phase's planned
+        dockings just took. This read applies the batch's ``+1`` / ``-1`` rule
+        (:func:`gbp.model.inventory_deltas_from_events`) to the current
+        inventory. :meth:`apply_step_events` moves the inventory through this
+        same method, so what a decision sees and what the write produces cannot
+        disagree. The state itself does not change.
+        """
+        deltas = inventory_deltas_from_events(new_flows)
+        if deltas.empty:
+            return self.state_inventory_df
+        return adjust_inventory(self.state_inventory_df, deltas)
+
     def apply_step_events(self, new_flows: pd.DataFrame, phase_rank: int) -> "SimulationState":
         """Write one phase's events as numbered steps and apply what they imply.
 
@@ -212,8 +233,9 @@ class SimulationState:
         The same call maintains the two projections, so events and projections
         cannot disagree:
 
-        - inventory moves by exactly the batch's ``+1`` / ``-1`` rule
-          (:func:`gbp.model.inventory_deltas_from_events`);
+        - inventory moves by exactly the batch's ``+1`` / ``-1`` rule, through
+          :meth:`inventory_after_events` -- the same read a mid-phase decision
+          uses, so the two cannot disagree;
         - ``in_transit`` gains the batch's still-riding ``departed`` rows and
           loses the rows whose arc the batch closes
           (:func:`gbp.model.in_transit_after_events`).
@@ -237,15 +259,9 @@ class SimulationState:
             step_by_round[round_no], working = working.open_step()
         flows["step_id"] = flows["phase_round"].map(step_by_round)
 
-        deltas = inventory_deltas_from_events(flows)
-        inventory = (
-            self.state_inventory_df
-            if deltas.empty
-            else adjust_inventory(self.state_inventory_df, deltas)
-        )
         return dataclasses.replace(
             working.append_flows(flows),
-            state_inventory_df=inventory,
+            state_inventory_df=self.inventory_after_events(flows),
             in_transit=in_transit_after_events(self.in_transit, flows),
         )
 

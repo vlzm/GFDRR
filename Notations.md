@@ -134,6 +134,17 @@ number comes from the counter,
 never from the event columns, so two separately opened steps always get different
 `step_id` values.
 
+**A mid-phase decision reads, it does not write.** A phase writes its events
+once, at the end. But a decision inside the phase may depend on the events the
+phase already built: where a bounced bike can dock depends on the docks the same
+phase's planned dockings just took. That decision reads the inventory through
+`SimulationState.inventory_after_events` — the built events applied to the
+current inventory by the same `+1`/`-1` rule as the write (`apply_step_events`
+moves the inventory through the same method). So a phase never keeps its own
+copy of the inventory arithmetic. The one exception is the redirect's round
+loop inside `plan_overflow_redirect` (mechanics work on plain frames, below the
+state); it keeps a local per-round copy via `dock_deltas`.
+
 **Historical loader: derived from the label.** The loader has no phases and opens
 no step, so it stamps no number. `finalize_flows` then numbers the distinct
 `(period_id, phase_rank, phase_round)` tuples 0, 1, 2, … in sorted order. This is

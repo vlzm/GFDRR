@@ -48,7 +48,6 @@ from gbp.loaders.dataloader_graph import ResolvedModelData
 from gbp.model import (
     REBALANCE_RANK,
     haversine_km,
-    inventory_deltas_from_events,
     rebalance_arrived_events,
     rebalance_departed_events,
 )
@@ -56,7 +55,7 @@ from gbp.model import (
 from .config import EnvironmentConfig
 from .mechanics import dock_up_to_capacity, free_docks
 from .phases import Phase
-from .state import PeriodRow, SimulationState, SimulatorConfigError, adjust_inventory
+from .state import PeriodRow, SimulationState, SimulatorConfigError
 
 # ---------------------------------------------------------------------------
 # Table schemas (Notations.md §14)
@@ -728,20 +727,23 @@ class ApplyRebalancingPhase(Phase):
         if plan.empty and not on_truck.any():
             return state
 
-        # `inventory` is a local decision copy: each round's docking and pickup
-        # decisions must see the docks the earlier rounds took or freed. The
-        # real inventory and in_transit are written by apply_step_events below.
-        inventory = state.state_inventory_df
         home_by_resource = resolved.resources_df.set_index("resource_id")["home_facility_id"]
         capacities = resolved.facilities_capacities_df
         batches: list[pd.DataFrame] = []
 
+        def inventory_now() -> pd.DataFrame:
+            # Each round's docking and pickup decisions must see the docks the
+            # earlier rounds took or freed, so the inventory for the next
+            # decision is read from the state with the rounds built so far
+            # applied. The real write happens once, in apply_step_events below.
+            if not batches:
+                return state.state_inventory_df
+            return state.inventory_after_events(pd.concat(batches, ignore_index=True))
+
         # Round 0 -- dropoffs due now for bikes picked up in an earlier period.
         due_previous = in_transit[on_truck & (in_transit["planned_end_period"] == t)]
         if not due_previous.empty:
-            arrived, inventory = _dock_dropoffs(
-                due_previous, inventory, capacities, home_by_resource, t
-            )
+            arrived = _dock_dropoffs(due_previous, inventory_now(), capacities, home_by_resource, t)
             batches.append(arrived.assign(phase_round=0))
 
         # Round 1 -- this period's pickups, cut to the bikes actually on hand.
@@ -749,7 +751,7 @@ class ApplyRebalancingPhase(Phase):
         if not plan.empty:
             due_pickups = plan[plan["pickup_period"] == t]
             plan = plan[plan["pickup_period"] > t]
-            executed = _pickups_up_to_inventory(due_pickups, inventory)
+            executed = _pickups_up_to_inventory(due_pickups, inventory_now())
             if not executed.empty:
                 departed = rebalance_departed_events(
                     pd.DataFrame(
@@ -765,14 +767,11 @@ class ApplyRebalancingPhase(Phase):
                     )
                 )
                 batches.append(departed.assign(phase_round=1))
-                inventory = adjust_inventory(inventory, inventory_deltas_from_events(departed))
                 due_same = departed[departed["planned_end_period"] == t]
 
         # Round 2 -- dock the dropoffs of bikes picked up within this period.
         if due_same is not None and not due_same.empty:
-            arrived, inventory = _dock_dropoffs(
-                due_same, inventory, capacities, home_by_resource, t
-            )
+            arrived = _dock_dropoffs(due_same, inventory_now(), capacities, home_by_resource, t)
             batches.append(arrived.assign(phase_round=2))
 
         new_state = state
@@ -788,21 +787,19 @@ def _dock_dropoffs(
     capacities: pd.DataFrame,
     home_by_resource: pd.Series,
     period_id: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> pd.DataFrame:
     """Dock dropped-off bikes; what does not fit goes to the truck's home depot.
 
     The same docking rule as the user phases (:func:`dock_up_to_capacity`) at
     the planned station; the overflow's ``realized_target_id`` becomes the
-    truck's home depot. Returns the ``arrived`` events and the adjusted local
-    inventory copy (a decision input for the caller's later rounds).
+    truck's home depot. ``inventory`` is the caller's decision input -- the
+    state with the earlier rounds applied. Returns the ``arrived`` events.
     """
     fits, overflow = dock_up_to_capacity(due, free_docks(inventory, capacities))
     fits = fits.assign(realized_target_id=fits["planned_target_id"])
     overflow = overflow.assign(realized_target_id=overflow["resource_id"].map(home_by_resource))
     landed = pd.concat([fits, overflow], ignore_index=True)
-    events = rebalance_arrived_events(landed, period_id)
-    inventory = adjust_inventory(inventory, inventory_deltas_from_events(events))
-    return events, inventory
+    return rebalance_arrived_events(landed, period_id)
 
 
 def _pickups_up_to_inventory(due: pd.DataFrame, inventory: pd.DataFrame) -> pd.DataFrame:

@@ -27,7 +27,6 @@ from gbp.model import (
     arrived_events,
     departed_events,
     empty_flows_journal,
-    inventory_deltas_from_events,
     lost_events,
     redirect_leg_events,
     redirected_events,
@@ -42,7 +41,7 @@ from .mechanics import (
     plan_overflow_redirect,
     realize_departures,
 )
-from .state import PeriodRow, SimulationState, adjust_inventory
+from .state import PeriodRow, SimulationState
 
 
 class Phase:
@@ -148,12 +147,10 @@ class DockArrivals(Phase):
 
         # Resolve every bike that did not fit: docked at a redirect target,
         # riding a new leg, or lost. The redirect must see the docks the
-        # planned dockings just took, so it gets a local copy of the inventory
-        # with those dockings applied (a decision input; the real inventory is
-        # written when the events are applied).
-        after_docked = adjust_inventory(
-            state.state_inventory_df, inventory_deltas_from_events(arrivals_docked)
-        )
+        # planned dockings just took, so it reads the inventory as it will
+        # stand once those events are written (a decision input; the real
+        # write happens in apply_step_events).
+        after_docked = state.inventory_after_events(arrivals_docked)
         outcomes = plan_overflow_redirect(
             after_docked,
             resolved.facilities_capacities_df,
