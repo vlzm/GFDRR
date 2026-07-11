@@ -5,7 +5,9 @@ boosting? A negative answer is a valid result.
 
 Nodes are stations. Edges come from OD flows: :func:`station_graph_edges`
 counts the trips between every pair of stations in the raw trip files of the
-given months. The counts become edge weights, made symmetric (a trip
+given months. The graph is part of what ``fit`` learns: when no ``edges_df``
+was passed to the constructor, ``fit`` counts the edges from the raw trip
+files of its last training month. The counts become edge weights, made symmetric (a trip
 connects both of its endpoints) and cut to the ``max_neighbors`` strongest
 neighbors per station; the aggregation step divides by each station's total
 weight, so a neighbor's influence is its share of the station's traffic.
@@ -145,7 +147,7 @@ class GraphSageModel(DemandModel):
 
     def __init__(
         self,
-        edges_df: pd.DataFrame,
+        edges_df: pd.DataFrame | None = None,
         hidden_size: int = 64,
         epochs: int = 3,
         batch_size: int = 64,
@@ -153,8 +155,14 @@ class GraphSageModel(DemandModel):
         train_window_months: int = 3,
         max_neighbors: int = 32,
         seed: int = 0,
+        raw: pathlib.Path | None = None,
     ) -> None:
-        """Store the graph edges and the training settings."""
+        """Store the training settings and, when given, the graph edges.
+
+        Without ``edges_df``, ``fit`` counts the edges from the raw trip
+        files of its last training month; ``raw`` overrides the folder those
+        files are read from.
+        """
         self.hidden_size = hidden_size
         self.epochs = epochs
         self.batch_size = batch_size
@@ -162,7 +170,10 @@ class GraphSageModel(DemandModel):
         self.train_window_months = train_window_months
         self.max_neighbors = max_neighbors
         self.seed = seed
-        self._edges = self._symmetric_capped(edges_df)
+        self.raw = raw
+        self._edges: pd.DataFrame | None = (
+            None if edges_df is None else self._symmetric_capped(edges_df)
+        )
         self._net: _SageNet | None = None
         self._mu: np.ndarray | None = None
         self._sd: np.ndarray | None = None
@@ -178,7 +189,7 @@ class GraphSageModel(DemandModel):
             "train_window_months": self.train_window_months,
             "max_neighbors": self.max_neighbors,
             "seed": self.seed,
-            "n_edges": len(self._edges),
+            "n_edges": 0 if self._edges is None else len(self._edges),
         }
 
     def _symmetric_capped(self, edges_df: pd.DataFrame) -> pd.DataFrame:
@@ -196,6 +207,8 @@ class GraphSageModel(DemandModel):
 
     def _adjacency(self, facilities: list[str]) -> torch.Tensor:
         """Row-normalized sparse adjacency restricted to ``facilities``."""
+        if self._edges is None:
+            raise ValueError("graph edges missing — fit the model first")
         index = {facility: i for i, facility in enumerate(facilities)}
         edges = self._edges[
             self._edges["source_id"].isin(index) & self._edges["target_id"].isin(index)
@@ -247,11 +260,19 @@ class GraphSageModel(DemandModel):
         return _GridBlock(table, facilities, features, target, weight)
 
     def fit(self, training_table: pd.DataFrame) -> None:
-        """Train on the last ``train_window_months`` months, one month per graph."""
+        """Train on the last ``train_window_months`` months, one month per graph.
+
+        When the constructor got no ``edges_df``, the graph edges are
+        counted here, from the raw trip files of the last training month.
+        """
         torch.manual_seed(self.seed)
         months = training_table["start_timestamp"].dt.to_period("M")
         keep = sorted(months.unique())[-self.train_window_months :]
         window = training_table[months.isin(keep)]
+
+        if self._edges is None:
+            last_month = keep[-1].strftime("%Y%m")
+            self._edges = self._symmetric_capped(station_graph_edges([last_month], self.raw))
 
         values = window[FEATURE_COLUMNS].to_numpy(dtype="float32", na_value=np.nan)
         # A column with no observed value at all (for example weather that
@@ -310,7 +331,7 @@ class GraphSageModel(DemandModel):
 
     def save(self, folder: pathlib.Path) -> None:
         """Write the network weights, the scaling, and the edges into ``folder``."""
-        if self._net is None or self._mu is None or self._sd is None:
+        if self._net is None or self._mu is None or self._sd is None or self._edges is None:
             raise ValueError("fit the model before saving")
         folder.mkdir(parents=True, exist_ok=True)
         torch.save(self._net.state_dict(), folder / "net.pt")

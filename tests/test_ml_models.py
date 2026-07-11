@@ -155,11 +155,6 @@ def test_create_model_rejects_an_unknown_family():
         create_model("prophet")
 
 
-def test_create_model_rejects_graphsage_without_a_graph():
-    with pytest.raises(ValueError, match="graphsage needs train_months"):
-        create_model("graphsage")
-
-
 # ---------------------------------------------------------------------------
 # Family-specific behavior
 # ---------------------------------------------------------------------------
@@ -206,17 +201,23 @@ def test_graphsage_rejects_a_table_with_grid_holes():
         model.fit(table.iloc[:-1])
 
 
-def test_station_graph_edges_counts_pairs_and_drops_self_loops(tmp_path):
+def write_trip_csv(folder, month: str, pairs) -> None:
+    """Write one raw trip CSV for ``month``: one ride per (start, end) station pair."""
     header = (
         "ride_id,rideable_type,started_at,ended_at,start_station_name,start_station_id,"
         "end_station_name,end_station_id,start_lat,start_lng,end_lat,end_lng,member_casual"
     )
+    day = f"{month[:4]}-{month[4:]}-03"
     rows = [
-        f"R{i},{CLASSIC},2025-02-03 08:0{i}:00,2025-02-03 08:2{i}:00,A,{s},B,{t},"
+        f"R{i},{CLASSIC},{day} 08:0{i}:00,{day} 08:2{i}:00,A,{s},B,{t},"
         "40.75,-73.99,40.76,-73.97,member"
-        for i, (s, t) in enumerate([("s1", "s2"), ("s1", "s2"), ("s2", "s1"), ("s1", "s1")])
+        for i, (s, t) in enumerate(pairs)
     ]
-    (tmp_path / "202502-citibike-tripdata_1.csv").write_text("\n".join([header, *rows]) + "\n")
+    (folder / f"{month}-citibike-tripdata_1.csv").write_text("\n".join([header, *rows]) + "\n")
+
+
+def test_station_graph_edges_counts_pairs_and_drops_self_loops(tmp_path):
+    write_trip_csv(tmp_path, "202502", [("s1", "s2"), ("s1", "s2"), ("s2", "s1"), ("s1", "s1")])
 
     edges = station_graph_edges(["202502"], raw=tmp_path)
 
@@ -224,6 +225,32 @@ def test_station_graph_edges_counts_pairs_and_drops_self_loops(tmp_path):
     assert by_pair[("s1", "s2")] == 2
     assert by_pair[("s2", "s1")] == 1
     assert ("s1", "s1") not in by_pair.index
+
+
+def test_graphsage_counts_its_edges_in_fit_when_none_are_given(tmp_path):
+    # The training table ends in March 2025, so fit reads the March raw file.
+    write_trip_csv(tmp_path, "202503", [("s1", "s2"), ("s2", "s1")])
+    model = create_model(
+        "graphsage",
+        hidden_size=8,
+        epochs=1,
+        batch_size=32,
+        train_window_months=2,
+        raw=tmp_path,
+    )
+    assert model.params()["n_edges"] == 0
+
+    model.fit(tiny_training_table())
+
+    assert model.params()["n_edges"] > 0
+    out = model.predict(tiny_forecast_input(MONDAY + 6 * WEEK))
+    assert len(out) == 168 * 2
+
+
+def test_graphsage_fit_without_edges_needs_the_raw_files(tmp_path):
+    model = create_model("graphsage", raw=tmp_path)  # an empty folder: no trip CSVs
+    with pytest.raises(FileNotFoundError, match="no raw CSVs"):
+        model.fit(tiny_training_table())
 
 
 def test_graphsage_neighbor_cap_keeps_the_strongest_edges():
@@ -316,9 +343,15 @@ def test_comparison_table_relates_models_to_the_baseline():
         {"model": "seasonal_naive", "test_month": "202504", "mae": 2.0, "poisson_deviance": 4.0},
         {"model": "lightgbm", "test_month": "202504", "mae": 1.0, "poisson_deviance": 2.0},
     ]
-    table = comparison_table(records).set_index("model")
+    baseline = [{"test_month": "202504", "mae": 2.0, "poisson_deviance": 4.0}]
+    table = comparison_table(records, baseline).set_index("model")
     assert table.loc["lightgbm", "mae_over_naive"] == pytest.approx(0.5)
     assert table.loc["seasonal_naive", "poisson_deviance_over_naive"] == pytest.approx(1.0)
+
+
+def test_comparison_table_without_a_baseline_has_no_ratio_columns():
+    records = [{"model": "lightgbm", "test_month": "202504", "mae": 1.0, "poisson_deviance": 2.0}]
+    assert "mae_over_naive" not in comparison_table(records).columns
 
 
 # ---------------------------------------------------------------------------

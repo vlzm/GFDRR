@@ -30,19 +30,12 @@ from gbp.ml.models.base import DemandModel
 MODEL_FAMILIES = ("seasonal_naive", "sarimax", "lightgbm", "graphsage")
 
 
-def create_model(
-    name: str,
-    *,
-    train_months: list[str] | None = None,
-    raw: pathlib.Path | None = None,
-    **params: object,
-) -> DemandModel:
+def create_model(name: str, **params: object) -> DemandModel:
     """Build one unfitted model of the given family.
 
-    ``train_months`` and ``raw`` matter only for ``graphsage``, whose graph
-    edges are counted from the raw trip files of the last training month —
-    the other families ignore them. ``params`` go to the family's
-    constructor unchanged.
+    ``params`` go to the family's constructor unchanged. Every family builds
+    itself from its training table alone — ``graphsage`` counts its graph
+    edges inside ``fit`` when no ``edges_df`` is passed in.
     """
     if name == "seasonal_naive":
         from gbp.ml.models.seasonal_naive import SeasonalNaiveModel
@@ -57,15 +50,8 @@ def create_model(
 
         return LightGbmModel(**params)  # type: ignore[arg-type]
     if name == "graphsage":
-        from gbp.ml.models.graph import GraphSageModel, station_graph_edges
+        from gbp.ml.models.graph import GraphSageModel
 
-        if "edges_df" not in params:
-            if not train_months:
-                raise ValueError(
-                    "graphsage needs train_months (its graph edges are counted "
-                    "from the last training month) or an explicit edges_df"
-                )
-            params["edges_df"] = station_graph_edges([max(train_months)], raw)
         return GraphSageModel(**params)  # type: ignore[arg-type]
     raise ValueError(f"unknown model family {name!r}; known: {', '.join(MODEL_FAMILIES)}")
 

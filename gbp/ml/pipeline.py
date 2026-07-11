@@ -12,9 +12,9 @@ Five idempotent steps, runnable as one command and one by one::
   register it as a model version (Notations.md §17). The same family on the
   same months of the same data version is the same model — the existing
   version is reused, not registered twice.
-- ``backtest`` — the phase-4 backtest, unchanged, over the candidate's
-  family, the champion's family, and the seasonal naive baseline — the same
-  splits for all of them.
+- ``backtest`` — the phase-4 backtest over the candidate's family and the
+  champion's family — the same splits for both; the backtest itself scores
+  every split against the seasonal naive baseline.
 - ``promote`` — the rule, not a manual choice: the candidate becomes
   champion only when its mean backtest score is at least as good as the
   champion's over the same splits (equal promotes — same recipe, newer data
@@ -222,7 +222,6 @@ def step_train(
     months: Sequence[str] | None = None,
     *,
     data_ver: str | None = None,
-    raw: pathlib.Path | None = None,
     training_root: pathlib.Path | None = None,
     tracking_dir: pathlib.Path | None = None,
     log: Callable[[str], None] = print,
@@ -249,7 +248,7 @@ def step_train(
         return existing
     log(f"train: fitting {family} on {span} (data {version}) ...")
     table = load_training_table(list(months), training_root)
-    model = create_model(family, train_months=list(months), raw=raw)
+    model = create_model(family)
     model.fit(table)
     registered = register_version(
         model, train_months=list(months), data_version=version, tracking_dir=tracking_dir
@@ -272,10 +271,11 @@ def step_backtest(
     """Backtest the candidate's and the champion's families over the same splits.
 
     The phase-4 backtest, unchanged: the promote rule needs both sides
-    scored on the same splits, and the seasonal naive baseline rides along
-    for the over-naive columns. When the champion is the same family as the
-    candidate (or there is no champion yet), one set of scores serves both
-    sides.
+    scored on the same splits. The backtest itself scores every split
+    against the shared naive month forecast, so the seasonal naive does not
+    need to run as a family here. When the champion is the same family as
+    the candidate (or there is no champion yet), one set of scores serves
+    both sides.
     """
     if months is None:
         months = partition_months(training_root)
@@ -283,8 +283,6 @@ def step_backtest(
     champion = champion_version(tracking_dir)
     if champion is not None and champion.tags["model_family"] not in families:
         families.append(str(champion.tags["model_family"]))
-    if "seasonal_naive" not in families:
-        families.append("seasonal_naive")
     return run_backtest(
         list(months),
         families,
@@ -477,7 +475,6 @@ def run_pipeline(
         candidate = step_train(
             family,
             data_ver=version,
-            raw=raw,
             training_root=training_root,
             tracking_dir=tracking_dir,
             log=log,

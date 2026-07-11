@@ -50,7 +50,13 @@ from gbp.loaders.dataloader_graph import (
     HISTORICAL_DEMAND_SCHEMA,
     get_forecast_periods_df,
 )
-from gbp.ml.data import load_weather_daily, ml_dir, month_bounds, normalize_month
+from gbp.ml.data import (
+    load_weather_daily,
+    ml_dir,
+    month_bounds,
+    month_period_grid,
+    normalize_month,
+)
 from gbp.ml.features import HISTORY_WEEKS, build_features, clip_history_window
 from gbp.ml.models import DemandModel, create_model
 from gbp.model.journal_schema import schema_violations
@@ -263,9 +269,9 @@ def predict_horizon(
     window before the horizon, build the forecast input
     (:func:`forecast_input`), let the model predict, and round the fractional
     values to whole bikes (:func:`round_forecast_demand`). The forecast
-    builders in this module and the monitoring baseline
-    (``naive_month_prediction``) call this function instead of assembling
-    the steps themselves.
+    builders in this module and the shared naive baseline
+    (:func:`naive_month_prediction`) call this function instead of
+    assembling the steps themselves.
 
     Parameters
     ----------
@@ -300,6 +306,33 @@ def predict_horizon(
         history_df = load_history_counts(t0.strftime("%Y%m"), training_root)
     fractional = model.predict(forecast_input(history_df, forecast_periods_df, weather_df))
     return round_forecast_demand(fractional)
+
+
+def naive_month_prediction(
+    month: str, training_root: pathlib.Path | None = None
+) -> pd.DataFrame | None:
+    """Forecast one calendar month with the seasonal naive — the shared baseline.
+
+    The one naive forecast both quality measures rely on: the backtest
+    divides every family's error by its error (``mae_over_naive``), and the
+    monitoring alert compares a model version's rolling MAE against it
+    (``naive_mae``). Built like any forecast: the family comes from the
+    factory, and the prediction goes through the one recipe
+    :func:`predict_horizon` on the month's period grid, with the history
+    read from the training partitions before the month. Weather is not
+    read — the seasonal naive does not use it. Returns None when no earlier
+    partition exists.
+    """
+    # Imported here, not at the top: gbp.ml.training is the partition
+    # builder, and only the partition-backed helpers need it.
+    from gbp.ml.training import load_history_counts
+
+    history = load_history_counts(month, training_root)
+    if history.empty:
+        return None
+    return predict_horizon(
+        create_model("seasonal_naive"), month_period_grid(month), history_df=history
+    )
 
 
 def save_forecast(
@@ -461,7 +494,7 @@ def build_model_forecast(
         Folder name of the forecast artifact.
     root, training_root, raw : pathlib.Path, optional
         Folder overrides for the forecast artifacts, the training
-        partitions, and the raw files.
+        partitions, and the raw files (``raw`` feeds the horizon weather).
     weather_df : pandas.DataFrame, optional
         Daily weather for the horizon dates; without it the published
         weather is loaded (and missing dates stay NaN).
@@ -482,7 +515,7 @@ def build_model_forecast(
     months = sorted(normalize_month(m) for m in train_months)
     log(f"Training {model_name} on {months[0]}..{months[-1]} ...")
     train_table = load_training_table(months, training_root)
-    model = create_model(model_name, train_months=months, raw=raw, **model_params)
+    model = create_model(model_name, **model_params)
     model.fit(train_table)
 
     t0 = month_bounds(months[-1])[1]

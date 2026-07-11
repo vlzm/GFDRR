@@ -10,9 +10,9 @@ forecast to the metrics table ``data/ml/monitoring/metrics.parquet``:
   (``gbp/ml/metrics.py``), computed over the aligned rows of the overlap;
 - ``bias`` — the mean of ``predicted - actual``: positive means the model
   predicts too much, negative too little;
-- ``naive_mae`` — the seasonal naive baseline for the same rows: its
-  hour-of-week mean is predicted from the history window before the month
-  and rounded by the one rounding rule, exactly like a saved forecast.
+- ``naive_mae`` — the seasonal naive baseline for the same rows: the shared
+  naive month forecast (``naive_month_prediction`` in ``gbp/ml/forecast.py``),
+  the same forecast the backtest's over-naive columns divide by.
 
 Unlike the backtest, which scores fractional demand, monitoring scores the
 saved forecast demand table — whole bikes, the numbers the simulator
@@ -53,23 +53,17 @@ from typing import Any
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN
-from gbp.ml.data import ml_dir, month_bounds, month_period_grid, normalize_month
+from gbp.ml.data import ml_dir, month_bounds, normalize_month
 from gbp.ml.features import FEATURE_COLUMNS
 from gbp.ml.forecast import (
     ForecastMeta,
     forecast_periods_from_meta,
     list_forecasts,
     load_forecast,
-    predict_horizon,
+    naive_month_prediction,
 )
 from gbp.ml.metrics import align_forecast, forecast_metrics
-from gbp.ml.models.seasonal_naive import SeasonalNaiveModel
-from gbp.ml.training import (
-    load_actual_month,
-    load_history_counts,
-    partition_path,
-    training_dir,
-)
+from gbp.ml.training import load_actual_month, partition_path, training_dir
 
 #: How many scored months the rolling MAE of the alert rule averages over.
 ROLLING_MONTHS = 3
@@ -160,25 +154,6 @@ def month_period_map(meta: ForecastMeta, month: str) -> pd.DataFrame:
             "month_period_id": (offsets // DEFAULT_PERIOD_LEN).astype("int64"),
         }
     ).reset_index(drop=True)
-
-
-def naive_month_prediction(
-    month: str, training_root: pathlib.Path | None = None
-) -> pd.DataFrame | None:
-    """Predict the month with the seasonal naive — the baseline of the alert rule.
-
-    The one horizon-prediction recipe (``predict_horizon`` in
-    ``gbp/ml/forecast.py``) on the month's period grid: the hour-of-week
-    mean is predicted from the history window before the month (the earlier
-    partitions on disk) and rounded to whole bikes by the one rounding rule,
-    so the baseline is a forecast demand table like any saved forecast.
-    Weather is not read — the seasonal naive does not use it. Returns None
-    when no earlier partition exists; ``naive_mae`` then stays missing.
-    """
-    history = load_history_counts(month, training_root)
-    if history.empty:
-        return None
-    return predict_horizon(SeasonalNaiveModel(), month_period_grid(month), history_df=history)
 
 
 def score_forecast_against_month(

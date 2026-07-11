@@ -24,7 +24,9 @@ pair is one MLflow run: parameters (model settings, training months, the
 data version — the git commit of the ``.dvc`` files, Notations.md §17),
 the metrics of the split, and the fitted model files as artifacts. One
 extra run named ``comparison`` holds the cross-model table: mean metrics
-per model family next to their ratio against the seasonal naive baseline.
+per model family next to their ratio against the seasonal naive baseline —
+the shared naive month forecast of each held-out month
+(``naive_month_prediction`` in ``gbp/ml/forecast.py``).
 
 Terminal use (all four families, three splits, all partitions on disk)::
 
@@ -50,7 +52,7 @@ import mlflow
 import pandas as pd
 
 from gbp.ml.data import load_weather_daily, month_bounds, month_period_grid, normalize_month
-from gbp.ml.forecast import forecast_input
+from gbp.ml.forecast import forecast_input, naive_month_prediction
 from gbp.ml.metrics import forecast_metrics
 from gbp.ml.models import MODEL_FAMILIES, create_model
 from gbp.ml.registry import configure_mlflow, ensure_experiment
@@ -147,21 +149,28 @@ def month_forecast_input(
     return forecast_input(history, horizon, weather_df)
 
 
-def comparison_table(records: list[dict[str, object]]) -> pd.DataFrame:
+def comparison_table(
+    records: list[dict[str, object]],
+    baseline_records: list[dict[str, object]] | None = None,
+) -> pd.DataFrame:
     """Average the split metrics per model and compare against the baseline.
 
-    One row per model family: the mean of every metric over the splits,
-    plus ``mae_over_naive`` and ``poisson_deviance_over_naive`` — the
-    model's error divided by the seasonal naive's (below 1.0 beats the
+    One row per model family: the mean of every metric over the splits.
+    ``baseline_records`` holds the per-split metrics of the shared naive
+    month forecast (:func:`gbp.ml.forecast.naive_month_prediction`) — the
+    same forecast the monitoring alert compares against. With it every row
+    gets ``mae_over_naive`` and ``poisson_deviance_over_naive`` — the
+    model's mean error divided by the baseline's (below 1.0 beats the
     baseline).
     """
     frame = pd.DataFrame(records)
     table = frame.drop(columns=["test_month"]).groupby("model").mean(numeric_only=True)
     order = [m for m in MODEL_FAMILIES if m in table.index]
     table = table.loc[order + sorted(set(table.index) - set(order))]
-    if "seasonal_naive" in table.index:
+    if baseline_records:
+        baseline = pd.DataFrame(baseline_records)
         for metric in ["mae", "poisson_deviance"]:
-            table[f"{metric}_over_naive"] = table[metric] / table.loc["seasonal_naive", metric]
+            table[f"{metric}_over_naive"] = table[metric] / baseline[metric].mean()
     return table.reset_index()
 
 
@@ -192,6 +201,7 @@ def run_backtest(
     ensure_experiment(EXPERIMENT_NAME, store)
 
     records: list[dict[str, object]] = []
+    baseline_records: list[dict[str, object]] = []
     for index, split in enumerate(splits):
         log(
             f"split {index}: train {split.train_months[0]}..{split.train_months[-1]} "
@@ -200,10 +210,15 @@ def run_backtest(
         train_table = load_training_table(list(split.train_months), training_root)
         features = month_forecast_input(split.test_month, training_root, raw, weather_df)
         actual = load_actual_month(split.test_month, training_root)
+        naive_df = naive_month_prediction(split.test_month, training_root)
+        if naive_df is not None:
+            baseline = forecast_metrics(actual, naive_df)
+            baseline_records.append({"test_month": split.test_month, **baseline})
+            log(f"  naive baseline: mae={baseline['mae']:.4f}")
 
         for name in model_names:
             started = time.monotonic()
-            model = create_model(name, train_months=list(split.train_months), raw=raw)
+            model = create_model(name)
             model.fit(train_table)
             predicted = model.predict(features)
             metrics = forecast_metrics(actual, predicted)
@@ -228,7 +243,7 @@ def run_backtest(
             records.append({"model": name, "test_month": split.test_month, **metrics})
         del train_table, features
 
-    table = comparison_table(records)
+    table = comparison_table(records, baseline_records)
     with mlflow.start_run(run_name="comparison"):
         mlflow.log_params(
             {
