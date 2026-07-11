@@ -246,6 +246,13 @@ metrics. This is the second level of the two-level evaluation.
 Done when: the report exists for at least two models and states which model
 the platform should use and why.
 
+Done on 2026-07-11: `python app/evaluate.py --month 202601` builds the
+reference run and, per model, a forecast run and a forecast-sized run
+(actual demand against a state sized on the forecast — this is where
+forecast errors become losses). The report for all four families is
+`docs/reports/model_evaluation_202601.md`; it picks SARIMAX for now and
+names LightGBM the candidate once its volume bias is fixed.
+
 ## Phase 6 — model registry and the retraining pipeline
 
 Goal: retraining is one command, and promotion is a rule, not a manual
@@ -341,11 +348,8 @@ its own plan when the local system works.
   not, fall back to a coarser mapping (weekday/weekend × hour).
 - The rounding rule for fractional forecast quantities: plain rounding
   changes the total demand; decide in phase 1 and write the rule down.
-- Archived station-status data for censored-demand marking (phase 3):
-  answered on 2026-07-10 — the CityBikes archive publishes monthly dumps of
-  the station feed for New York from 2024-11 on, covering every training
-  month. The mark is built in `gbp/ml/station_status.py`; months before
-  2024-11 have no snapshots, so their mark stays NaN and the written
-  assumption stands.
+- Archived station-status data for censored-demand marking (phase 3): find
+  out whether snapshots exist for the chosen months before promising the
+  masking step.
 - How much history the models need: the plan starts with 12 months; revisit
   after the first backtest.

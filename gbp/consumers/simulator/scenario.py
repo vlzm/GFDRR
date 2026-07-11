@@ -63,6 +63,7 @@ def run_sized_scenario(
     number_of_periods: int,
     validate: bool = True,
     phases: list[Phase] | None = None,
+    sizing_data: ResolvedModelData | None = None,
 ) -> ScenarioRun:
     """Size the state, run the scenario against it, check the run invariants.
 
@@ -95,6 +96,15 @@ def run_sized_scenario(
         the canonical three phases -- the state is sized for the demand alone,
         so the rebalancer's effect shows up against it instead of being sized
         away.
+    sizing_data : ResolvedModelData, optional
+        The scenario data the sizing run measures. Default: ``resolved``
+        itself, which gives a clean run. Passing different data gives a
+        forecast-sized run (Notations.md §11): the state is sized for the
+        demand in ``sizing_data`` (a forecast), the run faces the demand in
+        ``resolved`` (the actual), and the gap between the two shows up as
+        lost and redirected events. The two must describe the same scenario
+        — same facilities, period grid, and OD matrix — or the sized state
+        is meaningless.
 
     Returns
     -------
@@ -108,7 +118,9 @@ def run_sized_scenario(
         demand_scale_factor=sizing_scale_factor,
         number_of_periods=number_of_periods,
     )
-    initial_inventory_df, facilities_capacities_df = size_state_for_demand(resolved, sizing_config)
+    initial_inventory_df, facilities_capacities_df = size_state_for_demand(
+        sizing_data if sizing_data is not None else resolved, sizing_config
+    )
 
     # The sized tables replace two engine inputs, so they must fit the same
     # schemas the loader checked the originals against.
