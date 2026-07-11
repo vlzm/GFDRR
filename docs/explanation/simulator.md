@@ -238,8 +238,9 @@ because they also replace `rebalance_plan` on the state.
 rank; the rank only places it in the list.
 
 The engine checks at construction time that the phase list is ordered by
-`phase_rank`. The list position hands out `step_id` and the rank sorts the
-steps, so the two orders must agree; a list out of rank order is refused with
+`phase_rank`. Phases execute in list order and the state's counter hands out
+`step_id` in that order, while the declared rank sorts the steps, so the two
+orders must agree; a list out of rank order is refused with
 `SimulatorConfigError`.
 
 Three more guards reject a run that cannot execute. `Environment.__init__`
@@ -682,8 +683,12 @@ This matters because labels are not enough to prove batch boundaries. If a phase
 needs two ordered batches, they must receive different `step_id` values. The
 counter makes that direct.
 
-The historical loader still derives `step_id` from labels because historical
-data has only user trips: no redirects and no rebalancing rounds.
+The historical loader has no counter, so it stamps its own `step_id` from the
+`(period_id, phase_rank, phase_round)` labels with `stamp_history_ordering`
+before finalizing. That is safe because historical data has only user trips:
+no redirects and no rebalancing rounds, so one label is always one batch.
+`finalize_flows` itself assigns nothing and refuses a journal that arrives
+without the order columns.
 
 ### Redirect Is A Real Second Leg
 

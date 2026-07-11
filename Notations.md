@@ -74,7 +74,7 @@ empty when the journal fits.
 | `reason` | Why a flow did not simply arrive: `stockout` or `dock_full`; NA otherwise (§1). |
 | `phase_rank` | Which inventory phase of a period applied the event's change. An **open-ended** integer that orders the phases inside a period, not a fixed set. Today's user trips use `0` dock-previous, `1` the period's own departures and stockout losses, `2` dock-same; a later phase (such as rebalancing) takes `3`, `4`, … Stamped by the emitting phase (the historical loader stamps it by timing, `phase_rank_by_timing`). A **label** that says which phase; the historical loader's step-ordering input (§0.1). |
 | `phase_round` | The round inside a single phase, for a phase that applies several ordered inventory batches in a row: `0` when the phase applies one batch, `1..` for each later round. Today only the redirect mechanics use it (a redirect's rounds); a later phase that iterates (such as a rebalancer's rounds) reuses the same column. `0` on every other row. A **label** that says which round; the historical loader's step-ordering input (§0.1). |
-| `step_id` | Run-global ordinal of the inventory step the event belongs to; the inventory time axis below the period (§0.1). In the simulator it is **opened at apply time** -- a phase takes the next number from a run-global counter when it begins an ordered change and writes it onto that step's events. The historical loader stamps no number, so `finalize_flows` **derives** it from the `(period_id, phase_rank, phase_round)` label instead. |
+| `step_id` | Run-global ordinal of the inventory step the event belongs to; the inventory time axis below the period (§0.1). In the simulator it is **opened at apply time** -- a phase takes the next number from a run-global counter when it begins an ordered change and writes it onto that step's events. The historical loader has no counter, so it **derives** the number from the `(period_id, phase_rank, phase_round)` label itself (`stamp_history_ordering`) before finalizing. |
 
 **Arcs and the two roles of `departed`.** A normal trip is one arc
 (`move_id = 0`): a `departed` then an `arrived`. A redirect adds an arc per
@@ -146,13 +146,16 @@ loop inside `plan_overflow_redirect` (mechanics work on plain frames, below the
 state); it keeps a local per-round copy via `dock_deltas`.
 
 **Historical loader: derived from the label.** The loader has no phases and opens
-no step, so it stamps no number. `finalize_flows` then numbers the distinct
-`(period_id, phase_rank, phase_round)` tuples 0, 1, 2, … in sorted order. This is
+no step. Before finalizing it stamps the order columns itself, with one function —
+`stamp_history_ordering`: `step_id` numbers the distinct
+`(period_id, phase_rank, phase_round)` labels 0, 1, 2, … in sorted order. This is
 safe because history is pure user trips — no redirects, no rebalancing — so one
-tuple is always exactly one batch. `phase_rank` orders the phases inside a period
+label is always exactly one batch. `phase_rank` orders the phases inside a period
 (today: dock-previous = 0, the period's own departures and stockout losses = 1,
-dock-same = 2, with later phases taking 3, 4, …) and the loader stamps it by timing
-(`phase_rank_by_timing`); `phase_round` orders the rounds inside one phase.
+dock-same = 2, with later phases taking 3, 4, …) and the same function stamps it
+by timing (`phase_rank_by_timing`); `phase_round` orders the rounds inside one
+phase and is 0 on every historical row. `finalize_flows` assigns no number for
+either producer: it refuses a journal whose order columns are missing.
 
 `phase_rank` and `phase_round` stay on every simulator row too, but only as
 **labels** — when / which phase / which round. They no longer *define* a step in

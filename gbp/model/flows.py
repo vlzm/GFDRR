@@ -88,7 +88,8 @@ FLOW_EVENT_DTYPES = {
 # below are today's user-trip phases; a later phase (such as rebalancing) takes
 # 3, 4, ... An event source that runs as an explicit phase (the simulator) stamps
 # its phase's rank straight onto the events it emits; a source with no phases
-# (the historical loader) stamps it with :func:`phase_rank_by_timing` instead.
+# (the historical loader) stamps it through :func:`stamp_history_ordering`,
+# which applies :func:`phase_rank_by_timing`.
 DOCK_PREVIOUS_RANK = 0  # dock bikes that left in an earlier period
 PERIOD_OWN_RANK = 1  # this period's own departures and stockout losses
 DOCK_SAME_RANK = 2  # dock bikes that left and arrive within this same period
@@ -201,8 +202,8 @@ def _typed_events(events_df: pd.DataFrame) -> pd.DataFrame:
     ``step_id`` -- are not set by the builders, so they are cast only when already
     present (an empty journal carries them; a freshly built event batch does not).
     In the simulator all three are stamped when a phase writes the events
-    (``SimulationState.apply_step_events``); the historical loader stamps
-    ``phase_rank`` by timing and :func:`finalize_flows` derives its ``step_id``.
+    (``SimulationState.apply_step_events``); the historical loader stamps all
+    three with :func:`stamp_history_ordering`.
     """
     for col, dtype in FLOW_EVENT_DTYPES.items():
         if col in events_df.columns:
@@ -618,8 +619,9 @@ def phase_rank_by_timing(flows: pd.DataFrame) -> pd.Series:
 
     This is for an event source that has **no** explicit phases: the historical
     loader turns raw trips into a journal in one pass, so it stamps ``phase_rank``
-    with this rule rather than knowing it from a phase. The simulator, which runs
-    real phases, stamps its phase's rank directly and never calls this.
+    with this rule (through :func:`stamp_history_ordering`) rather than knowing it
+    from a phase. The simulator, which runs real phases, stamps its phase's rank
+    directly and never calls this.
 
     The rule matches the simulator's phase order (dock-previous -> form departures
     -> dock-same). ``t`` is the flow's opening period, which is ``start_period`` on
@@ -640,7 +642,7 @@ def phase_rank_by_timing(flows: pd.DataFrame) -> pd.Series:
     cases above are exhaustive.
 
     The rule and the simulator's stamped constants must agree; the scenario test
-    ``test_step_id_is_a_pure_function_of_the_journal`` uses this function as the
+    ``test_stamped_step_id_matches_tuple_order`` uses this function as the
     independent oracle that locks that agreement.
     """
     is_departure = is_user_departure(flows)
@@ -652,112 +654,54 @@ def phase_rank_by_timing(flows: pd.DataFrame) -> pd.Series:
     return rank
 
 
-def _assign_step_id(flows: pd.DataFrame) -> pd.DataFrame:
-    """Set ``step_id`` and ``phase_round`` labels and return ``flows`` in step order.
+def stamp_history_ordering(journal: pd.DataFrame) -> pd.DataFrame:
+    """Stamp the three ordering columns on a journal built without phases.
 
-    ``step_id`` is the run-global ordinal of an inventory step -- one batch of
-    ``+1`` / ``-1`` applied together (Notations.md §0.1). It is filled one of two
-    ways, depending on whether the producer already stamped it:
+    The one producer with no phases is the historical loader: it turns raw
+    trips into a journal in one pass, so no phase ran and nothing opened
+    inventory steps. This function stamps what the write path would have
+    stamped (Notations.md §0.1):
 
-    - **Stamped (the simulator).** Each phase opens a step at apply time
-      (:meth:`SimulationState.open_step`) and writes its number onto the events of
-      that step, so every event arrives with a ``step_id``. Here we trust it and
-      only sort by it. The number was opened from a run-global counter, never
-      derived from the columns, so two ordered batches can never share it.
-    - **Derived (the historical loader).** The loader has no phases and stamps no
-      ``step_id``, so it arrives absent (or all-NA). We then number the distinct
-      ``(period_id, phase_rank, phase_round)`` tuples 0, 1, 2, ... in sorted order.
-      This is safe because history is pure user trips -- no redirects, no
-      rebalancing -- so one tuple is always exactly one batch.
+    - ``phase_rank`` -- by the timing rule (:func:`phase_rank_by_timing`);
+    - ``phase_round`` -- 0 on every row: a source with no phases has no rounds;
+    - ``step_id`` -- the distinct ``(period_id, phase_rank, phase_round)``
+      labels numbered 0, 1, 2, ... in sorted order. Safe here because history
+      is pure user trips -- no redirects, no rebalancing -- so one label is
+      always exactly one inventory batch.
 
-    Either way ``phase_rank`` and ``phase_round`` stay on every row as labels (when
-    / which phase / which round):
-
-    - ``phase_rank`` orders the phases inside a period (an open-ended integer:
-      today 0/1/2 for user trips, later phases take 3, 4, ...). The emitting phase
-      stamps it (the historical loader uses :func:`phase_rank_by_timing`), so this
-      reads the stored column; any row that arrives without one is filled by the
-      rule as a safety net.
-    - ``phase_round`` orders the rounds inside one phase that applies several
-      ordered batches: 0 for a single-batch phase, 1.. for each later round (a
-      redirect's rounds today). It is the one piece of order not recoverable from
-      the other columns (the rounds are the mechanics' internal iteration), so the
-      phase stores it; rows without it carry 0.
-
-    Events that share a step share a ``step_id`` either way.
+    The simulator never calls this: its ``step_id`` is handed out by the
+    run-global counter at write time (``SimulationState.apply_step_events``)
+    and is never derived from the event columns. That keeps one answer per
+    producer to "where does an event's ``step_id`` come from".
     """
-    if "phase_rank" in flows.columns:
-        phase_rank = flows["phase_rank"]
-        missing = phase_rank.isna()
-        if missing.any():
-            phase_rank = phase_rank.where(~missing, phase_rank_by_timing(flows))
-        phase_rank = phase_rank.astype("int64")
-    else:
-        phase_rank = phase_rank_by_timing(flows)
-    if "phase_round" in flows.columns:
-        phase_round = flows["phase_round"].fillna(0).astype("int64")
-    else:
-        phase_round = pd.Series(0, index=flows.index, dtype="int64")
-
-    stamped = "step_id" in flows.columns and not flows["step_id"].isna().all()
-    if stamped:
-        # Trust the stamped number; order by it, then by the trip ids within a step.
-        order = pd.DataFrame(
-            {
-                "step_id": flows["step_id"].astype("int64"),
-                "phase_rank": phase_rank,
-                "phase_round": phase_round,
-                "flow_id": flows["flow_id"],
-                "event_id": flows["event_id"],
-            }
-        )
-        order = order.sort_values(["step_id", "flow_id", "event_id"], kind="stable")
-        flows = flows.loc[order.index].copy()
-        flows["phase_rank"] = order["phase_rank"].to_numpy()
-        flows["phase_round"] = order["phase_round"].to_numpy()
-        flows["step_id"] = order["step_id"].to_numpy()
-        return flows.reset_index(drop=True)
-
-    # Derive: number the distinct (period_id, phase_rank, phase_round) tuples.
+    flows = journal.copy()
+    flows["phase_rank"] = phase_rank_by_timing(flows)
+    flows["phase_round"] = pd.Series(0, index=flows.index, dtype="int64")
+    # ngroup with sort=True numbers the distinct labels in sorted (= step) order.
     keys = ["period_id", "phase_rank", "phase_round"]
-    order = pd.DataFrame(
-        {
-            "period_id": flows["period_id"],
-            "phase_rank": phase_rank,
-            "phase_round": phase_round,
-            "flow_id": flows["flow_id"],
-            "event_id": flows["event_id"],
-        }
-    )
-    order = order.sort_values([*keys, "flow_id", "event_id"], kind="stable")
-    flows = flows.loc[order.index].copy()
-    flows["phase_rank"] = order["phase_rank"].to_numpy()
-    flows["phase_round"] = order["phase_round"].to_numpy()
-    # ngroup over the sorted frame numbers the distinct (period_id, phase_rank,
-    # phase_round) batches 0, 1, 2, ... in order of appearance -- step order.
-    flows["step_id"] = order.groupby(keys, sort=False).ngroup().to_numpy()
-    return flows.reset_index(drop=True)
+    flows["step_id"] = flows.groupby(keys, sort=True).ngroup()
+    return flows
 
 
 def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
-    """Order the accumulated journal, assign ``step_id``, and project the columns.
+    """Order the accumulated journal by its stamped steps and project the columns.
 
     Both the historical log (:func:`dataloader_graph.get_historical_flows_df`)
     and a replay run's journal are finalized through this one function, so they
     share their order and their column projection by construction rather than by
-    two definitions kept in sync by hand. The trip ids (``move_id``, ``event_id``)
-    and ``phase_rank`` are already set at emit time (the emitting phase stamps
-    ``phase_rank``; the historical loader uses :func:`phase_rank_by_timing`).
-    :func:`_assign_step_id` then settles ``step_id`` -- the inventory-step ordinal
-    (Notations.md §0.1): it trusts the number the simulator stamped at apply time
-    and only derives it from the ``(period_id, phase_rank, phase_round)`` tuple
-    when none was stamped (the historical loader). It also fills ``phase_round``
-    with 0 wherever a builder did not set it.
+    two definitions kept in sync by hand. It assigns nothing. The trip ids
+    (``move_id``, ``event_id``) are set by the builders at emit time. The
+    ordering columns (``phase_rank``, ``phase_round``, ``step_id``) are stamped
+    before the journal gets here: by ``SimulationState.apply_step_events`` in
+    the simulator, or by :func:`stamp_history_ordering` in the historical
+    loader. A journal with a hole in those columns is refused -- filling it
+    here would be a second definition of ``step_id``.
 
     Parameters
     ----------
     journal : pandas.DataFrame
-        The append-only journal accumulated during a run.
+        The append-only journal accumulated during a run, with the ordering
+        columns stamped on every row.
 
     Returns
     -------
@@ -765,16 +709,25 @@ def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
         Event log with columns :data:`FLOW_EVENT_COLUMNS`, ordered by ``step_id``
         then ``flow_id`` then ``event_id``. Within a flow the ``event_id`` order
         matches the events' time order, so each trip's events stay in sequence.
+
+    Raises
+    ------
+    ValueError
+        If an ordering column is absent or NA on any row.
     """
     flows = journal.copy()
     for col, dtype in FLOW_EVENT_DTYPES.items():
         if col in flows.columns:
             flows[col] = flows[col].astype(dtype)
-    flows = _assign_step_id(flows)
-    flows["phase_rank"] = flows["phase_rank"].astype("Int64")
-    flows["phase_round"] = flows["phase_round"].astype("Int64")
-    flows["step_id"] = flows["step_id"].astype("Int64")
-    return flows[FLOW_EVENT_COLUMNS]
+    for col in _ORDERING_COLUMNS:
+        if col not in flows.columns or flows[col].isna().any():
+            raise ValueError(
+                f"finalize_flows: journal rows arrived without {col!r}. The simulator "
+                "stamps the ordering columns in SimulationState.apply_step_events; a "
+                "source with no phases stamps them with stamp_history_ordering."
+            )
+    flows = flows.sort_values(["step_id", "flow_id", "event_id"], kind="stable")
+    return flows.reset_index(drop=True)[FLOW_EVENT_COLUMNS]
 
 
 # ---------------------------------------------------------------------------

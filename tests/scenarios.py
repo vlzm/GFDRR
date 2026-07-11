@@ -61,9 +61,9 @@ def _history(trips: list[tuple[str, str, int, int]]) -> pd.DataFrame:
         [J.departed_events(df), J.arrived_events(df, df["planned_end_period"])],
         ignore_index=True,
     )
-    # Like the real loader, this has no phases, so it stamps phase_rank by timing.
-    journal["phase_rank"] = J.phase_rank_by_timing(journal)
-    return J.finalize_flows(journal)
+    # Like the real loader, this has no phases, so it stamps the ordering
+    # columns with the history rule before finalizing.
+    return J.finalize_flows(J.stamp_history_ordering(journal))
 
 
 def build_resolved(

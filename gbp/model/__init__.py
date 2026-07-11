@@ -53,6 +53,7 @@ from .flows import (
     redirect_leg_events,
     redirect_neighbor_table,
     redirected_events,
+    stamp_history_ordering,
 )
 
 __all__ = [
@@ -94,4 +95,5 @@ __all__ = [
     "redirect_leg_events",
     "redirect_neighbor_table",
     "redirected_events",
+    "stamp_history_ordering",
 ]

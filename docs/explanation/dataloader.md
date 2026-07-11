@@ -149,8 +149,9 @@ so there are no `lost` or `redirected` events and every flow stays on one arc
 (`move_id == 0`). `flow_id` gets a `hist_` prefix, so historical and simulated
 flows can never collide in one journal.
 
-The loader has no phases, so it stamps `phase_rank` with the timing rule
-`phase_rank_by_timing`, and `finalize_flows` derives `step_id` from the
+The loader has no phases, so it stamps the order columns itself with
+`stamp_history_ordering` before finalizing: `phase_rank` by the timing rule
+`phase_rank_by_timing`, `phase_round` 0, and `step_id` numbering the distinct
 `(period_id, phase_rank, phase_round)` labels (see
 [flow_journal.md](flow_journal.md#finalizing-the-journal)).
 

@@ -55,9 +55,10 @@ class Environment:
                 f"number_of_periods={config.number_of_periods} exceeds the period grid "
                 f"({len(self._periods)} periods)"
             )
-        # The list position hands out step_id and the declared phase_rank sorts
-        # the steps, so the two orders must agree. A list out of rank order
-        # would write a journal whose step_id and phase_rank disagree.
+        # Phases execute in list order and the state's counter hands out
+        # step_id in that order, while the declared phase_rank sorts the steps.
+        # A list out of rank order would write a journal whose step_id and
+        # phase_rank orders disagree.
         ranks = [phase.phase_rank for phase in config.phases]
         if ranks != sorted(ranks):
             raise SimulatorConfigError(f"phases must be ordered by phase_rank, got {ranks}")

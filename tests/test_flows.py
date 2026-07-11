@@ -17,6 +17,16 @@ from tests.invariants import check_journal_well_formed
 CLASSIC = "classic_bike"
 
 
+def _finalize(journal: pd.DataFrame) -> pd.DataFrame:
+    """Stamp the ordering columns like a phase-less producer, then finalize.
+
+    The journals here are hand-built builder outputs -- no phase ran, so
+    nothing stamped ``phase_rank`` / ``phase_round`` / ``step_id``. The history
+    rule fills them, the same way the historical loader does.
+    """
+    return J.finalize_flows(J.stamp_history_ordering(journal))
+
+
 def _trip_frame() -> pd.DataFrame:
     """One trip A->B, departing period 5, due to dock period 7."""
     return pd.DataFrame(
@@ -97,7 +107,7 @@ def test_full_redirect_journal_is_well_formed():
     trip = _trip_frame()
     redirects = trip.assign(move_id=0, realized_target_id="C", leg_end_period=7)
     legs = J.redirect_leg_events(redirects, 7)
-    journal = J.finalize_flows(
+    journal = _finalize(
         pd.concat(
             [
                 J.departed_events(trip),  # (0, 0)
@@ -118,7 +128,7 @@ def test_chained_redirect_journal_is_well_formed():
     leg1 = J.redirect_leg_events(first, 7)  # (1, 2): B -> C, arrives at 9
     second = leg1.assign(realized_target_id="D", leg_end_period=9)
     leg2 = J.redirect_leg_events(second, 9)  # (2, 4): C -> D, same period
-    journal = J.finalize_flows(
+    journal = _finalize(
         pd.concat(
             [
                 J.departed_events(trip),  # (0, 0)
@@ -140,12 +150,22 @@ def test_empty_journal_is_well_formed():
     assert check_journal_well_formed(J.empty_flows_journal()) == []
 
 
+def test_finalize_refuses_a_journal_without_the_order_columns():
+    # finalize_flows assigns no step_id: the producer stamps the order columns
+    # first (apply_step_events in the simulator, stamp_history_ordering for a
+    # source with no phases). Raw builder output must be refused, not repaired.
+    trip = _trip_frame()
+    journal = pd.concat([J.departed_events(trip), J.arrived_events(trip, 7)], ignore_index=True)
+    with pytest.raises(ValueError, match="phase_rank"):
+        J.finalize_flows(journal)
+
+
 # ---------------------------------------------------------------------------
 # The checker must catch broken journals (testing the test)
 # ---------------------------------------------------------------------------
 def _good_normal_journal() -> pd.DataFrame:
     trip = _trip_frame()
-    return J.finalize_flows(
+    return _finalize(
         pd.concat([J.departed_events(trip), J.arrived_events(trip, 7)], ignore_index=True)
     )
 
@@ -160,7 +180,7 @@ def test_checker_flags_duplicate_event_id():
 def test_checker_flags_a_redirect_with_no_continuation():
     # A bounce with no second arc -- the exact bug the redesign must avoid.
     trip = _trip_frame()
-    journal = J.finalize_flows(
+    journal = _finalize(
         pd.concat(
             [J.departed_events(trip), J.redirected_events(trip.assign(realized_target_id="C"), 7)],
             ignore_index=True,
@@ -188,7 +208,7 @@ def test_checker_flags_time_running_backwards():
 def test_finalize_orders_events_within_a_flow():
     trip = _trip_frame()
     # Concatenate arrived before departed; finalize must still order 0 then 1.
-    journal = J.finalize_flows(
+    journal = _finalize(
         pd.concat([J.arrived_events(trip, 7), J.departed_events(trip)], ignore_index=True)
     )
     assert journal["event_id"].tolist() == [0, 1]

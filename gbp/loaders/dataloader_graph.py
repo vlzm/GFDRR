@@ -30,7 +30,7 @@ from gbp.model import (
     get_inventory_df,
     haversine_km,
     inventory_at_moments,
-    phase_rank_by_timing,
+    stamp_history_ordering,
 )
 from gbp.model.journal_schema import check_journal_schema, schema_violations
 from gbp.routing import DEFAULT_OSRM_URL, Routes, RoutingMode
@@ -202,10 +202,11 @@ def get_historical_flows_df(
     flows the simulator generates and appends to the same journal.
 
     The rows are built with the shared :func:`~gbp.model.flows.departed_events` /
-    :func:`~gbp.model.flows.arrived_events` builders and ordered by
-    :func:`~gbp.model.flows.finalize_flows` -- the same primitives the simulator uses --
-    so a base replay's finalized journal is identical to this log by
-    construction.
+    :func:`~gbp.model.flows.arrived_events` builders, get their ordering columns
+    from :func:`~gbp.model.flows.stamp_history_ordering` (the rule for a source
+    with no phases), and are ordered by :func:`~gbp.model.flows.finalize_flows` --
+    the same finalize the simulator uses -- so a base replay's finalized journal
+    is identical to this log by construction.
 
     Parameters
     ----------
@@ -237,10 +238,11 @@ def get_historical_flows_df(
     departed = departed_events(trips)
     arrived = arrived_events(trips, trips["planned_end_period"])
     journal = pd.concat([departed, arrived], ignore_index=True)
-    # The loader has no phases, so it stamps phase_rank with the timing rule
-    # (departed -> period-own; an arrival -> dock-same or dock-previous by whether
-    # it closes in its own period). The simulator stamps its phase's rank instead.
-    journal["phase_rank"] = phase_rank_by_timing(journal)
+    # The loader has no phases, so nothing opened inventory steps. Stamp the
+    # ordering columns with the history rule instead (phase_rank by timing,
+    # step_id numbers the (period_id, phase_rank, phase_round) labels). The
+    # simulator stamps its own: rank from the phase, step_id from the counter.
+    journal = stamp_history_ordering(journal)
     flows = finalize_flows(journal)
     # The load boundary: the historical journal is checked once here, so bad
     # input data fails now instead of surfacing later as a run-end violation.

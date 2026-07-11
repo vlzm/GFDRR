@@ -32,7 +32,7 @@ Everything lives in one file, `gbp/model/flows.py`. Its parts, top to bottom:
 | Event builders | `departed_events`, `arrived_events`, `redirected_events`, `redirect_leg_events`, `lost_events`, `rebalance_departed_events`, `rebalance_arrived_events` |
 | Empty frames | `empty_in_transit`, `empty_flows_journal` |
 | In-transit set | `in_transit_after_events` (the working set after one event batch) |
-| Finalizing | `phase_rank_by_timing`, `finalize_flows` (with the helper `_assign_step_id`) |
+| Finalizing | `phase_rank_by_timing`, `stamp_history_ordering` (the history rule for the order columns), `finalize_flows` |
 | Marginals | `flows_to_departures`, `flows_to_arrivals`, `flows_to_redirects`, `flows_to_losses`, `flows_to_od_matrix`, `flows_to_panel`, `get_inventory_df`, `inventory_at_moments` |
 | Wide views | `flows_with_inventory`, `flows_with_costs`, `flows_with_measures` |
 | Geometry helpers | `haversine_km`, `neighbor_distance_sq` |
@@ -86,8 +86,8 @@ Row uniqueness is the pair `(flow_id, event_id)`.
 
 The builders set `move_id` and `event_id` at emit time. The three order
 columns are set after builder output. The simulator stamps all three in
-`SimulationState.apply_step_events`; the historical loader stamps
-`phase_rank`, and `finalize_flows` fills the remaining order columns.
+`SimulationState.apply_step_events`; the historical loader stamps all three
+with `stamp_history_ordering`.
 
 ## Which Events Move Inventory
 
@@ -173,38 +173,36 @@ into the finished table:
 ```python
 def finalize_flows(journal):
     flows = journal.copy()
-    ...
-    flows = _assign_step_id(flows)
-    ...
-    return flows[FLOW_EVENT_COLUMNS]
+    ...  # cast the dtypes; refuse rows without the order columns
+    flows = flows.sort_values(["step_id", "flow_id", "event_id"], kind="stable")
+    return flows.reset_index(drop=True)[FLOW_EVENT_COLUMNS]
 ```
 
-It casts the types, settles the order columns, sorts by
-`(step_id, flow_id, event_id)`, and cuts the frame to exactly
-`FLOW_EVENT_COLUMNS`. It does not assign trip ids. The builders already set
-`move_id` and `event_id`.
+It casts the types, sorts by `(step_id, flow_id, event_id)`, and cuts the
+frame to exactly `FLOW_EVENT_COLUMNS`. It assigns nothing. The builders
+already set `move_id` and `event_id`, and the three order columns are stamped
+before the journal gets here. A journal with a missing or NA order column is
+refused with a `ValueError` — filling it here would be a second definition of
+`step_id`.
 
-The work is in `_assign_step_id`. A step is one batch of `+1`/`-1` inventory
-changes applied together; `step_id` is its run-global ordinal
+A step is one batch of `+1`/`-1` inventory changes applied together; `step_id`
+is its run-global ordinal
 ([Notations.md §0.1](../../Notations.md#01-moment-and-step-the-inventory-time-axis)).
-The function fills it one of two ways:
+Each producer stamps it its own way, before finalizing:
 
-```python
-stamped = "step_id" in flows.columns and not flows["step_id"].isna().all()
-```
-
-- Stamped — the simulator. Each phase opened a step from a run-global counter
-  and wrote the number onto its events. The function trusts the number and
-  only sorts by it.
-- Derived — the historical loader. The loader has no phases and stamps
-  nothing, so the function numbers the distinct
-  `(period_id, phase_rank, phase_round)` tuples 0, 1, 2, … in sorted order.
+- The simulator. Each phase writes through
+  `SimulationState.apply_step_events`, which opens a step from the run-global
+  counter per ordered batch and stamps `phase_rank`, `phase_round` and
+  `step_id` on the rows.
+- The historical loader. It has no phases, so it calls
+  `stamp_history_ordering`: `phase_rank` by the timing rule below,
+  `phase_round` 0 on every row, and `step_id` numbering the distinct
+  `(period_id, phase_rank, phase_round)` labels 0, 1, 2, … in sorted order.
   This is safe because history is pure user trips: no redirects and no
-  rebalancing, so one tuple is always exactly one batch.
+  rebalancing, so one label is always exactly one batch.
 
-For the derived path the loader stamps `phase_rank` with
-`phase_rank_by_timing` — the rule that reads the phase off the event's own
-columns:
+The timing rule is `phase_rank_by_timing` — it reads the phase off the
+event's own columns:
 
 ```python
 is_period_own = is_user_departure(flows) | is_stockout
@@ -217,7 +215,7 @@ A real departure or a stockout loss is the period's own activity (rank 1). Any
 other event is a docking-phase event: rank 0 when the flow opened in an
 earlier period, rank 2 when it opened in this one. The rule matches the
 simulator's phase order by construction, and the scenario test
-`test_step_id_is_a_pure_function_of_the_journal` uses it to check that the
+`test_stamped_step_id_matches_tuple_order` uses it to check that the
 historical order and the simulator order agree.
 
 ## The Marginals (Reading The Journal Back)
@@ -394,15 +392,17 @@ view (`inventory_at_moments`) both add up the same deltas, only along
 different time axes. The per-period deltas are literally the per-step deltas
 aggregated by period, so the coarse and the fine view cannot disagree.
 
-### `step_id`: Trust The Stamp, Derive Only Without One
+### `step_id`: One Owner Per Producer
 
 Two separately ordered inventory batches must never share a `step_id`. The
 simulator proves that with a counter: a number handed out once is never handed
-out again. The historical loader has no counter, but its history is pure user
-trips — one `(period_id, phase_rank, phase_round)` tuple is always exactly one
-batch — so deriving the number from the tuple is safe there. `_assign_step_id`
-implements exactly this split: trust the stamped number, derive only when none
-was stamped. The full reasoning is in
+out again, and `SimulationState.apply_step_events` is the only place that
+stamps it. The historical loader has no counter, but its history is pure user
+trips — one `(period_id, phase_rank, phase_round)` label is always exactly one
+batch — so it derives the number from the label, in `stamp_history_ordering`.
+`finalize_flows` stays out of it: it sorts by the stamped number and refuses a
+journal without one, so "where does an event's `step_id` come from" has one
+answer per producer. The full reasoning is in
 [Notations.md §0.1](../../Notations.md#01-moment-and-step-the-inventory-time-axis).
 
 ### The Geometry Helpers Live Here
