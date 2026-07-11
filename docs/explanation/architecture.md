@@ -164,6 +164,7 @@ flowchart TB
     runs[("data/runs/<br/>one folder per run")]
     api["api.py<br/>six endpoints, one worker thread"]
     client["api_client.py<br/>HTTP calls to the API"]
+    backend["backend.py<br/>the one disk-or-API choice"]
     shared["ui_shared.py<br/>typed loaders: load_panel, load_meta, ..."]
     main["main.py<br/>page registry"]
     views["views/<br/>nine Streamlit pages"]
@@ -173,20 +174,23 @@ flowchart TB
     api -->|"starts runs through"| runner
     api -->|"loads and saves through"| artifacts
     client -->|"GET / POST over HTTP"| api
-    shared -->|"local backend"| artifacts
-    shared -->|"HTTP backend, when API_URL is set"| client
+    shared -->|"reads through"| backend
+    backend -->|"disk backend"| artifacts
+    backend -->|"HTTP backend, when API_URL is set"| client
+    backend -->|"local runs"| runner
     main -->|"registers"| views
     views -->|"saved-run pages ask for tables"| shared
-    views -.->|"Run scenario page only"| runner
+    views -.->|"Run scenario page starts runs"| backend
 ```
 
 
 
 `runner.py` connects this picture to the previous one: `build_graph_data` calls
 the loaders, and `run_scenario` calls `run_sized_scenario`, then passes the
-result to the artifact builder. The "Run scenario" page starts a run through
-`runner.py` when it works with local files, and through `api_client.py` when
-`API_URL` is set — the same switch `ui_shared.py` uses for reading.
+result to the artifact builder. `backend.py` is the one place the app chooses
+between local files and the API (`API_URL` set): the `ui_shared.py` loaders
+read through it, and the "Run scenario" page starts runs through it — locally
+via `runner.py`, or over HTTP via `api_client.py`.
 
 ## Module depth — small interface, big module
 
@@ -229,8 +233,9 @@ interface column longer, review the design.
 | `artifacts.py`       | `build_run_tables`, `save_run`, `load_run_table`, `load_run_meta`        | one build function per saved table, the artifact's pandera schemas, the `METRICS` registry, run naming |
 | `api.py`             | six HTTP endpoints ([api.md](api.md))                                    | the single worker thread, the run queue, the disk fallback after a restart                             |
 | `api_client.py`      | `list_runs`, `load_table`, `start_run`, `run_status`                     | URL building, the API-key header, response decoding                                                    |
-| `ui_shared.py`       | typed loaders: `load_panel(run_name)`, `load_meta(run_name)`, ...        | the two backends (disk or API), caching, old-artifact fallbacks                                        |
-| `main.py` + `views/` | one Streamlit page per view                                              | saved-run pages only draw precomputed artifact values; `Run scenario` starts a local or API run        |
+| `backend.py`         | `current()` — the chosen backend: reads, and `run_and_wait`              | the disk-or-API choice (`API_URL`), local in-process runs vs POST-and-poll over HTTP                   |
+| `ui_shared.py`       | typed loaders: `load_panel(run_name)`, `load_meta(run_name)`, ...        | caching, old-artifact fallbacks                                                                        |
+| `main.py` + `views/` | one Streamlit page per view                                              | saved-run pages only draw precomputed artifact values; `Run scenario` starts a run through the backend |
 
 
 

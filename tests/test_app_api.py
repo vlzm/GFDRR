@@ -196,6 +196,16 @@ def test_api_url_reads_the_environment(monkeypatch):
     assert api_client.api_url() == "http://localhost:8000"
 
 
+def test_backend_choice_follows_api_url(monkeypatch):
+    # backend.current() is the one place the disk-or-API choice is made.
+    import backend
+
+    monkeypatch.delenv("API_URL", raising=False)
+    assert isinstance(backend.current(), backend.DiskBackend)
+    monkeypatch.setenv("API_URL", "http://localhost:8000")
+    assert isinstance(backend.current(), backend.ApiBackend)
+
+
 def test_table_cache_key_is_a_constant_over_http(monkeypatch):
     # Served artifacts are immutable (docs/explanation/api.md): the HTTP cache key must
     # not touch the disk and must not vary.
@@ -203,3 +213,45 @@ def test_table_cache_key_is_a_constant_over_http(monkeypatch):
 
     monkeypatch.setenv("API_URL", "http://localhost:8000")
     assert ui_shared.table_cache_key("any_run", "panel") == 0.0
+
+
+def test_api_backend_forwards_progress_and_returns_the_final_name(monkeypatch):
+    # run_and_wait polls the status endpoint and passes each new progress
+    # line on exactly once; the server's (possibly versioned) name comes back.
+    import api_client
+    import backend
+
+    monkeypatch.setattr(backend.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        api_client, "start_run", lambda request: {"run_name": "x_version_2", "status": "queued"}
+    )
+    states = iter(
+        [
+            {"status": "running", "progress": ["step 1"], "error": None},
+            {"status": "done", "progress": ["step 1", "step 2"], "error": None},
+        ]
+    )
+    monkeypatch.setattr(api_client, "run_status", lambda name: next(states))
+
+    lines: list[str] = []
+    name = backend.ApiBackend().run_and_wait({"run_name": "x"}, None, on_progress=lines.append)
+    assert name == "x_version_2"
+    assert lines == ["Queued on the server as x_version_2.", "step 1", "step 2"]
+
+
+def test_api_backend_raises_run_failed_with_the_server_error(monkeypatch):
+    import api_client
+    import backend
+
+    monkeypatch.setattr(
+        api_client, "start_run", lambda request: {"run_name": "bad", "status": "queued"}
+    )
+    monkeypatch.setattr(
+        api_client,
+        "run_status",
+        lambda name: {"status": "failed", "progress": [], "error": "ValueError: boom"},
+    )
+    with pytest.raises(backend.RunFailed) as caught:
+        backend.ApiBackend().run_and_wait({"run_name": "bad"}, None, on_progress=lambda line: None)
+    assert caught.value.run_name == "bad"
+    assert "boom" in str(caught.value)

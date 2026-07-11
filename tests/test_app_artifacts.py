@@ -268,6 +268,7 @@ def test_meta_carries_t0_and_the_run_parameters():
 # ---------------------------------------------------------------------------
 PAGES = [
     "home.py",
+    "run_scenario.py",
     "station_map.py",
     "trips_map.py",
     "truck_trips.py",
@@ -294,6 +295,8 @@ def _run_page(page, runs_root, monkeypatch, compare):
     from streamlit.testing.v1 import AppTest
 
     monkeypatch.setenv("DATA_DIR", str(runs_root.parent))
+    # The pages must render on the disk backend, whatever the outer environment.
+    monkeypatch.delenv("API_URL", raising=False)
     at = AppTest.from_file(str(_REPO_ROOT / "app" / "views" / page), default_timeout=30)
     if compare:
         at.session_state["scenario_a_value"] = "base"

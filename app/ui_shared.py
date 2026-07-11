@@ -8,12 +8,11 @@ ramp, and the difference view uses the blue-gray-red diverging pair.
 from __future__ import annotations
 
 import dataclasses
-import pathlib
 from collections.abc import Callable
 from typing import NamedTuple
 
-import api_client
 import artifacts
+import backend
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -62,41 +61,29 @@ LEVELS = [LEVEL_GLOBAL, LEVEL_PERIOD, LEVEL_COMMODITY, LEVEL_FACILITY]
 
 # --- The run-artifact loader --------------------------------------------------
 # The one front door to a saved run (Notations.md §12). A page asks for a table
-# through the typed accessors below; the file layout, the caching, the two
-# backends (local files, or HTTP calls to the API when API_URL is set --
-# docs/explanation/api.md), and the old-artifact fallbacks all live here, so a page never
-# names a parquet file or re-checks which columns an older artifact carries.
+# through the typed accessors below; the caching and the old-artifact fallbacks
+# live here, and the choice between the two backends (local files, or HTTP
+# calls to the API when API_URL is set) is made once, in backend.current().
+# A page never names a parquet file or re-checks which columns an older
+# artifact carries.
 def list_runs() -> list[str]:
-    """Names of every saved run: from the API when ``API_URL`` is set, else the disk."""
-    if api_client.api_url():
-        return [meta.run_name for meta in api_client.list_runs()]
-    return artifacts.list_runs()
+    """Names of every saved run, from the chosen backend."""
+    return backend.current().list_runs()
 
 
 @st.cache_data(show_spinner=False)
 def _table_cached(run_name: str, table: str, cache_key: float) -> pd.DataFrame:
     """Cache one parquet table; ``cache_key`` comes from :func:`table_cache_key`."""
-    if api_client.api_url():
-        return api_client.load_table(run_name, table)
-    return artifacts.load_run_table(run_name, table)
-
-
-def table_path(run_name: str, table: str) -> pathlib.Path:
-    """Path of one saved table on the local disk (the local cache key reads its mtime)."""
-    return artifacts.run_dir(run_name) / f"{table}.parquet"
+    return backend.current().load_table(run_name, table)
 
 
 def table_cache_key(run_name: str, table: str) -> float:
     """Cache key of one saved table: the file mtime locally, a constant over HTTP.
 
-    A local file can be rewritten, so the mtime must be part of the key. A
-    served artifact cannot change (the API is the only writer on the server
-    and never overwrites a saved run -- docs/explanation/api.md), so ``(run_name, table)``
-    alone identifies the content and the key is a constant.
+    The backend owns the rule (a local file can be rewritten; a served
+    artifact never changes — docs/explanation/api.md).
     """
-    if api_client.api_url():
-        return 0.0
-    return table_path(run_name, table).stat().st_mtime
+    return backend.current().table_cache_key(run_name, table)
 
 
 def _load_table(run_name: str, table: str) -> pd.DataFrame:
@@ -138,18 +125,13 @@ def load_arcs(run_name: str, flow_type: str | None = None) -> pd.DataFrame | Non
 
 @st.cache_data(show_spinner=False)
 def _meta_cached(run_name: str, cache_key: float) -> artifacts.RunMeta:
-    """Cache one meta.json; ``cache_key`` is the mtime locally, a constant over HTTP."""
-    if api_client.api_url():
-        return api_client.load_meta(run_name)
-    return artifacts.load_run_meta(run_name)
+    """Cache one meta.json; ``cache_key`` mirrors :func:`table_cache_key`."""
+    return backend.current().load_meta(run_name)
 
 
 def load_meta(run_name: str) -> artifacts.RunMeta:
     """Read a saved run's meta.json through the Streamlit cache."""
-    if api_client.api_url():
-        return _meta_cached(run_name, 0.0)
-    path = artifacts.run_dir(run_name) / "meta.json"
-    return _meta_cached(run_name, path.stat().st_mtime)
+    return _meta_cached(run_name, backend.current().meta_cache_key(run_name))
 
 
 class RebalancingSettings(NamedTuple):

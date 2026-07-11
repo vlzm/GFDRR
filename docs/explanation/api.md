@@ -36,7 +36,7 @@ precompute, and it adds nothing to `gbp/`.
 | `app/artifacts.py` | The one place that builds, saves, and loads artifacts. The API calls `list_runs`, `load_run_meta`, `next_free_run_name`; the parquet files are served as saved. |
 | `app/runner.py` | Owns `build_graph_data` and `run_scenario`. The API's worker calls them unchanged. |
 | The artifact contract | `meta.json` + five parquet tables per run (Notations.md §12). The API exposes this contract; it does not define a second one. |
-| `views/*` pages | Pages read through the `ui_shared` typed accessors; only the loader behind those accessors switches backends (see "The Two Backends"). |
+| `views/*` pages | Pages read through the `ui_shared` typed accessors and start runs through `backend.current()`; the disk-or-API choice lives in `app/backend.py` (see "The Two Backends"). |
 
 ## The Service Map
 
@@ -188,22 +188,24 @@ cannot change. No cache invalidation protocol is needed.
 
 ## The Two Backends Of The Streamlit App
 
-The loader in `ui_shared.py` is the one front door to a saved run, and that
-is the payoff: the pages, pickers, KPI row, and charts are the same in both
-backends. Two files branch on `API_URL`:
+One module, `app/backend.py`, makes the disk-or-API choice: `backend.current()`
+returns `ApiBackend` when `API_URL` is set and `DiskBackend` otherwise, and
+everything the app does to runs goes through that object. Pages never import
+`api_client` and never check `API_URL` themselves, and that is the payoff:
+the pages, pickers, KPI row, and charts are the same in both backends.
 
-- `ui_shared.py` — `list_runs`, the table loader, and the meta loader have
-  two backends behind the same functions: local file reads when `API_URL` is
-  unset, HTTP calls through `api_client` when it is set. The typed accessors
-  (`load_panel`, `load_arcs`, `load_flow_totals`, `load_facilities`,
-  `load_meta`) keep their signatures either way. The cache key is the file's
-  modification time locally and a constant over HTTP (see "Artifacts Are
-  Immutable").
-- `views/run_scenario.py` — with `API_URL` set, the page sends `POST /runs`
-  and polls `GET /runs/{run_name}/status`, showing the `progress` lines in
-  its status box; the server resolves the final run name. Without `API_URL`
-  it calls `runner.run_scenario` in the Streamlit process and resolves the
-  name itself with `next_free_run_name`.
+- Reading. The `ui_shared.py` typed accessors (`load_panel`, `load_arcs`,
+  `load_flow_totals`, `load_facilities`, `load_meta`) keep their signatures
+  either way and call the backend underneath: local file reads on the disk,
+  HTTP calls through `api_client` over the network. The cache key is the
+  file's modification time locally and a constant over HTTP (see "Artifacts
+  Are Immutable").
+- Starting runs. `views/run_scenario.py` calls `backend.current().run_and_wait`.
+  On the disk backend it runs `runner.run_scenario` in the Streamlit process
+  and resolves the name with `next_free_run_name`; on the API backend it
+  sends `POST /runs` and polls `GET /runs/{run_name}/status` (the server
+  resolves the final run name). Both stream the same `progress` lines into
+  the page's status box.
 
 Local development stays a one-process command: `streamlit run app/main.py`
 with no `API_URL` reads the disk directly. The server runs both processes and
@@ -218,7 +220,7 @@ timeout is 120 seconds, sized for a table download of millions of rows.
 
 | Function | Endpoint | Returns |
 |---|---|---|
-| `api_url()` | — | The base URL from the `API_URL` env var; `None` means read local files. This is the loader's backend switch. |
+| `api_url()` | — | The base URL from the `API_URL` env var; `None` means read local files. `backend.current()` reads it to choose the backend. |
 | `list_runs()` | `GET /runs` | `list[RunMeta]` |
 | `load_meta(run_name)` | `GET /runs/{run_name}` | one `RunMeta` |
 | `load_table(run_name, table)` | `GET /runs/{run_name}/tables/{table}` | the table as a `pandas.DataFrame` |

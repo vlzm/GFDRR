@@ -30,6 +30,7 @@ describes the local backend; the switch and the server side are in
 | `runner.py` | Owns `build_graph_data` and `run_scenario`; the terminal entry point. |
 | `artifacts.py` | Owns the `build_*` functions, the `METRICS` table, and save/load. |
 | `main.py` | The Streamlit entry point: the page list and navigation. |
+| `backend.py` | The one place the app chooses its backend — local files, or HTTP when `API_URL` is set — for reading runs and for starting them. |
 | `ui_shared.py` | Shared page helpers: cached loaders, scenario pickers, the KPI row, colors, charts. |
 | `views/*.py` | One file per page. Every page reads saved tables and draws them. |
 
@@ -198,12 +199,12 @@ its typed accessors). `load_run_meta` has more callers: the API endpoints in
 `app/api.py` and the runner's terminal entry point, which prints the totals
 of the run it just saved.
 
-The Run scenario page resolves a free name before it runs: with the local
-backend it calls `next_free_run_name` itself; with `API_URL` set the server
-resolves the name (see [api.md](api.md)). A taken name gets a `_version_2`,
-`_version_3`, … suffix either way, so that page does not overwrite a saved
-run. A caller that passes an existing `run_name` directly to `save_run`
-replaces the files in that folder.
+A run started from the Run scenario page goes through the free-name rule:
+the disk backend (`backend.py`) calls `next_free_run_name`; with `API_URL`
+set the server resolves the name (see [api.md](api.md)). A taken name gets a
+`_version_2`, `_version_3`, … suffix either way, so that page does not
+overwrite a saved run. A caller that passes an existing `run_name` directly
+to `save_run` replaces the files in that folder.
 
 ## Step 3: The Streamlit App
 
@@ -213,10 +214,12 @@ share lives in `ui_shared.py`:
 - the run-artifact loader — the one front door to a saved run. Typed
   accessors per table (`load_panel`, `load_arcs`, `load_flow_totals`,
   `load_facilities`, `load_meta`) plus `rebalancing_settings` for the
-  rebalancing block of `meta.json`. With the local backend the cache key
-  includes the file's modification time, so a rewritten artifact invalidates
-  itself. With `API_URL` set the key is a constant, because a served
-  artifact never changes ([api.md](api.md)).
+  rebalancing block of `meta.json`. The accessors read through
+  `backend.current()` (`backend.py`), where the disk-or-API choice is made
+  once. On the disk backend the cache key includes the file's modification
+  time, so a rewritten artifact invalidates itself. With `API_URL` set the
+  key is a constant, because a served artifact never changes
+  ([api.md](api.md)).
   Old-artifact fallbacks live here: `load_arcs(run, flow_type=...)` handles
   arcs saved before the `flow_type` column existed.
 - `pick_scenario_pair` — the sidebar pickers for scenario A and the optional
@@ -247,7 +250,7 @@ The pages, and which artifact tables each reads:
 | Page | File | Reads |
 |---|---|---|
 | Overview & compare | `views/home.py` | `meta.json` of every run |
-| Run scenario | `views/run_scenario.py` | — (calls `runner.run_scenario`, then shows the new run's meta) |
+| Run scenario | `views/run_scenario.py` | — (starts a run through `backend.current()`, then shows the new run's meta) |
 | Station map | `views/station_map.py` | `panel`, `facilities` |
 | Trips map | `views/trips_map.py` | `arcs`, `facilities`, `panel` (for the bike-type filter) |
 | Truck trips | `views/truck_trips.py` | `arcs` (the `rebalance` rows), `facilities` |
@@ -256,11 +259,14 @@ The pages, and which artifact tables each reads:
 | Single facility | `views/facility_detail.py` | `panel`, `facilities` |
 | Download data | `views/downloads.py` | `flow_totals`, `panel` as CSV downloads |
 
-"Run scenario" is the one page that computes anything slow: it caches
-`build_graph_data` with `st.cache_resource` (one load per CSV path) and calls
-`runner.run_scenario` with `on_progress=st.write`, so the stages appear in a
-status box. Every other page follows one pattern: pick the scenario pair,
-load its tables through the cache, slice, draw.
+"Run scenario" is the one page that starts anything slow: it calls
+`backend.current().run_and_wait(...)` with `on_progress=st.write`, so the
+stages appear in a status box. On the disk backend that runs
+`runner.run_scenario` in this process (with `build_graph_data` cached by
+`st.cache_resource`, one load per CSV path); on the API backend it queues
+the run on the server and polls its status. Every other page follows one
+pattern: pick the scenario pair, load its tables through the cache, slice,
+draw.
 
 ## Why It Is Built This Way
 

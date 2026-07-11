@@ -74,8 +74,9 @@ with a depth table (level 3).
   `app/main.py` and `app/views/` are the Streamlit web interface — a pure
   reader of saved artifacts: it never simulates and never recomputes what the
   artifact builder has already computed. `app/ui_shared.py` holds the pages'
-  shared helpers, including the loader with its two backends: local files,
-  or HTTP calls through `app/api_client.py` when `API_URL` is set.
+  shared helpers; `app/backend.py` is the one place the app chooses between
+  local files and HTTP calls through `app/api_client.py` (when `API_URL` is
+  set), for reading runs and for starting them.
   `app/api.py` is the run-artifact API — an HTTP service that serves saved
   runs and starts new ones ([api.md](explanation/api.md)).
 - **`notebooks/`** — `test_pipeline.ipynb`, the canonical scenario: the whole
