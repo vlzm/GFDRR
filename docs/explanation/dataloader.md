@@ -212,17 +212,15 @@ same-period arrivals dock. The end-of-period value already counts those late
 arrivals, so it overstates what is on hand at the moment of departure. Sizing
 against end-of-period values would leave real stockouts.
 
-`get_replay_capacities_df` sizes dock capacity for a journal. The loader defines
-this helper, but `ResolvedModelData.__init__` does not call it.
-`size_state_for_demand` calls it after a sizing run.
+`get_replay_capacities_df` sizes dock capacity for a journal. It lives next to
+its only caller, `size_state_for_demand` in
+`gbp/consumers/simulator/sizing.py`, which calls it after a sizing run.
 
 ```python
 moments = inventory_at_moments(historical_flows_df, initial_inventory_df)
-facility_total = moments.groupby(["step_id", "facility_id"], as_index=False)[
-    "inventory_after"
-].sum()
-step_peak = facility_total.groupby("facility_id")["inventory_after"].max()
-initial_total = initial_inventory_df.groupby("facility_id")["quantity"].sum()
+step_totals = occupancy_per_facility(moments, "inventory_after", extra_keys=("step_id",))
+step_peak = step_totals.groupby("facility_id").max()
+initial_total = occupancy_per_facility(initial_inventory_df)
 idx = step_peak.index.union(initial_total.index)
 peak = pd.concat(
     [step_peak.reindex(idx, fill_value=0), initial_total.reindex(idx, fill_value=0)],
@@ -231,9 +229,11 @@ peak = pd.concat(
 ```
 
 With the initial inventory fixed, it finds each facility's peak total occupancy
-after every step. It also compares that with the initial occupancy, the moment
-before the first step. A station whose inventory only drains has its highest
-occupancy at the start.
+after every step. Occupancy is the inventory summed across commodities, because
+the docks are shared; one function owns that total, `occupancy_per_facility` in
+`gbp/model/flows.py`. The peak is also compared with the initial occupancy, the
+moment before the first step. A station whose inventory only drains has its
+highest occupancy at the start.
 
 The capacity becomes that peak, with `min_capacity = 10` as a floor for
 facilities with no replay traffic.
@@ -245,10 +245,11 @@ dock-full can happen. It then calls `get_replay_initial_inventory_df` and
 `get_replay_capacities_df` on that sizing run's journal
 (see [simulator.md](simulator.md#how-a-run-starts)).
 
-`get_saturated_inventory_df` builds the artificial saturated inventory table:
-one million bikes per station and commodity. `size_state_for_demand` builds the
-matching saturated capacity table itself: `(n_commodities + 1) * 1_000_000`
-docks per facility.
+`get_saturated_inventory_df` (also in `sizing.py`) builds the artificial
+saturated inventory table: one million bikes per station and commodity
+(`SATURATION_QUANTITY`). `size_state_for_demand` builds the matching saturated
+capacity table itself: `(n_commodities + 1) * SATURATION_QUANTITY` docks per
+facility.
 
 ### Riding Speed And Routes
 

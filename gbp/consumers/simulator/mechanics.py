@@ -17,10 +17,10 @@ times, and on nothing above it:
 import numpy as np
 import pandas as pd
 
-from gbp.model import neighbor_distance_sq
+from gbp.model import neighbor_distance_sq, occupancy_per_facility
 from gbp.routing import Routes
 
-from .state import adjust_inventory, dock_deltas
+from .state import adjust_inventory
 
 
 # ---------------------------------------------------------------------------
@@ -30,10 +30,11 @@ from .state import adjust_inventory, dock_deltas
 # full, arriving bikes overflow and are redirected to the nearest station with a
 # free dock. Never triggers in an exact replay, where capacity is never the limit.
 def free_docks(inventory: pd.DataFrame, capacities: pd.DataFrame) -> pd.Series:
-    """Free dock slots per facility: capacity minus bikes currently docked.
+    """Free dock slots per facility: capacity minus the facility's occupancy.
 
-    Classic and electric bikes share the same physical docks, so occupancy is the
-    total inventory across commodities.
+    Occupancy is the total inventory across commodities, because classic and
+    electric bikes share the same physical docks
+    (:func:`gbp.model.occupancy_per_facility`).
 
     Parameters
     ----------
@@ -47,7 +48,7 @@ def free_docks(inventory: pd.DataFrame, capacities: pd.DataFrame) -> pd.Series:
     pandas.Series
         ``facility_id -> free slots`` (clipped at zero).
     """
-    occupied = inventory.groupby("facility_id")["quantity"].sum()
+    occupied = occupancy_per_facility(inventory)
     capacity = capacities.set_index("facility_id")["capacity"]
     idx = capacity.index.union(occupied.index)
     free = capacity.reindex(idx).fillna(0) - occupied.reindex(idx).fillna(0)
@@ -62,7 +63,7 @@ def dock_up_to_capacity(
     The one docking rule: within each target the first ``free`` flows (in row
     order) dock; the rest are overflow. Vectorized through a per-target
     cumulative count -- no Python loop. ``target_col`` selects which station the
-    flows dock at (the same pattern :func:`state.dock_deltas` uses):
+    flows dock at (the same pattern :func:`_dock_deltas` uses):
     ``planned_target_id`` for flows docking at their planned station,
     ``realized_target_id`` for a redirect round docking at the station chosen
     for it.
@@ -162,6 +163,24 @@ def _leg_durations(
     return from_od.fillna(estimate).round().astype("int64")
 
 
+def _dock_deltas(docked: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    """+1 per docking bike, grouped by the station docked at and the commodity.
+
+    For the redirect's round loop only: its rows are decisions, not events yet,
+    so the loop cannot derive its deltas from events the way the state's real
+    inventory write does (:func:`gbp.model.inventory_deltas_from_events`).
+    ``target_col`` selects which station the bike docked at:
+    ``planned_target_id`` when it docked at its planned target,
+    ``realized_target_id`` when an overflow flow was redirected elsewhere.
+    """
+    return (
+        docked.groupby([target_col, "commodity_category"])
+        .size()
+        .reset_index(name="delta")
+        .rename(columns={target_col: "facility_id"})
+    )
+
+
 def plan_overflow_redirect(
     inventory: pd.DataFrame,
     capacities: pd.DataFrame,
@@ -240,7 +259,7 @@ def plan_overflow_redirect(
         # The same docking rule as the planned dockings, at the redirect's target.
         docked_now, bounced = dock_up_to_capacity(now, free, "realized_target_id")
         resolved += [later.assign(outcome="riding"), docked_now.assign(outcome="docked")]
-        running = adjust_inventory(running, dock_deltas(docked_now, "realized_target_id"))
+        running = adjust_inventory(running, _dock_deltas(docked_now, "realized_target_id"))
         remaining = bounced.drop(columns=["realized_target_id", "leg_end_period", "phase_round"])
 
     lost = remaining.assign(
@@ -267,6 +286,18 @@ def plan_overflow_redirect(
 # ---------------------------------------------------------------------------
 # Demand realization and OD expansion (FormDepartures / FormPotentialTrips)
 # ---------------------------------------------------------------------------
+def scale_demand(quantity: pd.Series, demand_scale_factor: float) -> pd.Series:
+    """Scale a demand count by the run's factor and round it to whole bikes.
+
+    The one scaling rule (``EnvironmentConfig.demand_scale_factor``), applied
+    per row. Everything that scales demand must round the same way, or the
+    demand-split invariant I1 would compare the journal against a demand the
+    run never faced: the departures phase, the run validator and the
+    rebalancing target all call this function.
+    """
+    return (quantity * demand_scale_factor).round().astype("Int64")
+
+
 def realize_departures(demand_now: pd.DataFrame, inventory: pd.DataFrame) -> pd.DataFrame:
     """Departures per (facility, commodity): ``min(demand, inventory)``.
 

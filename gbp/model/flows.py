@@ -192,6 +192,41 @@ def inventory_deltas_from_events(events: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def occupancy_per_facility(
+    frame: pd.DataFrame,
+    value_column: str = "quantity",
+    extra_keys: tuple[str, ...] = (),
+) -> pd.Series:
+    """Occupancy: bikes docked per facility, ``value_column`` summed across commodities.
+
+    Docks are shared between commodities -- a classic and an electric bike park
+    in the same kind of slot -- so every dock question (free docks, "this
+    station is full", the docks a station ever needs) counts the facility's
+    total across commodities, never one commodity alone. This function is that
+    rule, written once; a caller only picks which column to total and, with
+    ``extra_keys``, whether to keep a time axis in the grouping.
+
+    Parameters
+    ----------
+    frame : pandas.DataFrame
+        Rows split by commodity, with ``facility_id`` and ``value_column``
+        (an inventory table, or a slice of :func:`inventory_at_moments`).
+    value_column : str, optional
+        The column to total. Defaults to ``quantity``; the redirect explainer
+        totals ``inventory_before`` / ``inventory_after``.
+    extra_keys : tuple of str, optional
+        Grouping keys kept in front of ``facility_id``. ``("step_id",)`` gives
+        one total per step and facility (the capacity sizing needs the
+        per-step trajectory). Default: one total per facility.
+
+    Returns
+    -------
+    pandas.Series
+        The totals, indexed by ``facility_id`` (and ``extra_keys`` when given).
+    """
+    return frame.groupby([*extra_keys, "facility_id"])[value_column].sum()
+
+
 # ---------------------------------------------------------------------------
 # Flow-event builders
 # ---------------------------------------------------------------------------
@@ -1349,16 +1384,18 @@ def redirect_neighbor_table(
     elif pd.notna(realized_target) and realized_target in order:
         order = order[: order.index(realized_target) + 1]
 
-    # Dock occupancy at the redirect step, summed across commodities (shared docks).
-    # inventory_at_moments lists every facility at every step, so a neighbour with
-    # no bikes still appears; reindex fills any that never held one with 0.
+    # Dock occupancy at the redirect step (occupancy_per_facility: shared docks,
+    # so the total across commodities). inventory_at_moments lists every facility
+    # at every step, so a neighbour with no bikes still appears; reindex fills
+    # any that never held one with 0.
     moments = inventory_at_moments(flows, initial_inventory)
     at_step = moments[moments["step_id"] == step_id]
-    occ = (
-        at_step.groupby("facility_id")[["inventory_before", "inventory_after"]]
-        .sum()
-        .reindex(order, fill_value=0)
-    )
+    occ = pd.DataFrame(
+        {
+            "inventory_before": occupancy_per_facility(at_step, "inventory_before"),
+            "inventory_after": occupancy_per_facility(at_step, "inventory_after"),
+        }
+    ).reindex(order, fill_value=0)
 
     out = pd.DataFrame(
         {

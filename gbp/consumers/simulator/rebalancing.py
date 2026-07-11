@@ -47,13 +47,14 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 from gbp.model import (
     REBALANCE_RANK,
     haversine_km,
+    occupancy_per_facility,
     rebalance_arrived_events,
     rebalance_departed_events,
 )
 
 from .config import EnvironmentConfig
 from .inputs import ScenarioInputs
-from .mechanics import dock_up_to_capacity, free_docks
+from .mechanics import dock_up_to_capacity, free_docks, scale_demand
 from .phases import Phase
 from .state import PeriodRow, SimulationState, SimulatorConfigError
 
@@ -217,7 +218,7 @@ def target_inventory(
 
     def _signed(marginal: pd.DataFrame, sign: int) -> pd.DataFrame:
         rows = marginal[marginal["period_id"].isin(period_ids)].copy()
-        rows["net"] = sign * (rows["quantity"] * demand_scale_factor).round()
+        rows["net"] = sign * scale_demand(rows["quantity"], demand_scale_factor)
         return rows[["period_id", *_KEYS, "net"]]
 
     net = pd.concat([_signed(demand, +1), _signed(arrivals, -1)], ignore_index=True)
@@ -252,16 +253,18 @@ def clip_dropoffs_to_free_docks(
 ) -> pd.DataFrame:
     """Cut each station's planned inflow down to its free docks.
 
-    A station cannot take in more bikes than it has free dock slots (docks are
-    shared across commodities). When a facility's total planned inflow exceeds
-    its free docks, every commodity's share is scaled down by the same factor
-    and rounded down, so the total fits. Pickups (positive imbalance) are
-    untouched -- they are already bounded by the bikes on hand, because
+    A station cannot take in more bikes than it has free dock slots. Docks are
+    shared across commodities, so the planned inflow is totalled per facility
+    with the same rule the free docks use
+    (:func:`gbp.model.occupancy_per_facility`). When that total exceeds the
+    facility's free docks, every commodity's share is scaled down by the same
+    factor and rounded down, so the total fits. Pickups (positive imbalance)
+    are untouched -- they are already bounded by the bikes on hand, because
     ``target >= 0`` implies ``imbalance <= inventory``.
     """
     out = imbalance.copy()
     need = (-out["imbalance"]).clip(lower=0)
-    need_per_facility = need.groupby(out["facility_id"]).transform("sum")
+    need_per_facility = out["facility_id"].map(occupancy_per_facility(out.assign(quantity=need)))
     allowed = out["facility_id"].map(free_docks(inventory, capacities))
     allowed = allowed.astype("float64").fillna(0.0)
     factor = (allowed / need_per_facility).where(need_per_facility > 0, 1.0).clip(upper=1.0)

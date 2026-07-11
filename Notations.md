@@ -143,7 +143,8 @@ current inventory by the same `+1`/`-1` rule as the write (`apply_step_events`
 moves the inventory through the same method). So a phase never keeps its own
 copy of the inventory arithmetic. The one exception is the redirect's round
 loop inside `plan_overflow_redirect` (mechanics work on plain frames, below the
-state); it keeps a local per-round copy via `dock_deltas`.
+state); it keeps a local per-round copy via its own docking-delta helper
+(`_dock_deltas` in `mechanics.py`, next to the loop).
 
 **Historical loader: derived from the label.** The loader has no phases and opens
 no step. Before finalizing it stamps the order columns itself, with one function —
@@ -239,8 +240,9 @@ inventory anywhere else.
 | `inventory` | Bikes currently docked at facilities (the amount on hand). Columns `facility_id`, `commodity_category`, `quantity`. | `stock`; `on-hand` as a data name (the prose phrase "bikes on hand" is fine — this file uses it too) |
 | `in_transit` | Bikes that departed but have not yet docked (the working set). | "moving set", "moving bikes" |
 | `demand` | The number of trips users wanted. `demand = departed + lost(stockout)`. | — |
-| `supply` | Inventory in its "available to depart" role (`state_supply_df`; the `available` column inside `realize_departures`). A *role view* of `inventory`, not a second word for the inventory table in general. | — |
-| `free_docks` | Free dock slots per facility: `capacity` minus all bikes docked there, summed across commodities (the docks are shared). Function `free_docks` in `mechanics.py`; the redirect explainer's `free_before` / `free_after` are the same value at the step's two moments. | `available docks`, `slots` |
+| `supply` | Inventory in its "available to depart" role (the `available` column inside `realize_departures`). A *role view* of `inventory`, not a second word for the inventory table in general. | — |
+| `occupancy` | Bikes docked at a facility, summed across commodities — the docks are shared, so a classic and an electric bike take the same kind of slot. One function owns this total: `occupancy_per_facility` in `gbp/model/flows.py`; `free_docks`, the redirect explainer and the capacity sizing all read it from there. | per-commodity dock counts, `utilization` |
+| `free_docks` | Free dock slots per facility: `capacity` minus the facility's `occupancy`. Function `free_docks` in `mechanics.py`; the redirect explainer's `free_before` / `free_after` are the same value at the step's two moments. | `available docks`, `slots` |
 | `fits` / `overflow` | The two halves of the one docking rule, `dock_up_to_capacity(due, free)`: within each target the first `free` flows dock (`fits`), the rest are `overflow`. A user trip's overflow is redirected (§1); a rebalance dropoff's overflow docks at the truck's home depot (§14). | `spillover`, `excess` |
 
 `stock` is the main offender: the fundamental thing is `inventory`, so never write

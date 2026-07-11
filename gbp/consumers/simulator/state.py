@@ -13,9 +13,7 @@ the in-transit change from the events themselves (the model-layer rules
 :func:`gbp.model.in_transit_after_events`), so a phase cannot write events that
 disagree with the projections. A decision in the middle of a phase reads the
 inventory through :meth:`SimulationState.inventory_after_events` -- the events
-built so far, applied by the same rule the write applies. The marginal
-observations are exposed as read-only properties derived on demand through
-:mod:`flows`. Dependency direction:
+built so far, applied by the same rule the write applies. Dependency direction:
 ``journal <- state <- mechanics <- phases <- engine``.
 """
 
@@ -26,9 +24,6 @@ import pandas as pd
 
 from gbp.model import (
     empty_in_transit,
-    flows_to_arrivals,
-    flows_to_departures,
-    flows_to_od_matrix,
     in_transit_after_events,
     inventory_deltas_from_events,
 )
@@ -42,24 +37,6 @@ def adjust_inventory(inventory: pd.DataFrame, deltas: pd.DataFrame) -> pd.DataFr
     out = inventory.merge(deltas, on=["facility_id", "commodity_category"], how="outer")
     out["quantity"] = out["quantity"].fillna(0) + out["delta"].fillna(0)
     return out[["facility_id", "commodity_category", "quantity"]]
-
-
-def dock_deltas(docked: pd.DataFrame, target_col: str = "planned_target_id") -> pd.DataFrame:
-    """+1 per docking bike, grouped by the station docked at and the commodity.
-
-    For decision rows that are not events yet (the redirect's round loop in
-    :mod:`mechanics`). A phase's real inventory write derives its deltas from
-    the events instead (:func:`gbp.model.inventory_deltas_from_events`).
-    ``target_col`` selects which station the bike docked at: ``planned_target_id``
-    when it docked at its planned target, ``realized_target_id`` when an overflow
-    flow was redirected elsewhere.
-    """
-    return (
-        docked.groupby([target_col, "commodity_category"])
-        .size()
-        .reset_index(name="delta")
-        .rename(columns={target_col: "facility_id"})
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -93,10 +70,6 @@ class SimulationState:
     named state contract: it is internal plumbing (the "departed but not yet
     docked" working set), the same kind of projection as inventory but not
     worth observing on its own.
-
-    The "Additional" observations are exposed as read-only properties derived on
-    demand: ``state_departures_df``, ``state_arrivals_df``, ``state_demand_df``,
-    ``state_supply_df`` and ``state_od_matrix_df``.
 
     Attributes
     ----------
@@ -136,38 +109,6 @@ class SimulationState:
     def period_id(self) -> int:
         """Integer id of the current period."""
         return self.state_period_id_obj.period_id
-
-    # -- derived "Additional" observations -----------------------------------
-    @property
-    def state_departures_df(self) -> pd.DataFrame:
-        """Outflow per period and source, derived from ``state_flows_df``."""
-        return flows_to_departures(self.state_flows_df)
-
-    @property
-    def state_arrivals_df(self) -> pd.DataFrame:
-        """Inflow per period and target, derived from ``state_flows_df``."""
-        return flows_to_arrivals(self.state_flows_df)
-
-    @property
-    def state_demand_df(self) -> pd.DataFrame:
-        """Realized user demand (= departures in an exact replay).
-
-        Demand is the number of trips users *wanted* to take. Above the
-        historical baseline some of it is lost to stockouts and diverges from
-        ``state_departures_df``; in the replay every desired trip departs, so the
-        two coincide and demand is read off the journal as the departures.
-        """
-        return flows_to_departures(self.state_flows_df)
-
-    @property
-    def state_supply_df(self) -> pd.DataFrame:
-        """Bikes currently available to depart: the current inventory."""
-        return self.state_inventory_df
-
-    @property
-    def state_od_matrix_df(self) -> pd.DataFrame:
-        """Origin-destination demand matrix, derived from ``state_flows_df``."""
-        return flows_to_od_matrix(self.state_flows_df)
 
     # -- functional updates --------------------------------------------------
     def with_rebalance_plan(self, new_plan: pd.DataFrame) -> "SimulationState":

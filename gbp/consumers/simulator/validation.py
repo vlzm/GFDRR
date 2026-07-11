@@ -26,6 +26,7 @@ from gbp.model import (
 from gbp.model.journal_schema import check_journal_schema
 
 from .inputs import ScenarioInputs
+from .mechanics import scale_demand
 from .state import SimulationState
 
 _KEYS = ["facility_id", "commodity_category"]
@@ -52,8 +53,9 @@ def validate_run(
     demand_scale_factor : float, optional
         The run's demand scale (``EnvironmentConfig.demand_scale_factor``). The
         demand-split check must compare the journal against the demand the run
-        actually faced, so the historical demand is scaled and rounded here the
-        same way ``FormDeparturesPhase`` scales it. Defaults to 1.0.
+        actually faced, so the historical demand is scaled here with the same
+        rule ``FormDeparturesPhase`` applies
+        (:func:`~gbp.consumers.simulator.mechanics.scale_demand`). Defaults to 1.0.
     number_of_periods : int, optional
         How many periods the run stepped (``EnvironmentConfig.number_of_periods``).
         A run over the first N periods of a longer grid never saw the demand of
@@ -76,7 +78,7 @@ def validate_run(
         demand = demand[demand["period_id"] < number_of_periods]
     if demand_scale_factor != 1.0:
         demand = demand.copy()
-        demand["quantity"] = (demand["quantity"] * demand_scale_factor).round().astype("Int64")
+        demand["quantity"] = scale_demand(demand["quantity"], demand_scale_factor)
 
     violations: list[str] = []
     violations += check_journal_schema(flows)  # the journal's shape contract

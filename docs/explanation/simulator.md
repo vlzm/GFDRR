@@ -122,17 +122,9 @@ The main fields are:
 | `next_step_id` | The next `step_id` to hand out. |
 | `rebalance_plan` | Bike-level truck plan still to execute. Empty outside a rebalancing window. |
 
-The state also exposes read-only values derived from `state_flows_df`:
-
-```python
-state_departures_df
-state_arrivals_df
-state_demand_df
-state_supply_df
-state_od_matrix_df
-```
-
-These are read-models of the journal. They are not separate sources of truth.
+The state exposes nothing derived from `state_flows_df`. Read-models of the
+journal (departures, arrivals, the OD matrix) are plain functions in
+`gbp/model/flows.py`; a reader calls them on the journal directly.
 
 ## The One Journal Write Path
 

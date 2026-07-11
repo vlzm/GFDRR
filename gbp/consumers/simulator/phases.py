@@ -40,6 +40,7 @@ from .mechanics import (
     free_docks,
     plan_overflow_redirect,
     realize_departures,
+    scale_demand,
 )
 from .state import PeriodRow, SimulationState
 
@@ -214,8 +215,8 @@ class FormDeparturesPhase(Phase):
         t = period.period_id
         demand = resolved.historical_demand_df
         demand_now = demand[demand["period_id"] == t].copy()
-        demand_now.loc[:, "quantity"] = (
-            (demand_now["quantity"] * config.demand_scale_factor).round().astype("Int64")
+        demand_now.loc[:, "quantity"] = scale_demand(
+            demand_now["quantity"], config.demand_scale_factor
         )
         if demand_now.empty:
             return empty_flows_journal()
