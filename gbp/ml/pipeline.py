@@ -40,15 +40,12 @@ import argparse
 import datetime
 import pathlib
 import subprocess
-import tempfile
-import typing
 from collections.abc import Callable, Sequence
 
-import mlflow
 import pandas as pd
 from mlflow.entities.model_registry import ModelVersion
 
-from gbp.ml.backtest import EXPERIMENT_NAME, data_version, run_backtest
+from gbp.ml.backtest import data_version, latest_comparison, run_backtest
 from gbp.ml.data import (
     download_months,
     ml_dir,
@@ -57,15 +54,7 @@ from gbp.ml.data import (
     raw_trip_months,
 )
 from gbp.ml.models import MODEL_FAMILIES, create_model
-from gbp.ml.registry import (
-    champion_version,
-    configure_mlflow,
-    find_version,
-    latest_registered_version,
-    mark_challenger,
-    promote_to_champion,
-    register_version,
-)
+from gbp.ml.registry import MlflowStore
 from gbp.ml.station_status import download_status_months, next_month
 from gbp.ml.training import (
     load_training_table,
@@ -223,7 +212,7 @@ def step_train(
     *,
     data_ver: str | None = None,
     training_root: pathlib.Path | None = None,
-    tracking_dir: pathlib.Path | None = None,
+    store: MlflowStore | None = None,
     log: Callable[[str], None] = print,
 ) -> ModelVersion:
     """Fit the candidate on every partition and register it, reusing a twin.
@@ -232,6 +221,7 @@ def step_train(
     and data version is returned as is — fitting again would only register a
     twin of it.
     """
+    store = store or MlflowStore()
     if months is None:
         months = partition_months(training_root)
     if not months:
@@ -239,7 +229,7 @@ def step_train(
     months = sorted(normalize_month(m) for m in months)
     span = f"{months[0]}..{months[-1]}"
     version = data_ver or data_version()
-    existing = find_version(family, list(months), version, tracking_dir)
+    existing = store.find_version(family, list(months), version)
     if existing is not None:
         log(
             f"train: version {existing.version} already holds {family} on {span} "
@@ -250,9 +240,7 @@ def step_train(
     table = load_training_table(list(months), training_root)
     model = create_model(family)
     model.fit(table)
-    registered = register_version(
-        model, train_months=list(months), data_version=version, tracking_dir=tracking_dir
-    )
+    registered = store.register_version(model, train_months=list(months), data_version=version)
     log(f"train: registered version {registered.version}")
     return registered
 
@@ -264,7 +252,7 @@ def step_backtest(
     *,
     training_root: pathlib.Path | None = None,
     raw: pathlib.Path | None = None,
-    tracking_dir: pathlib.Path | None = None,
+    store: MlflowStore | None = None,
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
 ) -> pd.DataFrame:
@@ -277,10 +265,11 @@ def step_backtest(
     the candidate (or there is no champion yet), one set of scores serves
     both sides.
     """
+    store = store or MlflowStore()
     if months is None:
         months = partition_months(training_root)
     families = [str(candidate.tags["model_family"])]
-    champion = champion_version(tracking_dir)
+    champion = store.champion_version()
     if champion is not None and champion.tags["model_family"] not in families:
         families.append(str(champion.tags["model_family"]))
     return run_backtest(
@@ -289,48 +278,10 @@ def step_backtest(
         n_splits,
         training_root=training_root,
         raw=raw,
-        tracking_dir=tracking_dir,
+        store=store,
         weather_df=weather_df,
         log=log,
     )
-
-
-def latest_comparison(
-    tracking_dir: pathlib.Path | None = None,
-) -> tuple[pd.DataFrame, dict[str, str]] | None:
-    """Read the newest backtest comparison from MLflow: the table and the run's parameters.
-
-    This is how a standalone promote step finds the scores when the backtest
-    ran in an earlier command — backtest state lives in MLflow, not in the
-    process.
-    """
-    configure_mlflow(tracking_dir)
-    experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
-    if experiment is None:
-        return None
-    runs = typing.cast(
-        pd.DataFrame,
-        mlflow.search_runs(
-            [experiment.experiment_id],
-            filter_string="tags.mlflow.runName = 'comparison'",
-            order_by=["attributes.start_time DESC"],
-            max_results=1,
-        ),
-    )
-    if runs.empty:
-        return None
-    newest = runs.iloc[0]
-    with tempfile.TemporaryDirectory() as folder:
-        path = mlflow.artifacts.download_artifacts(
-            f"runs:/{newest['run_id']}/comparison.csv", dst_path=folder
-        )
-        table = pd.read_csv(path)
-    params = {
-        key.removeprefix("params."): str(newest[key])
-        for key in runs.columns
-        if key.startswith("params.")
-    }
-    return table, params
 
 
 def family_score(comparison: pd.DataFrame, family: str) -> float:
@@ -399,7 +350,7 @@ def step_promote(
     comparison: pd.DataFrame | None,
     *,
     data_ver: str | None = None,
-    tracking_dir: pathlib.Path | None = None,
+    store: MlflowStore | None = None,
     log_path: pathlib.Path | None = None,
     log: Callable[[str], None] = print,
 ) -> dict[str, object]:
@@ -407,14 +358,15 @@ def step_promote(
 
     Returns the row that went to the pipeline log.
     """
-    champion = champion_version(tracking_dir)
+    store = store or MlflowStore()
+    champion = store.champion_version()
     promoted, reason, candidate_score, champion_score = promote_decision(
         candidate, champion, comparison
     )
     if promoted:
-        promote_to_champion(candidate, tracking_dir)
+        store.promote_to_champion(candidate)
     elif champion is not None and str(champion.version) != str(candidate.version):
-        mark_challenger(candidate, tracking_dir)
+        store.mark_challenger(candidate)
     row: dict[str, object] = {
         "run_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "data_version": data_ver or data_version(),
@@ -453,6 +405,8 @@ def run_pipeline(
     the history, it does not replace it. The ``.dvc`` files are refreshed
     when download or build-table changed the default data folders, so the
     data version in the log names what was actually trained on.
+    ``tracking_dir`` names the MLflow store folder; the store object is
+    created once here and passed to every step that talks to MLflow.
     """
     unknown = set(steps) - set(STEPS)
     if unknown:
@@ -470,22 +424,23 @@ def run_pipeline(
     if not ({"train", "backtest", "promote"} & set(ordered)):
         return None
     version = data_version()
+    store = MlflowStore(tracking_dir)
 
     if "train" in ordered:
         candidate = step_train(
             family,
             data_ver=version,
             training_root=training_root,
-            tracking_dir=tracking_dir,
+            store=store,
             log=log,
         )
     else:
-        found = latest_registered_version(tracking_dir)
+        found = store.latest_registered_version()
         if found is None:
             raise LookupError("the registry has no versions; run the train step first")
         candidate = found
 
-    champion = champion_version(tracking_dir)
+    champion = store.champion_version()
     already_champion = champion is not None and str(champion.version) == str(candidate.version)
 
     comparison: pd.DataFrame | None = None
@@ -495,7 +450,7 @@ def run_pipeline(
             n_splits=n_splits,
             training_root=training_root,
             raw=raw,
-            tracking_dir=tracking_dir,
+            store=store,
             weather_df=weather_df,
             log=log,
         )
@@ -505,21 +460,20 @@ def run_pipeline(
     if "promote" not in ordered:
         return None
     if comparison is None and champion is not None and not already_champion:
-        found_comparison = latest_comparison(tracking_dir)
-        if found_comparison is not None:
-            table, params = found_comparison
-            if params.get("data_version") == version:
-                comparison = table
+        saved = latest_comparison(store)
+        if saved is not None:
+            if saved.data_version == version:
+                comparison = saved.table
             else:
                 log(
                     f"promote: the newest comparison is for data "
-                    f"{params.get('data_version')}, not {version}; ignoring it"
+                    f"{saved.data_version}, not {version}; ignoring it"
                 )
     return step_promote(
         candidate,
         comparison,
         data_ver=version,
-        tracking_dir=tracking_dir,
+        store=store,
         log_path=log_path,
         log=log,
     )

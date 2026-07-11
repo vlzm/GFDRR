@@ -27,6 +27,7 @@ from gbp.ml.metrics import (
 )
 from gbp.ml.models import MODEL_FAMILIES, create_model
 from gbp.ml.models.graph import GraphSageModel, station_graph_edges
+from gbp.ml.registry import MlflowStore
 
 CLASSIC = "classic_bike"
 
@@ -389,12 +390,13 @@ def test_run_backtest_logs_every_split_to_mlflow(tmp_path):
             partition.loc[0, "quantity"] += 1
         partition.to_parquet(training_root / f"{month}.parquet", index=False)
 
+    store = MlflowStore(tmp_path / "mlflow")
     table = run_backtest(
         ["202502", "202503", "202504"],
         ["seasonal_naive"],
         n_splits=1,
         training_root=training_root,
-        tracking_dir=tmp_path / "mlflow",
+        store=store,
         weather_df=flat_weather("2025-02-01", "2025-04-30"),
         log=lambda message: None,
     )
@@ -408,7 +410,7 @@ def test_run_backtest_logs_every_split_to_mlflow(tmp_path):
 
     import mlflow
 
-    mlflow.set_tracking_uri(f"sqlite:///{(tmp_path / 'mlflow' / 'mlflow.db').resolve()}")
+    store.activate()
     runs = mlflow.search_runs(experiment_names=[EXPERIMENT_NAME])
     names = set(runs["tags.mlflow.runName"])
     assert names == {"seasonal_naive-202504", "comparison"}

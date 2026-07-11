@@ -556,8 +556,8 @@ def build_champion_forecast(
     """Build a forecast with the champion, resolved from the registry by its alias.
 
     The platform's forecast path (plan, phase 6): the model is the fitted
-    version the ``champion`` alias points at (``resolve_champion`` in
-    ``gbp/ml/registry.py``) — no refitting, no file paths. The saved
+    version the ``champion`` alias points at (``MlflowStore.resolve_champion``
+    in ``gbp/ml/registry.py``) — no refitting, no file paths. The saved
     ``meta.json`` records the family as ``model_name`` and the registry
     version number as ``model_version``; the version's own training months
     live on its registry tags. The ``history_*`` fields and ``inputs`` name
@@ -590,10 +590,10 @@ def build_champion_forecast(
     """
     # Imported here, not at the top: the registry drags in MLflow and the
     # training module is the partition builder — only this builder needs them.
-    from gbp.ml.registry import resolve_champion
+    from gbp.ml.registry import MlflowStore
     from gbp.ml.training import history_months, partition_path, training_dir
 
-    model, version = resolve_champion(tracking_dir)
+    model, version = MlflowStore(tracking_dir).resolve_champion()
     log(f"Champion: {model.name} version {version.version}")
 
     if t0_month is None:

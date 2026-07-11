@@ -253,7 +253,7 @@ def test_drift_report_compares_the_month_against_the_champions_training_data(roo
     champion = types.SimpleNamespace(
         version="7", tags={"model_family": "lightgbm", "train_months": "202512,202601"}
     )
-    monkeypatch.setattr(registry, "champion_version", lambda tracking_dir=None: champion)
+    monkeypatch.setattr(registry.MlflowStore, "champion_version", lambda self: champion)
 
     summary_path = monitoring.drift_report(
         "202601",
@@ -281,6 +281,6 @@ def test_drift_report_compares_the_month_against_the_champions_training_data(roo
 def test_drift_report_without_a_champion_raises(roots, monkeypatch):
     import gbp.ml.registry as registry
 
-    monkeypatch.setattr(registry, "champion_version", lambda tracking_dir=None: None)
+    monkeypatch.setattr(registry.MlflowStore, "champion_version", lambda self: None)
     with pytest.raises(LookupError, match="no champion"):
         monitoring.drift_report("202601", training_root=roots.training, root=roots.monitoring)

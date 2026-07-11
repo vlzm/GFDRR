@@ -364,10 +364,10 @@ def drift_report(
     from evidently import Report
     from evidently.presets import DataDriftPreset
 
-    from gbp.ml.registry import champion_version
+    from gbp.ml.registry import MlflowStore
 
     month = normalize_month(month)
-    champion = champion_version(tracking_dir)
+    champion = MlflowStore(tracking_dir).champion_version()
     if champion is None:
         raise LookupError(
             "the registry has no champion yet; run the retraining pipeline "

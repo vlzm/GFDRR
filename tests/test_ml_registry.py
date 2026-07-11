@@ -71,28 +71,26 @@ def write_tiny_partitions(root) -> list[str]:
 # The registry round trip
 # ---------------------------------------------------------------------------
 def test_registry_round_trip_register_find_promote_load(tmp_path):
-    store = tmp_path / "mlflow"
+    store = registry.MlflowStore(tmp_path / "mlflow")
     months = ["202502", "202503"]
 
-    version = registry.register_version(
-        fitted_naive(), train_months=months, data_version="abc123", tracking_dir=store
-    )
+    version = store.register_version(fitted_naive(), train_months=months, data_version="abc123")
     assert str(version.version) == "1"
 
     # The twin lookup finds the same identity and nothing else.
-    found = registry.find_version("seasonal_naive", months, "abc123", store)
+    found = store.find_version("seasonal_naive", months, "abc123")
     assert found is not None and str(found.version) == "1"
-    assert registry.find_version("seasonal_naive", months, "def456", store) is None
-    assert registry.find_version("lightgbm", months, "abc123", store) is None
+    assert store.find_version("seasonal_naive", months, "def456") is None
+    assert store.find_version("lightgbm", months, "abc123") is None
 
     # No champion until the first promotion.
-    assert registry.champion_version(store) is None
-    registry.promote_to_champion(version, store)
-    champion = registry.champion_version(store)
+    assert store.champion_version() is None
+    store.promote_to_champion(version)
+    champion = store.champion_version()
     assert champion is not None and str(champion.version) == "1"
 
     # The alias resolves to a model that predicts.
-    model, resolved = registry.resolve_champion(store)
+    model, resolved = store.resolve_champion()
     assert str(resolved.version) == "1"
     predicted = model.predict(tiny_forecast_input(MONDAY + 6 * WEEK))
     assert (predicted["quantity"] >= 0).all()
@@ -100,23 +98,21 @@ def test_registry_round_trip_register_find_promote_load(tmp_path):
 
 def test_resolve_champion_without_a_champion_raises(tmp_path):
     with pytest.raises(LookupError, match="no champion"):
-        registry.resolve_champion(tmp_path / "mlflow")
+        registry.MlflowStore(tmp_path / "mlflow").resolve_champion()
 
 
 def test_promotion_moves_the_alias_and_tags_the_old_champion(tmp_path):
-    store = tmp_path / "mlflow"
-    first = registry.register_version(
-        fitted_naive(), train_months=["202502"], data_version="v1", tracking_dir=store
+    store = registry.MlflowStore(tmp_path / "mlflow")
+    first = store.register_version(fitted_naive(), train_months=["202502"], data_version="v1")
+    second = store.register_version(
+        fitted_naive(), train_months=["202502", "202503"], data_version="v2"
     )
-    second = registry.register_version(
-        fitted_naive(), train_months=["202502", "202503"], data_version="v2", tracking_dir=store
-    )
-    registry.promote_to_champion(first, store)
-    registry.promote_to_champion(second, store)
+    store.promote_to_champion(first)
+    store.promote_to_champion(second)
 
-    champion = registry.champion_version(store)
+    champion = store.champion_version()
     assert champion is not None and str(champion.version) == str(second.version)
-    demoted = registry.find_version("seasonal_naive", ["202502"], "v1", store)
+    demoted = store.find_version("seasonal_naive", ["202502"], "v1")
     assert demoted is not None and demoted.tags["role"] == "challenger"
 
 
@@ -205,13 +201,13 @@ def test_published_missing_months_stops_at_the_first_unpublished(monkeypatch):
 def test_pipeline_promotes_the_first_version_and_keeps_it_on_rerun(tmp_path):
     training_root = tmp_path / "training"
     write_tiny_partitions(training_root)
-    store = tmp_path / "mlflow"
+    store = registry.MlflowStore(tmp_path / "mlflow")
     log_path = tmp_path / "pipeline_log.csv"
     settings = {
         "family": "seasonal_naive",
         "n_splits": 1,
         "training_root": training_root,
-        "tracking_dir": store,
+        "tracking_dir": store.root,
         "log_path": log_path,
         "weather_df": flat_weather("2025-02-01", "2025-04-30"),
         "log": lambda message: None,
@@ -219,7 +215,7 @@ def test_pipeline_promotes_the_first_version_and_keeps_it_on_rerun(tmp_path):
 
     row = run_pipeline(["train", "backtest", "promote"], **settings)
     assert row is not None and row["promoted"] is True
-    champion = registry.champion_version(store)
+    champion = store.champion_version()
     assert champion is not None and str(champion.version) == row["candidate_version"]
     assert row["candidate_mae"] is not None  # the backtest score made it into the log
 
@@ -228,7 +224,7 @@ def test_pipeline_promotes_the_first_version_and_keeps_it_on_rerun(tmp_path):
     rerun = run_pipeline(["train", "backtest", "promote"], **settings)
     assert rerun is not None and rerun["promoted"] is False
     assert "already the champion" in str(rerun["reason"])
-    assert str(registry.latest_registered_version(store).version) == str(champion.version)
+    assert str(store.latest_registered_version().version) == str(champion.version)
     table = pd.read_csv(log_path)
     assert len(table) == 2
     assert table["promoted"].tolist() == [True, False]
@@ -237,18 +233,16 @@ def test_pipeline_promotes_the_first_version_and_keeps_it_on_rerun(tmp_path):
 def test_champion_forecast_resolves_the_model_by_alias(tmp_path):
     training_root = tmp_path / "training"
     months = write_tiny_partitions(training_root)
-    store = tmp_path / "mlflow"
-    version = registry.register_version(
-        fitted_naive(), train_months=months, data_version="abc123", tracking_dir=store
-    )
-    registry.promote_to_champion(version, store)
+    store = registry.MlflowStore(tmp_path / "mlflow")
+    version = store.register_version(fitted_naive(), train_months=months, data_version="abc123")
+    store.promote_to_champion(version)
 
     build_champion_forecast(
         horizon_periods=24,
         forecast_name="champion_test",
         root=tmp_path / "forecasts",
         training_root=training_root,
-        tracking_dir=store,
+        tracking_dir=store.root,
         weather_df=flat_weather("2025-05-01", "2025-05-02"),
         log=lambda message: None,
     )

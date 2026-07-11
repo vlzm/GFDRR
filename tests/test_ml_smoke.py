@@ -99,7 +99,7 @@ def test_pipeline_runs_all_five_steps_on_the_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr("gbp.ml.pipeline.month_zip_keys", bucket_has_nothing)
 
     training_root = tmp_path / "training"
-    store = tmp_path / "mlflow"
+    store = registry.MlflowStore(tmp_path / "mlflow")
     log_path = tmp_path / "pipeline_log.csv"
     notes = []
     settings = {
@@ -107,7 +107,7 @@ def test_pipeline_runs_all_five_steps_on_the_fixture(tmp_path, monkeypatch):
         "n_splits": 1,
         "raw": raw,
         "training_root": training_root,
-        "tracking_dir": store,
+        "tracking_dir": store.root,
         "log_path": log_path,
         "log": notes.append,
     }
@@ -120,7 +120,7 @@ def test_pipeline_runs_all_five_steps_on_the_fixture(tmp_path, monkeypatch):
     assert sorted(p.stem for p in training_root.glob("*.parquet")) == months
     # train + backtest + promote: the first version became champion with a score.
     assert row is not None and row["promoted"] is True
-    champion = registry.champion_version(store)
+    champion = store.champion_version()
     assert champion is not None and str(champion.version) == row["candidate_version"]
     assert row["candidate_mae"] is not None and row["candidate_mae"] > 0
 
