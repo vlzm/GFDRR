@@ -92,6 +92,7 @@ from collections.abc import Callable
 import pandas as pd
 import requests
 
+from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN, get_forecast_periods_df
 from gbp.loaders.dataloader_raw import (
     TRIPS_SCHEMA,
     clean_trips,
@@ -142,6 +143,21 @@ def month_bounds(month: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     month = normalize_month(month)
     start = pd.Timestamp(year=int(month[:4]), month=int(month[4:]), day=1)
     return start, start + pd.offsets.MonthBegin(1)
+
+
+def month_period_grid(month: str) -> pd.DataFrame:
+    """Build the hourly period grid of one calendar month (Notations.md §17).
+
+    One row per hour of the month: ``period_id`` — 0 at the month's first
+    hour — plus the hour's ``start_timestamp`` and ``end_timestamp``. Every
+    month-shaped task counts on this one grid: a training partition numbers
+    its hours on it, and a forecast of a held-out month uses it as the
+    forecast horizon (the backtest and the monitoring baseline).
+    """
+    start, end = month_bounds(month)
+    return get_forecast_periods_df(
+        start, int((end - start) / DEFAULT_PERIOD_LEN), DEFAULT_PERIOD_LEN
+    )
 
 
 def month_csvs(month: str, raw: pathlib.Path | None = None) -> list[pathlib.Path]:

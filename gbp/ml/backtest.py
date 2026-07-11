@@ -49,16 +49,15 @@ from collections.abc import Callable, Sequence
 import mlflow
 import pandas as pd
 
-from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN, get_forecast_periods_df
-from gbp.ml.data import load_weather_daily, month_bounds, normalize_month
+from gbp.ml.data import load_weather_daily, month_bounds, month_period_grid, normalize_month
 from gbp.ml.forecast import forecast_input
 from gbp.ml.metrics import forecast_metrics
 from gbp.ml.models import MODEL_FAMILIES, create_model
 from gbp.ml.registry import configure_mlflow, ensure_experiment
 from gbp.ml.training import (
+    load_actual_month,
     load_history_counts,
     load_training_table,
-    partition_path,
     training_dir,
 )
 
@@ -135,31 +134,17 @@ def month_forecast_input(
 ) -> pd.DataFrame:
     """Build the forecast input for one held-out month.
 
-    The horizon is the month's full hourly grid, the history window is read
-    from the training partitions before the month, and the weather defaults
-    to the month's actual weather — in a backtest that plays the role of a
-    perfect weather forecast.
+    The horizon is the month's full hourly grid (``month_period_grid``), the
+    history window is read from the training partitions before the month,
+    and the weather defaults to the month's actual weather — in a backtest
+    that plays the role of a perfect weather forecast.
     """
-    start, end = month_bounds(test_month)
-    horizon = get_forecast_periods_df(
-        start, int((end - start) / DEFAULT_PERIOD_LEN), DEFAULT_PERIOD_LEN
-    )
+    horizon = month_period_grid(test_month)
     history = load_history_counts(test_month, training_root)
     if weather_df is None:
+        start, end = month_bounds(test_month)
         weather_df = load_weather_daily(start, end - pd.Timedelta(days=1), raw)
     return forecast_input(history, horizon, weather_df)
-
-
-def load_actual_month(test_month: str, root: pathlib.Path | None = None) -> pd.DataFrame:
-    """Read the held-out month's actual counts from its training partition."""
-    path = partition_path(test_month, root)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"no training partition for {test_month}; build it first (python -m gbp.ml.training)"
-        )
-    return pd.read_parquet(
-        path, columns=["period_id", "facility_id", "commodity_category", "quantity"]
-    )
 
 
 def comparison_table(records: list[dict[str, object]]) -> pd.DataFrame:

@@ -52,20 +52,24 @@ from typing import Any
 
 import pandas as pd
 
-from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN, get_forecast_periods_df
-from gbp.ml.data import ml_dir, month_bounds, normalize_month
+from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN
+from gbp.ml.data import ml_dir, month_bounds, month_period_grid, normalize_month
 from gbp.ml.features import FEATURE_COLUMNS
 from gbp.ml.forecast import (
     ForecastMeta,
-    forecast_input,
     forecast_periods_from_meta,
     list_forecasts,
     load_forecast,
-    round_forecast_demand,
+    predict_horizon,
 )
 from gbp.ml.metrics import align_forecast, forecast_metrics
 from gbp.ml.models.seasonal_naive import SeasonalNaiveModel
-from gbp.ml.training import load_history_counts, partition_path, training_dir
+from gbp.ml.training import (
+    load_actual_month,
+    load_history_counts,
+    partition_path,
+    training_dir,
+)
 
 #: How many scored months the rolling MAE of the alert rule averages over.
 ROLLING_MONTHS = 3
@@ -158,40 +162,23 @@ def month_period_map(meta: ForecastMeta, month: str) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
-def load_actual_month(month: str, training_root: pathlib.Path | None = None) -> pd.DataFrame:
-    """Read the month's actual counts off its training partition."""
-    path = partition_path(month, training_root)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"no training partition for {normalize_month(month)}; "
-            "build it first (python -m gbp.ml.training)"
-        )
-    return pd.read_parquet(
-        path, columns=["period_id", "facility_id", "commodity_category", "quantity"]
-    )
-
-
 def naive_month_prediction(
     month: str, training_root: pathlib.Path | None = None
 ) -> pd.DataFrame | None:
     """Predict the month with the seasonal naive — the baseline of the alert rule.
 
-    The hour-of-week mean is predicted from the history window before the
-    month (the earlier partitions on disk) and rounded to whole bikes by the
-    one rounding rule, so the baseline is a forecast demand table like any
-    saved forecast. Weather is not read — the seasonal naive does not use
-    it. Returns None when no earlier partition exists; ``naive_mae`` then
-    stays missing.
+    The one horizon-prediction recipe (``predict_horizon`` in
+    ``gbp/ml/forecast.py``) on the month's period grid: the hour-of-week
+    mean is predicted from the history window before the month (the earlier
+    partitions on disk) and rounded to whole bikes by the one rounding rule,
+    so the baseline is a forecast demand table like any saved forecast.
+    Weather is not read — the seasonal naive does not use it. Returns None
+    when no earlier partition exists; ``naive_mae`` then stays missing.
     """
-    start, end = month_bounds(month)
     history = load_history_counts(month, training_root)
     if history.empty:
         return None
-    horizon = get_forecast_periods_df(
-        start, int((end - start) / DEFAULT_PERIOD_LEN), DEFAULT_PERIOD_LEN
-    )
-    fractional = SeasonalNaiveModel().predict(forecast_input(history, horizon))
-    return round_forecast_demand(fractional)
+    return predict_horizon(SeasonalNaiveModel(), month_period_grid(month), history_df=history)
 
 
 def score_forecast_against_month(

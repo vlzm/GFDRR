@@ -6,10 +6,11 @@ periods that have no history yet. The models themselves live behind the one
 interface in ``gbp/ml/models/``; this module is the forecast builder around
 them. It holds the one rounding rule that turns fractional forecasts into
 whole bikes, the forecast input (:func:`forecast_input` — the feature table a
-model predicts from, built by the shared feature module), and the forecast
-artifact — the folder ``data/ml/forecasts/<forecast_name>/`` with
-``demand.parquet`` and ``meta.json`` that a forecast run (Notations.md §11)
-is loaded from.
+model predicts from, built by the shared feature module), the one
+horizon-prediction recipe (:func:`predict_horizon` — history window →
+forecast input → prediction → whole bikes), and the forecast artifact — the
+folder ``data/ml/forecasts/<forecast_name>/`` with ``demand.parquet`` and
+``meta.json`` that a forecast run (Notations.md §11) is loaded from.
 
 Three builders save an artifact:
 
@@ -51,7 +52,7 @@ from gbp.loaders.dataloader_graph import (
 )
 from gbp.ml.data import load_weather_daily, ml_dir, month_bounds, normalize_month
 from gbp.ml.features import HISTORY_WEEKS, build_features, clip_history_window
-from gbp.ml.models import create_model
+from gbp.ml.models import DemandModel, create_model
 from gbp.model.journal_schema import schema_violations
 
 
@@ -248,6 +249,59 @@ def forecast_input(
     return build_features(grid, history, weather_df)
 
 
+def predict_horizon(
+    model: DemandModel,
+    forecast_periods_df: pd.DataFrame,
+    *,
+    history_df: pd.DataFrame | None = None,
+    training_root: pathlib.Path | None = None,
+    weather_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Predict one forecast horizon with a fitted model, in whole bikes.
+
+    The one recipe every forecast demand table is built by: take the history
+    window before the horizon, build the forecast input
+    (:func:`forecast_input`), let the model predict, and round the fractional
+    values to whole bikes (:func:`round_forecast_demand`). The forecast
+    builders in this module and the monitoring baseline
+    (``naive_month_prediction``) call this function instead of assembling
+    the steps themselves.
+
+    Parameters
+    ----------
+    model : DemandModel
+        A fitted model — only its ``predict`` is called.
+    forecast_periods_df : pandas.DataFrame
+        The forecast period grid (:func:`get_forecast_periods_df`, or
+        ``month_period_grid`` for a full month).
+    history_df : pandas.DataFrame, optional
+        Departure counts in training-table shape. Without it the history is
+        read from the training partitions before the horizon
+        (``load_history_counts``); the horizon must then start at a month's
+        first hour, because the partitions are monthly.
+    training_root : pathlib.Path, optional
+        Training partitions folder override; used only when ``history_df``
+        is not given.
+    weather_df : pandas.DataFrame, optional
+        Daily weather covering the horizon dates; without it the weather
+        features stay NaN.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A forecast demand table: whole-bike quantities, positive rows only.
+    """
+    if history_df is None:
+        # Imported here, not at the top: gbp.ml.training is the partition
+        # builder, and only this default needs it.
+        from gbp.ml.training import load_history_counts
+
+        t0 = forecast_periods_df["start_timestamp"].iloc[0]
+        history_df = load_history_counts(t0.strftime("%Y%m"), training_root)
+    fractional = model.predict(forecast_input(history_df, forecast_periods_df, weather_df))
+    return round_forecast_demand(fractional)
+
+
 def save_forecast(
     demand_df: pd.DataFrame, meta: ForecastMeta, root: pathlib.Path | None = None
 ) -> pathlib.Path:
@@ -300,13 +354,12 @@ def build_seasonal_naive_forecast(
     The phase-1 builder: history is a demand marginal plus its period grid
     (what one trip CSV gives), the model is the seasonal naive. The path is
     the interface one — the demand becomes a zero-filled counts grid
-    (:func:`counts_from_demand`), the counts become a forecast input
-    (:func:`forecast_input`), and the model predicts from it, so the mean
-    reads the history window like every history feature. The forecast
-    horizon starts where the history ends (the last period's
-    ``end_timestamp``) and runs for ``horizon_periods`` periods of the same
-    length, numbered from 0. The fractional values are rounded to whole
-    bikes with :func:`round_forecast_demand`.
+    (:func:`counts_from_demand`), and the prediction goes through the one
+    recipe :func:`predict_horizon`, so the mean reads the history window
+    like every history feature and the fractional values are rounded to
+    whole bikes. The forecast horizon starts where the history ends (the
+    last period's ``end_timestamp``) and runs for ``horizon_periods``
+    periods of the same length, numbered from 0.
 
     Parameters
     ----------
@@ -334,8 +387,7 @@ def build_seasonal_naive_forecast(
     counts = counts_from_demand(demand_df, periods_df)
     model = create_model("seasonal_naive")
     model.fit(counts)
-    fractional = model.predict(forecast_input(counts, forecast_periods_df))
-    forecast_demand_df = round_forecast_demand(fractional)
+    forecast_demand_df = predict_horizon(model, forecast_periods_df, history_df=counts)
     meta = ForecastMeta(
         forecast_name=forecast_name,
         model_name=model.name,
@@ -425,7 +477,7 @@ def build_model_forecast(
     """
     # Imported here, not at the top: gbp.ml.training is the partition
     # builder, and only this builder needs it.
-    from gbp.ml.training import load_history_counts, load_training_table
+    from gbp.ml.training import load_training_table
 
     months = sorted(normalize_month(m) for m in train_months)
     log(f"Training {model_name} on {months[0]}..{months[-1]} ...")
@@ -437,10 +489,10 @@ def build_model_forecast(
     forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, DEFAULT_PERIOD_LEN)
     horizon_end = forecast_periods_df["end_timestamp"].iloc[-1]
     weather_df = _horizon_weather(t0, horizon_end, raw, weather_df, log)
-    history = load_history_counts(t0.strftime("%Y%m"), training_root)
     log(f"Predicting {horizon_periods} periods from {t0} ...")
-    fractional = model.predict(forecast_input(history, forecast_periods_df, weather_df))
-    forecast_demand_df = round_forecast_demand(fractional)
+    forecast_demand_df = predict_horizon(
+        model, forecast_periods_df, training_root=training_root, weather_df=weather_df
+    )
     meta = ForecastMeta(
         forecast_name=forecast_name,
         model_name=model.name,
@@ -506,7 +558,7 @@ def build_champion_forecast(
     # Imported here, not at the top: the registry drags in MLflow and the
     # training module is the partition builder — only this builder needs them.
     from gbp.ml.registry import resolve_champion
-    from gbp.ml.training import history_months, load_history_counts, partition_path, training_dir
+    from gbp.ml.training import history_months, partition_path, training_dir
 
     model, version = resolve_champion(tracking_dir)
     log(f"Champion: {model.name} version {version.version}")
@@ -526,10 +578,10 @@ def build_champion_forecast(
     forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, DEFAULT_PERIOD_LEN)
     horizon_end = forecast_periods_df["end_timestamp"].iloc[-1]
     weather_df = _horizon_weather(t0, horizon_end, raw, weather_df, log)
-    history = load_history_counts(t0_month, training_root)
     log(f"Predicting {horizon_periods} periods from {t0} ...")
-    fractional = model.predict(forecast_input(history, forecast_periods_df, weather_df))
-    forecast_demand_df = round_forecast_demand(fractional)
+    forecast_demand_df = predict_horizon(
+        model, forecast_periods_df, training_root=training_root, weather_df=weather_df
+    )
     window = [m for m in history_months(t0_month) if partition_path(m, training_root).exists()]
     meta = ForecastMeta(
         forecast_name=forecast_name,

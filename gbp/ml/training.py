@@ -52,6 +52,7 @@ from gbp.ml.data import (
     ml_dir,
     month_bounds,
     month_csvs,
+    month_period_grid,
     normalize_month,
 )
 from gbp.ml.features import FEATURE_SCHEMA_COLUMNS, HISTORY_WEEKS, build_features
@@ -85,6 +86,25 @@ def training_dir() -> pathlib.Path:
 def partition_path(month: str, root: pathlib.Path | None = None) -> pathlib.Path:
     """Where one month's partition lives: ``<training dir>/<YYYYMM>.parquet``."""
     return (root or training_dir()) / f"{normalize_month(month)}.parquet"
+
+
+def load_actual_month(month: str, root: pathlib.Path | None = None) -> pd.DataFrame:
+    """Read one month's actual departure counts off its training partition.
+
+    Only the count columns are read — the callers (the backtest, monitoring,
+    the evaluation) score forecasts against the counts and do not need the
+    feature columns. Raises ``FileNotFoundError`` when the partition is
+    missing.
+    """
+    path = partition_path(month, root)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no training partition for {normalize_month(month)}; "
+            "build it first (python -m gbp.ml.training)"
+        )
+    return pd.read_parquet(
+        path, columns=["period_id", "facility_id", "commodity_category", "quantity"]
+    )
 
 
 def history_months(month: str) -> list[str]:
@@ -161,8 +181,9 @@ def departure_counts(trips_df: pd.DataFrame, month: str) -> pd.DataFrame:
     """Count departures per station-hour and bike type over one full month.
 
     Keeps the trips that started inside the month, numbers the month's hours
-    as ``period_id`` 0, 1, 2, … from the month's first hour, and counts each
-    trip into the hour and station it started at. The result is the full
+    on the month period grid (``period_id`` 0 at the month's first hour,
+    :func:`month_period_grid`), and counts each trip into the hour and
+    station it started at. The result is the full
     grid: every hour of the month × every station seen in the month's trips
     (as a start or an end point) × every bike type seen — hours with no
     departures hold ``quantity`` 0.
@@ -185,7 +206,7 @@ def departure_counts(trips_df: pd.DataFrame, month: str) -> pd.DataFrame:
     if in_month.empty:
         raise ValueError(f"no trips start inside {normalize_month(month)}")
 
-    n_periods = int((end - start) / DEFAULT_PERIOD_LEN)
+    month_periods_df = month_period_grid(month)
     facilities = pd.concat([in_month["start_station_id"], in_month["end_station_id"]]).unique()
     commodities = in_month["rideable_type"].unique()
 
@@ -195,13 +216,14 @@ def departure_counts(trips_df: pd.DataFrame, month: str) -> pd.DataFrame:
         .size()
     )
     grid = pd.MultiIndex.from_product(
-        [range(n_periods), sorted(facilities), sorted(commodities)],
+        [month_periods_df["period_id"], sorted(facilities), sorted(commodities)],
         names=["period_id", "facility_id", "commodity_category"],
     )
     table = (
         counts.rename_axis(grid.names).reindex(grid, fill_value=0).rename("quantity").reset_index()
     )
-    table.insert(1, "start_timestamp", start + table["period_id"] * DEFAULT_PERIOD_LEN)
+    starts = month_periods_df.set_index("period_id")["start_timestamp"]
+    table.insert(1, "start_timestamp", table["period_id"].map(starts))
     return table
 
 

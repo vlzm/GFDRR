@@ -48,13 +48,12 @@ from gbp.consumers.simulator import run_sized_scenario
 from gbp.loaders.dataloader_graph import (
     ResolvedModelData,
     apply_forecast_demand,
-    get_forecast_periods_df,
     hour_of_week,
 )
 from gbp.ml import forecast
-from gbp.ml.data import ml_dir, month_bounds, normalize_month
+from gbp.ml.data import ml_dir, month_bounds, month_period_grid, normalize_month
 from gbp.ml.metrics import busy_facility_ids, forecast_metrics
-from gbp.ml.training import partition_path, training_dir
+from gbp.ml.training import load_actual_month, training_dir
 
 #: The columns of a demand table (``HISTORICAL_DEMAND_SCHEMA`` order).
 DEMAND_COLUMNS = ["period_id", "facility_id", "commodity_category", "quantity"]
@@ -69,17 +68,11 @@ def actual_demand_table(month: str) -> pd.DataFrame:
     """Read the held-out month's actual demand from its training partition.
 
     The partition already counts departures per ``(period, facility,
-    commodity)`` on the month's hourly grid (period ids 0, 1, 2, … from the
-    month's first hour — the same grid :func:`get_forecast_periods_df` builds
-    for the month). Like the historical demand marginal, only positive rows
-    are kept.
+    commodity)`` on the month period grid (period ids 0, 1, 2, … from the
+    month's first hour — ``month_period_grid``). Like the historical demand
+    marginal, only positive rows are kept.
     """
-    path = partition_path(month)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"no training partition for {month}; build it first (python -m gbp.ml.training)"
-        )
-    counts = pd.read_parquet(path, columns=DEMAND_COLUMNS)
+    counts = load_actual_month(month)
     return counts[counts["quantity"] > 0].reset_index(drop=True)
 
 
@@ -147,7 +140,7 @@ def ensure_forecast(
     """
     month = normalize_month(month)
     name = f"{model_name}_{month}"
-    start, end = month_bounds(month)
+    start = month_bounds(month)[0]
     if name not in forecast.list_forecasts():
         train_months = [p.stem for p in sorted(training_dir().glob("*.parquet")) if p.stem < month]
         if not train_months:
@@ -155,7 +148,7 @@ def ensure_forecast(
         forecast.build_model_forecast(
             model_name,
             train_months,
-            horizon_periods=int((end - start) / pd.Timedelta(hours=1)),
+            horizon_periods=len(month_period_grid(month)),
             forecast_name=name,
             log=log,
         )
@@ -289,10 +282,10 @@ def evaluate_month(
     ``data/ml/evaluation/<month>/``.
     """
     month = normalize_month(month)
-    start, end = month_bounds(month)
-    month_hours = int((end - start) / pd.Timedelta(hours=1))
+    month_periods_df = month_period_grid(month)
+    month_hours = len(month_periods_df)
     horizon_periods = month_hours if n_periods is None else min(n_periods, month_hours)
-    periods_df = get_forecast_periods_df(start, horizon_periods, pd.Timedelta(hours=1))
+    periods_df = month_periods_df.iloc[:horizon_periods]
     prefix = (
         f"eval_{month}" if horizon_periods == month_hours else f"eval_{month}_{horizon_periods}p"
     )
