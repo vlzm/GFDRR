@@ -15,6 +15,7 @@ invariant has no effect in an exact replay and only matters above the baseline.
 """
 
 import pandas as pd
+import structlog
 
 from gbp.model import (
     check_demand_split,
@@ -28,6 +29,8 @@ from gbp.model.journal_schema import check_journal_schema
 from .inputs import ScenarioInputs
 from .mechanics import scale_demand
 from .state import SimulationState
+
+log = structlog.get_logger(__name__)
 
 _KEYS = ["facility_id", "commodity_category"]
 
@@ -87,6 +90,10 @@ def validate_run(
     violations += _check_projection_consistency(state.state_inventory_df, flows, initial)  # I3
     violations += _check_conservation(state, flows, initial)  # I4
     violations += _check_step_nonnegativity(flows, initial)  # I5
+    if violations:
+        log.warning("run_invariants_violated", count=len(violations), first=violations[:3])
+    else:
+        log.info("run_invariants_checked", violations=0)
     return violations
 
 

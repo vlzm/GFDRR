@@ -35,6 +35,7 @@ from gbp.loaders.dataloader_graph import (
     apply_truck_fleet,
 )
 from gbp.loaders.dataloader_raw import RawModelData
+from gbp.logging import configure_logging
 from gbp.ml import forecast
 from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
 
@@ -226,6 +227,7 @@ def run_scenario(
 
 def main() -> None:
     """Terminal entry point: parse arguments, run one scenario, save it."""
+    configure_logging()
     parser = argparse.ArgumentParser(description="Run one scenario and save its run artifact.")
     parser.add_argument("--run-name", required=True, help="artifact folder name")
     parser.add_argument("--demand-scale", type=float, default=1.0, help="demand multiplier")

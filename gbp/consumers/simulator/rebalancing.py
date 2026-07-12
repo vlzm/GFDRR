@@ -42,6 +42,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
+import structlog
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from gbp.model import (
@@ -57,6 +58,8 @@ from .inputs import ScenarioInputs
 from .mechanics import dock_up_to_capacity, free_docks, scale_demand
 from .phases import Phase
 from .state import PeriodRow, SimulationState, SimulatorConfigError
+
+log = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Table schemas (Notations.md §14)
@@ -691,6 +694,7 @@ class PlanRebalancingPhase(Phase):
         stops = self._solver(nodes, travel, trucks, self.params)
         minutes_per_period = int(resolved.period_len / pd.Timedelta(minutes=1))
         plan = assign_bikes_to_stops(stops, period.period_id, minutes_per_period)
+        log.debug("rebalancing_planned", plan_rows=len(plan), trucks=len(trucks))
         return state.with_rebalance_plan(plan)
 
 
@@ -780,6 +784,7 @@ class ApplyRebalancingPhase(Phase):
         new_state = state
         if batches:
             new_flows = pd.concat(batches, ignore_index=True)
+            log.debug("rebalancing_applied", events=len(new_flows), rounds=len(batches))
             new_state = new_state.apply_step_events(new_flows, self.phase_rank)
         return new_state.with_rebalance_plan(plan)
 

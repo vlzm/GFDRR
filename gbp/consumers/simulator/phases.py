@@ -18,6 +18,7 @@ historical level.
 from typing import Literal
 
 import pandas as pd
+import structlog
 
 from gbp.model import (
     DOCK_PREVIOUS_RANK,
@@ -43,6 +44,8 @@ from .mechanics import (
     scale_demand,
 )
 from .state import PeriodRow, SimulationState
+
+log = structlog.get_logger(__name__)
 
 
 class Phase:
@@ -71,9 +74,9 @@ class Phase:
         config: EnvironmentConfig,
     ) -> SimulationState:
         """Run the phase: build this period's events and write them as one batch."""
-        return state.apply_step_events(
-            self.build_events(state, resolved, period, config), self.phase_rank
-        )
+        events = self.build_events(state, resolved, period, config)
+        log.debug("phase_executed", phase=type(self).__name__, events=len(events))
+        return state.apply_step_events(events, self.phase_rank)
 
     def build_events(
         self,

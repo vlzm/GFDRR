@@ -8,7 +8,10 @@ the phases, but do nothing in an exact replay (saturated inventory and capacity)
 and only become meaningful once demand is pushed above the historical baseline.
 """
 
+import time
+
 import pandas as pd
+import structlog
 
 from gbp.model import empty_flows_journal, empty_in_transit, finalize_flows
 
@@ -16,6 +19,11 @@ from .config import EnvironmentConfig
 from .inputs import ScenarioInputs
 from .state import PeriodRow, SimulationState, SimulatorConfigError
 from .validation import RunInvariantError, validate_run
+
+log = structlog.get_logger(__name__)
+
+#: How many periods pass between two progress log lines in :meth:`Environment.run`.
+PROGRESS_LOG_PERIODS = 50
 
 
 def init_state(resolved: ScenarioInputs, first_period: PeriodRow) -> SimulationState:
@@ -87,17 +95,27 @@ class Environment:
         it costs one extra ``finalize_flows`` plus one ``inventory_at_moments``
         pass over the finished journal.
         """
-        while not self.is_done:
-            self.step()
-        if self._config.validate:
-            violations = validate_run(
-                self._state,
-                self._resolved,
-                self._config.demand_scale_factor,
-                self._config.number_of_periods,
-            )
-            if violations:
-                raise RunInvariantError("run invariants violated:\n" + "\n".join(violations))
+        run_started = time.monotonic()
+        with structlog.contextvars.bound_contextvars(scenario_id=self._config.scenario_id):
+            while not self.is_done:
+                self.step()
+                if self._period_cursor % PROGRESS_LOG_PERIODS == 0 or self.is_done:
+                    log.info(
+                        "periods_stepped",
+                        done=self._period_cursor,
+                        total=self._config.number_of_periods,
+                        journal_rows=len(self._state.state_flows_df),
+                        elapsed_s=round(time.monotonic() - run_started, 1),
+                    )
+            if self._config.validate:
+                violations = validate_run(
+                    self._state,
+                    self._resolved,
+                    self._config.demand_scale_factor,
+                    self._config.number_of_periods,
+                )
+                if violations:
+                    raise RunInvariantError("run invariants violated:\n" + "\n".join(violations))
         return self._state
 
     def step(self) -> SimulationState:
@@ -107,8 +125,9 @@ class Environment:
         :meth:`SimulationState.apply_step_events` and returns the next state.
         """
         period = self._periods[self._period_cursor]
-        for phase in self._config.phases:
-            self._state = phase.execute(self._state, self._resolved, period, self._config)
+        with structlog.contextvars.bound_contextvars(period_id=period.period_id):
+            for phase in self._config.phases:
+                self._state = phase.execute(self._state, self._resolved, period, self._config)
 
         self._period_cursor += 1
         if not self.is_done:

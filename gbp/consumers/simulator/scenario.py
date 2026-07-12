@@ -16,8 +16,10 @@ that carries the sized tables, and the sized tables come back on the
 
 import copy
 import dataclasses
+import time
 
 import pandas as pd
+import structlog
 
 from gbp.loaders.dataloader_graph import (
     FACILITIES_CAPACITIES_SCHEMA,
@@ -32,6 +34,8 @@ from .phases import DockArrivals, FormDeparturesPhase, Phase
 from .sizing import size_state_for_demand
 from .state import SimulationState
 from .validation import RunInvariantError, validate_run
+
+log = structlog.get_logger(__name__)
 
 
 def canonical_phases() -> list[Phase]:
@@ -119,8 +123,21 @@ def run_sized_scenario(
         demand_scale_factor=sizing_scale_factor,
         number_of_periods=number_of_periods,
     )
+    log.info(
+        "sizing_run_started",
+        scenario_id=scenario_id,
+        sizing_scale_factor=sizing_scale_factor,
+        number_of_periods=number_of_periods,
+    )
+    sizing_started = time.monotonic()
     initial_inventory_df, facilities_capacities_df = size_state_for_demand(
         sizing_data if sizing_data is not None else resolved, sizing_config
+    )
+    log.info(
+        "sizing_run_finished",
+        total_initial_inventory=int(initial_inventory_df["quantity"].sum()),
+        facilities=len(facilities_capacities_df),
+        elapsed_s=round(time.monotonic() - sizing_started, 1),
     )
 
     # The sized tables replace two engine inputs, so they must fit the same
@@ -146,14 +163,29 @@ def run_sized_scenario(
         demand_scale_factor=demand_scale_factor,
         number_of_periods=number_of_periods,
     )
+    log.info(
+        "run_started",
+        scenario_id=scenario_id,
+        demand_scale_factor=demand_scale_factor,
+        number_of_periods=number_of_periods,
+        phases=[type(p).__name__ for p in run_config.phases],
+    )
+    run_started = time.monotonic()
     env = Environment(sized, run_config)
     state = env.run()
     violations = validate_run(state, sized, demand_scale_factor, number_of_periods)
+    simulated_flows_df = env.simulated_flows_df
+    log.info(
+        "run_finished",
+        journal_rows=len(simulated_flows_df),
+        violations=len(violations),
+        elapsed_s=round(time.monotonic() - run_started, 1),
+    )
     if validate and violations:
         raise RunInvariantError("run invariants violated:\n" + "\n".join(violations))
 
     return ScenarioRun(
-        simulated_flows_df=env.simulated_flows_df,
+        simulated_flows_df=simulated_flows_df,
         state=state,
         initial_inventory_df=initial_inventory_df,
         facilities_capacities_df=facilities_capacities_df,

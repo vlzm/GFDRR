@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import pandera.pandas as pa
+import structlog
 
 from gbp.loaders.dataloader_raw import (
     RawModelData,
@@ -38,6 +39,8 @@ from gbp.routing import DEFAULT_OSRM_URL, Routes, RoutingMode
 
 if TYPE_CHECKING:
     from gbp.consumers.simulator.inputs import ScenarioInputs
+
+log = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Schemas of the tables the engine and its phases read
@@ -824,6 +827,15 @@ class ResolvedModelData:
             raise ValueError(
                 "resolved model data breaks its table schemas:\n" + "\n".join(violations)
             )
+
+        log.info(
+            "graph_resolved",
+            facilities=len(self.facilities_df),
+            periods=len(self.periods_df),
+            historical_events=len(self.historical_flows_df),
+            period_len=str(period_len),
+            routing_mode=routing_mode,
+        )
 
 
 def check_engine_tables(resolved: "ResolvedModelData") -> list[str]:

@@ -21,8 +21,11 @@ import pathlib
 import numpy as np
 import pandas as pd
 import pandera.pandas as pa
+import structlog
 
 from gbp.model.journal_schema import schema_violations
+
+log = structlog.get_logger(__name__)
 
 #: Loose bounding box around the service area (New York City and Jersey City).
 #: Wide enough that every real station fits with room to spare; a coordinate
@@ -151,6 +154,7 @@ def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
     processed_is_fresh = processed.exists() and processed.stat().st_mtime >= csv.stat().st_mtime
     if processed_is_fresh:
         trips_df = pd.read_parquet(processed)
+        log.info("trips_loaded", rows=len(trips_df), source="processed", path=str(processed))
     else:
         trips_dtypes = {
             "ride_id": "string",
@@ -170,7 +174,15 @@ def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
             dtype=trips_dtypes,
             parse_dates=["started_at", "ended_at"],
         )
+        rows_read = len(trips_df)
         trips_df = clean_trips(trips_df)
+        log.info(
+            "trips_loaded",
+            rows=len(trips_df),
+            rows_dropped_by_cleaning=rows_read - len(trips_df),
+            source="csv",
+            path=str(csv),
+        )
     violations = schema_violations(TRIPS_SCHEMA, trips_df)
     if violations:
         read_from = processed if processed_is_fresh else csv
