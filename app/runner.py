@@ -187,7 +187,7 @@ def run_scenario(
         )
     if rebalancing:
         progress(f"Applying the truck fleet: {len(homes)} trucks")
-        data = apply_truck_fleet(graph_data, homes, truck_capacity_bikes, DEFAULT_TRUCK_RATE)
+        data = apply_truck_fleet(data, homes, truck_capacity_bikes, DEFAULT_TRUCK_RATE)
         phases = canonical_phases() + rebalancing_phases(RebalancingParams())
 
     progress("Sizing the state, running the simulation, checking the invariants I1-I5")
