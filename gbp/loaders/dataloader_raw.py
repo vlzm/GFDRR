@@ -296,6 +296,12 @@ def get_bike_rates_df(electric_bike_rate: float, classic_bike_rate: float) -> pd
 class RawModelData:
     """Raw entity tables for one scenario, loaded once from data sources.
 
+    Everything here still uses the raw column names — ``station_id``,
+    ``depot_id``, ``truck_id``, ``ride_id``, ``rideable_type``. The rename to
+    the canonical schema (``facility_id``, ``resource_id``,
+    ``commodity_category``) happens in the ``get_*`` functions at the top of
+    ``dataloader_graph.py``; past that boundary only canonical names exist.
+
     Parameters
     ----------
     trips_path : str

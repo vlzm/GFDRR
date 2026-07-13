@@ -139,7 +139,11 @@ def size_state_for_demand(
     including its ``demand_scale_factor`` and ``number_of_periods`` — against a
     saturated copy of ``resolved``, and reads the requirements from the
     resulting journal with :func:`get_replay_initial_inventory_df` and
-    :func:`get_replay_capacities_df`.
+    :func:`get_replay_capacities_df`. The saturated inventory is
+    :func:`get_saturated_inventory_df`; the saturated capacity is
+    ``(n_commodities + 1) * SATURATION_QUANTITY`` docks per facility, above
+    the starting occupancy plus every arrival the run could dock, so nothing
+    redirects during the measurement.
 
     ``resolved`` is not modified; assign the returned tables to
     ``resolved.initial_inventory_df`` and ``resolved.facilities_capacities_df``

@@ -161,7 +161,13 @@ def hour_of_week(ts: pd.Series) -> pd.Series:
 def get_periods_df(
     trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta
 ) -> pd.DataFrame:
-    """Build the period grid covering every trip, with start/end timestamps."""
+    """Build the period grid covering every trip, with start/end timestamps.
+
+    Period ``k`` covers ``[t0 + k * period_len, t0 + (k + 1) * period_len)``;
+    the grid runs out to the last trip's end. ``t0`` itself is set by
+    ``ResolvedModelData.__init__``: the earliest trip start, floored to the
+    hour.
+    """
     n_periods = int(to_period_id(trips_df["ended_at"], t0, period_len).max()) + 1
     periods_df = pd.DataFrame({"period_id": range(n_periods)})
     periods_df["start_timestamp"] = t0 + periods_df["period_id"] * period_len
@@ -213,7 +219,9 @@ def get_historical_flows_df(
     from :func:`~gbp.model.flows.stamp_history_ordering` (the rule for a source
     with no phases), and are ordered by :func:`~gbp.model.flows.finalize_flows` --
     the same finalize the simulator uses -- so a base replay's finalized journal
-    is identical to this log by construction.
+    is identical to this log by construction. The finished journal is checked
+    with :func:`~gbp.model.journal_schema.check_journal_schema` before it is
+    returned: bad input data fails at load time, not as a run-end violation.
 
     Parameters
     ----------
@@ -417,7 +425,8 @@ def apply_truck_fleet(
     based at ``depot_1`` and one at ``depot_3``. The fleet is a run
     parameter: the heavy graph tables are untouched, only the three resource
     tables (``resources_df``, ``resources_capacities_df``,
-    ``resources_rates_df``) are rebuilt.
+    ``resources_rates_df``) are rebuilt. ``ValueError`` for an empty
+    ``truck_homes`` list and for a home that is not a depot facility.
 
     Parameters
     ----------
@@ -585,20 +594,21 @@ def apply_forecast_demand(
 ) -> "ResolvedModelData":
     """Return a shallow copy of ``resolved`` that runs on a forecast demand table.
 
-    The copy carries the forecast period grid, the forecast demand table, and
-    a historical OD matrix mapped onto the forecast periods by hour of week
+    The copy replaces four fields: the forecast period grid (``periods_df``
+    and its ``t0``), the forecast demand table, and a historical OD matrix
+    mapped onto the forecast periods by hour of week
     (:func:`map_od_matrix_by_hour_of_week`). Everything else — facilities,
     capacities, routes, the historical observations — is shared as-is. The
     forecast table sits in the ``historical_demand_df`` slot because that is
     the one demand slot the engine reads; the run's ``meta.json`` records that
     the demand came from a forecast (``demand_source``, ``forecast_name``).
 
-    Like the loader itself, this is a load boundary: the three replaced tables
-    are schema-checked here, plus two cross-table checks a schema cannot
-    express — every demand facility must exist in the facility table, and
-    every demanded ``(facility, commodity, period)`` must have OD rows, or the
-    engine would silently drop those departures and break the demand-split
-    invariant (I1).
+    Like the loader itself, this is a load boundary: the two incoming tables
+    are schema-checked here (``PERIODS_SCHEMA``, ``HISTORICAL_DEMAND_SCHEMA``),
+    plus two cross-table checks a schema cannot express — every demand
+    facility must exist in the facility table, and every demanded
+    ``(facility, commodity, period)`` must have OD rows, or the engine would
+    silently drop those departures and break the demand-split invariant (I1).
 
     Parameters
     ----------
@@ -750,6 +760,15 @@ class ResolvedModelData:
     stockout and no dock-full. To run a *scaled* demand, replace both with the
     output of :func:`gbp.consumers.simulator.size_state_for_demand`, which sizes
     them against the scaled scenario's own journal.
+
+    ``__init__`` builds the tables in dependency order: entities, attributes,
+    the time grid, the historical flow journal, the base replay initial
+    inventory, the historical marginals, riding speed and ``routes``, and the
+    empty ``simulated_*`` fields (filled by :func:`attach_simulation` after a
+    run). It ends with two load-time checks: an assert that the period-0
+    start-of-period inventory equals the initial inventory (the two are built
+    by different code paths), and ``check_engine_tables`` — every table the
+    engine reads against its schema in ``ENGINE_TABLE_SCHEMAS``.
 
     Parameters
     ----------

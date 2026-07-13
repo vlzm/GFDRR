@@ -42,6 +42,12 @@ class Environment:
 
     Each period runs the scheduled phases, appends their events to the journal,
     and advances the clock.
+
+    Construction refuses a run that cannot execute (``SimulatorConfigError``):
+    a scenario with both ``historical_demand_df`` and ``initial_inventory_df``
+    empty, ``number_of_periods`` larger than the period grid (the run would
+    silently step fewer periods), and a phase list out of ``phase_rank`` order
+    (the journal's ``step_id`` and ``phase_rank`` orders would disagree).
     """
 
     def __init__(self, resolved: ScenarioInputs, config: EnvironmentConfig) -> None:

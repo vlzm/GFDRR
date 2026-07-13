@@ -1,137 +1,92 @@
 # Documentation — start here
 
-This page is the entry point to the project documentation. It says what the
-project is, how to run it, what each folder of the repository does, and which
-document to read next. The route follows the five levels of code
-understanding from [comprehension_levels.md](method/comprehension_levels.md) — from
-"I can run it" (level 1) to "I know every line" (level 5). Each level is
-covered by exactly one artifact, and this page visits them in order.
-
-## What this project is
-
 The project is a simulator of a bike-sharing system, built on real Citi Bike
-data. The input is a month of historical trips. The simulator replays that
-demand period by period (a period is one step of the simulation clock,
-[Notations.md §6](../Notations.md#6-time)): bikes leave stations, ride, and
-dock at the destination — or, when the destination is full, get redirected to
-a nearby station. Every change is written as one row of the flow journal
-([Notations.md §0](../Notations.md#0-the-flow-event-schema-the-symbol-table)) —
-a table that only ever receives new rows and alone holds the full history of
-the run. Everything else the project shows (station inventories, maps, costs)
-is computed from the journal.
+data. The input is a month of trips; the simulator replays that demand period
+by period, and every change is written as one row of the flow journal — an
+append-only table that alone holds the full history of a run. The current
+phase is demand forecasting: a model predicts future demand, and the simulator
+runs on that forecast next to the base replay on history. The canonical
+scenario is therefore two runs — the base replay in
+`notebooks/test_pipeline.ipynb` and the forecast run in
+`notebooks/forecast_pipeline.ipynb`; everything in the codebase must serve one
+of them.
 
-Two parts sit on top of the simulator. The rebalancer moves bikes by truck at
-night to the stations the morning demand would otherwise empty, so bikes are
-there when the morning starts. The web interface (Streamlit) shows finished
-runs: maps, inventory charts, trip tables.
+Pick the door that matches what you came for.
 
-Two files hold a special place. `notebooks/test_pipeline.ipynb` is the
-canonical scenario — the source of truth: everything in the codebase must
-serve it. [`Notations.md`](../Notations.md) is the project dictionary — one
-concept, one word; every document here uses its vocabulary.
+## Run it
 
-## How to run (level 1)
+[first_run.md](first_run.md) takes a clean clone to its first flow journal in
+a few minutes, on a synthetic scenario — no data download. The same page ends
+with the real-data variant: where the trip CSVs come from, how much they
+weigh, which command downloads a month.
 
-```bash
-uv venv
-uv pip install -e ".[dev,ui,api]"  # simulator + web interface + API + dev tools
+## Understand it
 
-python app/runner.py --run-name demo   # run one scenario with default settings
-streamlit run app/main.py              # browse saved runs in the browser
-uvicorn api:app --app-dir app          # serve the run-artifact API (explanation/api.md)
-pytest                                 # run the tests
-```
+Three short reads, from concrete to general:
 
-`python app/runner.py --help` lists the scenario settings. A finished run is
-saved as a folder under `data/runs/<run_name>/`; the web interface lists every
-saved run. Docker, environment variables, and the layout of the data folder
-are described in the [root README](../README.md). The optional road-network
-routing server (OSRM) is set up by [osrm_setup.md](guides/osrm_setup.md).
+1. [concepts.md](concepts.md) — the five concepts every other page assumes:
+   period, demand, station inventory, flow journal, run artifact.
+2. [scenarios.md](explanation/scenarios.md), scenarios 1–3 — the smallest
+   real journal tables: a stockout, a trip that docks in the same period, a
+   trip that docks a period later. Every table there is re-run by a test.
+3. [architecture.md](explanation/architecture.md) — the system as diagrams at
+   three zoom levels, ending with the full module map.
 
-## The map of the repository (level 2)
+## Change it
 
-One run flows through the repository like this:
+The common changes have a recipe in [how-to/](how-to/) — one page each: the
+task, the steps with real commands and files, the expected result.
 
-raw trip CSVs → `RawModelData` → `ResolvedModelData` → simulator → flow
-journal → run artifact → web interface
+- [change-the-demand.md](how-to/change-the-demand.md) — scale the demand a
+  run faces, or replay another month.
+- [run-on-a-forecast.md](how-to/run-on-a-forecast.md) — run the simulator on
+  a saved forecast instead of history.
+- [add-a-table-to-the-run-artifact.md](how-to/add-a-table-to-the-run-artifact.md)
+  — precompute a new table into every saved run.
+- [debug-an-invariant-violation.md](how-to/debug-an-invariant-violation.md)
+  — find which invariant (I1–I5) broke and which journal rows to look at.
 
-The same map as diagrams: [architecture.md](explanation/architecture.md) — the system and
-the outside world (level 1), the big blocks (level 2), the full module map
-with a depth table (level 3).
+A new recipe is added when the same task comes up twice. For a change
+without one, find the part you are changing on the module map in
+[architecture.md](explanation/architecture.md), then open its document:
 
-- **`gbp/`** — the library; nothing in it runs by itself. `gbp/loaders/` reads
-  the raw trip CSVs into `RawModelData` and resolves them into
-  `ResolvedModelData` — the input tables of the simulator (stations, demand,
-  the OD matrix, the period grid). `gbp/consumers/simulator/` runs the
-  simulation and produces the flow journal. `gbp/model/` holds the journal
-  schema and the functions that read it. `gbp/routing.py` answers distance and
-  travel-time questions for station pairs.
-- **`app/`** — what you actually run. `app/runner.py` executes one scenario
-  end to end and saves the result as a run artifact: a folder
-  `data/runs/<run_name>/` with every table the interface needs, built by
-  `app/artifacts.py`
-  ([Notations.md §12](../Notations.md#12-run-artifacts-the-files-the-ui-reads)).
-  `app/main.py` and `app/views/` are the Streamlit web interface — a pure
-  reader of saved artifacts: it never simulates and never recomputes what the
-  artifact builder has already computed. `app/ui_shared.py` holds the pages'
-  shared helpers; `app/backend.py` is the one place the app chooses between
-  local files and HTTP calls through `app/api_client.py` (when `API_URL` is
-  set), for reading runs and for starting them.
-  `app/api.py` is the run-artifact API — an HTTP service that serves saved
-  runs and starts new ones ([api.md](explanation/api.md)).
-- **`notebooks/`** — `test_pipeline.ipynb`, the canonical scenario: the whole
-  pipeline in one notebook, from raw CSV to validated run. The other notebooks
-  are working notebooks around specific parts of the code.
-- **`data/`** — `raw/` (source trip CSVs), `osrm/` (road graph files for the
-  routing server, created by the OSRM setup — [osrm_setup.md](guides/osrm_setup.md)),
-  `runs/` (saved run artifacts, one folder per run).
-- **`tests/`** — `invariants.py` (the journal checks every run must pass),
-  `scenarios.py` (builders of tiny synthetic runs), the test modules, and
-  `test_docs_scenarios.py`, which re-runs every toy table of
-  [scenarios.md](explanation/scenarios.md) so the documentation cannot silently drift from
-  the code.
+| Part | Document |
+|---|---|
+| raw trip CSV → simulator inputs | [dataloader.md](explanation/dataloader.md) |
+| the simulation loop | [simulator.md](explanation/simulator.md) |
+| truck rebalancing | [rebalancing.md](explanation/rebalancing.md) |
+| the journal library (`gbp/model/flows.py`) | [flow_journal.md](explanation/flow_journal.md) |
+| run artifacts and the web interface | [app.md](explanation/app.md) |
+| the run-artifact API | [api.md](explanation/api.md) |
+| demand forecasting | [ml.md](explanation/ml.md) |
 
-## Where to go next (levels 3–5)
+Each document ends with a "Why It Is Built This Way" section: the
+load-bearing decisions, each with the alternative that was rejected and the
+reason. Decisions that span several modules live as short records in
+[decisions/](decisions/).
 
-Level 3 — every module and its contract, in coarse words. The module
-diagrams and the module depth table are in
-[architecture.md](explanation/architecture.md). Six documents
-cover the run chain from the map above. [dataloader.md](explanation/dataloader.md): how
-the raw trip CSV becomes `ResolvedModelData` — the entities, the historical
-journal, the sized initial state. [simulator.md](explanation/simulator.md): what a period
-is, what state the simulator carries, the phase loop, the mechanics, the
-invariants. [rebalancing.md](explanation/rebalancing.md): how a truck plan is computed
-and how the trucks execute it period by period.
-[flow_journal.md](explanation/flow_journal.md): the journal library
-(`gbp/model/flows.py`) shared by the loaders and the simulator — the event
-schema, the builders, the read-models, the checks. [app.md](explanation/app.md): how a
-finished run becomes a saved artifact and how the web interface draws it.
-[api.md](explanation/api.md): the HTTP service that serves saved runs to clients and
-starts runs on a server. One more document covers the model around the
-simulator — [ml.md](explanation/ml.md): how raw trip files become a training
-table, the feature columns, the model families, the backtest and the
-two-level evaluation, the model registry, the retraining pipeline, and
-monitoring.
+## Find the exact contract
 
-Level 4a — exact contracts. [`Notations.md`](../Notations.md) (repository
-root) defines every column, status, and table name.
-[scenarios.md](explanation/scenarios.md) shows the worked scenarios — each one a short
-story, a sequence diagram, and a toy journal table reproduced by a test.
+[Notations.md](../Notations.md) (repository root) is the project dictionary:
+every column, status, and table name — one concept, one word. Open it by
+section when you need a contract; it is a reference, not a reading route.
+The HTTP contract is in [api.md](explanation/api.md); the command list is in
+the root [README.md](../README.md).
 
-Level 4b — why it is built this way. Every level-3 document ends with a
-"Why It Is Built This Way" section: the load-bearing decisions, each with
-the alternative that was rejected and the reason. Start with
-[simulator.md](explanation/simulator.md#why-it-is-built-this-way) and
-[rebalancing.md](explanation/rebalancing.md#why-it-is-built-this-way).
+## The rest of docs/
 
-Level 5 — line by line. Not a document: the code itself, entered through
-`notebooks/test_pipeline.ipynb` and, for single modules, one-off walkthrough
-notebooks in `notebooks/`.
-
-[comprehension_levels.md](method/comprehension_levels.md) explains the route itself:
-what each level means and when each is required.
-[working-method.md](method/working-method.md) is the author's personal cheat sheet
-about how to work; it is not documentation of the code.
+- `explanation/` — the per-module documents from the table above.
+- `how-to/` — the task recipes from the "Change it" door above.
+- `decisions/` — short records of design decisions that cannot be derived
+  from the code, one record per decision.
+- `guides/` — [osrm_setup.md](guides/osrm_setup.md): the optional road-network
+  routing server.
+- `plans/` — the plans of the current work.
+- `reports/` — saved evaluation and review reports.
+- `method/` — the author's personal notes on how to work.
+  [comprehension_levels.md](method/comprehension_levels.md) describes a way to
+  read a codebase in five levels of understanding — background reading, not
+  part of the route above.
 
 ## Languages
 
@@ -139,4 +94,5 @@ The canonical language of the documents is English. A Russian companion
 (`*_ru.md`) exists only for the files the author rereads regularly: this page
 ([README_ru.md](README_ru.md)),
 [comprehension_levels_ru.md](method/comprehension_levels_ru.md), and
-[working-method.ru.md](method/working-method.ru.md). Each pair is kept in sync.
+[working-method.ru.md](method/working-method.ru.md). Each pair is kept in
+sync.

@@ -192,7 +192,7 @@ class Metric:
 
     @property
     def label(self) -> str:
-        """Full picker label: the title plus the canonical column name in braces."""
+        """Full picker label: the title plus the canonical column name in parentheses."""
         return f"{self.title} ({self.name})"
 
 
@@ -434,7 +434,8 @@ def build_flow_totals(priced_flows: pd.DataFrame, arcs: pd.DataFrame) -> pd.Data
     original ``planned_target_id``, ``start_period``), its terminal event (the
     docking ``arrived`` or a dock-full ``lost``: outcome, ``reason``,
     ``end_period``, ``duration_periods``, ``cost``), and the sum of its arcs'
-    ``distance_km``.
+    ``distance_km``. A flow with two terminal events raises: that would be a
+    double close (invariant I2).
 
     Two kinds of rows are not here. A stockout loss has no flow at all
     (``flow_id`` is NA — the trip never departed); it lives in the panel as
@@ -739,6 +740,12 @@ def build_run_tables(
     routes: Routes,
 ) -> dict[str, pd.DataFrame]:
     """Build every run-artifact table from one finalized journal.
+
+    One builder per table: ``flows`` is the journal widened by
+    :func:`gbp.model.flows_with_measures`; ``panel`` comes from
+    :func:`gbp.model.flows_to_panel`, cut to ``PANEL_KEYS + PANEL_VALUES``;
+    ``arcs`` from :func:`build_arcs`; ``flow_totals`` from
+    :func:`build_flow_totals`; ``facilities`` from :func:`build_facilities`.
 
     Parameters
     ----------

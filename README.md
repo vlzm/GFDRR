@@ -2,7 +2,9 @@
 
 A bike-sharing simulator built on the Citi Bike domain: the `gbp/` package runs
 the simulation, the `app/` folder is a Streamlit web interface that shows saved
-runs. The canonical scenario lives in `notebooks/test_pipeline.ipynb`.
+runs. The canonical scenario is two runs: the base replay of history in
+`notebooks/test_pipeline.ipynb` and the run on forecast demand in
+`notebooks/forecast_pipeline.ipynb`.
 
 The documentation starts at [docs/README.md](docs/README.md).
 

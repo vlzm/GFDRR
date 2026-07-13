@@ -127,6 +127,10 @@ def run_scenario(
     horizon and the OD matrix is mapped onto it by hour of week. Everything
     after that is the same sized-run path.
 
+    :func:`run_sized_scenario` is called with ``validate=False``: a violated
+    invariant is recorded in ``meta.json`` as ``violations`` instead of
+    raising, so the UI can show a failed run next to the good ones.
+
     Parameters
     ----------
     graph_data : ResolvedModelData

@@ -730,7 +730,8 @@ def finalize_flows(journal: pd.DataFrame) -> pd.DataFrame:
     before the journal gets here: by ``SimulationState.apply_step_events`` in
     the simulator, or by :func:`stamp_history_ordering` in the historical
     loader. A journal with a hole in those columns is refused -- filling it
-    here would be a second definition of ``step_id``.
+    here would be a second definition of ``step_id``. The columns are also
+    cast to :data:`FLOW_EVENT_DTYPES` on the way out.
 
     Parameters
     ----------
@@ -841,7 +842,13 @@ def flows_to_losses(flows: pd.DataFrame, reason: str) -> pd.DataFrame:
 
 
 def flows_to_od_matrix(flows: pd.DataFrame) -> pd.DataFrame:
-    """Build the OD demand model (probability and duration per source-target pair)."""
+    """Build the OD demand model (probability and duration per source-target pair).
+
+    Counts user departures per ``(source_id, planned_target_id, period_id,
+    commodity_category)`` -- a pair key, not the facility key the other
+    marginals share -- with the pair's share ``probability`` and its mean
+    ``duration`` in whole periods.
+    """
     # Only user departures are intended trips. A redirect's later-leg departure
     # is a forced transport leg and would pollute the demand model.
     dep = flows[is_user_departure(flows)].copy()

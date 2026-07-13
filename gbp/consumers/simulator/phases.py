@@ -110,6 +110,11 @@ class DockArrivals(Phase):
     different moments of the period: ``"previous"`` docks bikes that departed
     in an earlier period (before this period's departures are formed), and
     ``"same"`` docks bikes that departed within this period (after them).
+    ``phase_rank`` follows ``when``: 0 for ``"previous"``, 2 for ``"same"``.
+
+    The planned dockings are ``phase_round`` 0; each redirect round is its own
+    ordered batch, ``phase_round`` 1, 2, ... After the phase, every due bike
+    has docked, left on a new leg, or been lost, exactly once.
     """
 
     def __init__(self, when: Literal["previous", "same"]) -> None:
@@ -190,16 +195,21 @@ class FormDeparturesPhase(Phase):
 
     The period's own activity (:data:`PERIOD_OWN_RANK`), start to finish:
 
-    1. Decide how many bikes leave each ``(source, commodity)`` --
+    1. Take the period's demand, scaled by ``config.demand_scale_factor``
+       (:func:`~gbp.consumers.simulator.mechanics.scale_demand`). Decide how
+       many bikes leave each ``(source, commodity)`` --
        ``min(demand, inventory)`` -- and take them out of the inventory.
     2. Book the demand that did *not* fit as ``lost`` events
        (``reason="stockout"``), so the journal keeps the full split
        ``demand = departed + lost`` instead of quietly dropping the lost demand.
     3. Spread the departures over the targets with the OD probabilities
-       ``P(target | source, commodity)``, set each trip's arrival period from
-       the mean historical duration of its pair, and emit one ``departed`` flow
-       per bike. In the simple case the OD matrix is the historical one, so a
-       base run repeats the historical demand pattern.
+       ``P(target | source, commodity)``, rounded to whole bikes by the
+       largest-remainder method so each source's total is preserved exactly
+       (:func:`~gbp.consumers.simulator.mechanics.form_potential_trips`).
+       Set each trip's arrival period from the mean historical duration of its
+       pair, and emit one ``departed`` flow per bike. In the simple case the
+       OD matrix is the historical one, so a base run repeats the historical
+       demand pattern.
 
     All of it is one inventory step: the ``departed`` flows and the stockout
     ``lost`` events share one ``step_id`` (Notations.md §0.1).

@@ -60,5 +60,8 @@ Target (code, then narration — write like this):
 ## Codebase Rules
 
 - **Vertical, not horizontal.** No "domain-agnostic" abstractions. If the canonical scenario doesn't use it, it doesn't belong in the codebase.
+- **Minimalism.** Code must be hackable. No factories, heavy DI containers, or hidden magic.
+- **Vectorization first.** All math via pandas/NumPy. No `for` loops over data in hot paths.
+- **Strict typing.** Pydantic for all contracts. Type hints on all public functions.
 - **UI.** The Streamlit app lives in `app/`. It is a reader of run artifacts (`data/runs/<run_name>/`, see Notations.md §12): it loads saved tables and draws them. It must not add abstractions to `gbp/` and must not compute anything the artifact builder (`app/artifacts.py`) can precompute. **All UI text (labels, captions, tooltips, page titles) is English only** — same as the code; Russian is for chat with the user, never for the app.
 - **Language.** Code, comments, docstrings — English only. Documents (`.md`) — English by default; add a Russian companion (`*_ru.md`) when the user asks, and keep the two in sync. Communication with the user — Russian. The plain-language, no-jargon rule above applies in every language.

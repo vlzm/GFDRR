@@ -26,7 +26,10 @@ the metrics of the split, and the fitted model files as artifacts. One
 extra run holds the cross-model table: mean metrics per model family next
 to their ratio against the seasonal naive baseline — the shared naive
 month forecast of each held-out month (``naive_month_prediction`` in
-``gbp/ml/forecast.py``). How that run is stored is this module's own
+``gbp/ml/forecast.py``). One asymmetry to know: the families are scored on
+their fractional demand, while the shared naive baseline goes through
+``predict_horizon`` and is therefore rounded to whole bikes before its
+score is computed. How that run is stored is this module's own
 knowledge: the write half (``_log_comparison``) and the read half
 (:func:`latest_comparison`, used by the pipeline's promote step) live here
 side by side.

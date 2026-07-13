@@ -565,6 +565,10 @@ def assign_bikes_to_stops(
     minutes also become simulator periods here:
     ``period = window_period_id + minute // minutes_per_period``.
 
+    Two asserts reject a malformed ``stops`` table: a dropoff larger than the
+    bikes on the truck, and bikes still on a truck at its route's end. A
+    solver that respects its load bounds can produce neither.
+
     Returns
     -------
     pandas.DataFrame
@@ -627,6 +631,12 @@ class PlanRebalancingPhase(Phase):
     (this phase runs later in the phase list), so the freshest picture the
     simulator has. The window's later night demand can still invalidate parts
     of the plan; execution cuts those parts down (see the module docstring).
+
+    When one side is missing -- no station is short, or none has bikes to
+    give -- the phase stores an empty plan and never calls the solver. A
+    broken truck setup raises ``SimulatorConfigError`` instead of being
+    planned around: no truck at all, a truck without ``home_facility_id``,
+    or a home depot missing from the facility tables.
 
     Parameters
     ----------
@@ -701,8 +711,10 @@ class PlanRebalancingPhase(Phase):
 class ApplyRebalancingPhase(Phase):
     """Execute the plan rows whose period has come (``phase_rank`` 3).
 
-    Runs every period, after the three user-trip phases, in three ordered
-    rounds (each its own inventory step):
+    Runs every period, after the three user-trip phases; a period with no due
+    plan rows and no rebalance bike in ``in_transit`` passes through
+    unchanged. The work happens in three ordered rounds (each its own
+    inventory step):
 
     - round 0 -- dock the dropoffs due now for bikes picked up in an earlier
       period (they were waiting in ``in_transit``);

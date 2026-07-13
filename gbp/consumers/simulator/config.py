@@ -25,7 +25,11 @@ class EnvironmentConfig:
     number_of_periods: int = 10
 
     def __post_init__(self) -> None:
-        """Reject a config no run can execute, at construction time."""
+        """Reject a config no run can execute, at construction time.
+
+        ``ValueError`` for ``number_of_periods < 1`` and for
+        ``demand_scale_factor <= 0``.
+        """
         if self.number_of_periods < 1:
             raise ValueError(f"number_of_periods must be >= 1, got {self.number_of_periods}")
         if self.demand_scale_factor <= 0:

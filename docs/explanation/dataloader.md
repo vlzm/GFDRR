@@ -1,29 +1,16 @@
-# The data loaders, step by step
+# The data loaders
 
 This document explains `gbp/loaders/`: the code that turns the raw Citi Bike
 trip CSV into `ResolvedModelData`, the input tables the simulator reads. The
 simulator reads them through its contract `ScenarioInputs`
 (`gbp/consumers/simulator/inputs.py`); `ResolvedModelData` is one supplier of
-that contract and carries more fields than it.
-
-The loaders do three things:
-
-1. They read one raw trip CSV, keep a processed copy, and build the raw tables:
-   stations and trips from the CSV, plus generated depots, trucks, and bike
-   rates.
-2. They rename the raw columns to the canonical schema and build the
-   historical flow journal and its marginals. A marginal is a table computed
-   from the journal, such as inventory, departures, arrivals, or the OD matrix.
-3. They compute `initial_inventory_df` for the base replay and provide the
-   sizing helpers that `size_state_for_demand` uses for scaled runs.
-4. They own the two run-parameter substitutions, each a shallow copy with a
-   few tables replaced: `apply_truck_fleet` replaces the truck fleet, and
-   `apply_forecast_demand` replaces the demand with a saved forecast (see
-   "Running On Forecast Demand").
+that contract.
 
 The terms are the same as in [`Notations.md`](../../Notations.md). What the
-simulator does with these tables is [simulator.md](simulator.md). The journal
+simulator does with these tables is [simulator.md](simulator.md); the journal
 functions used here are explained in [flow_journal.md](flow_journal.md).
+Each function's exact behavior is in its docstring — this page gives the map
+and the design.
 
 ## Code Map
 
@@ -44,424 +31,104 @@ raw trip CSV
   -> attach_simulation()   (fills the simulated_* marginals)
 ```
 
-## Step 1: `RawModelData` (`dataloader_raw.py`)
+## The Main Idea
 
-`RawModelData.__init__` loads everything once and stores the results as
-attributes. In order:
+`RawModelData` loads everything once: the cleaned trip table (with a
+processed-parquet copy in `data/processed/`, Notations.md §15), the station
+table derived from the trip endpoints, and the synthetic depots, trucks, and
+rates generated from a seed. Everything there still uses the raw column
+names. `ResolvedModelData` renames them to the canonical schema
+([Notations.md §4](../../Notations.md#4-facility-and-its-roles-in-a-trip)) —
+`station_id`/`depot_id` become `facility_id`, `truck_id` becomes
+`resource_id`, `rideable_type` becomes `commodity_category` — in the small
+`get_*` functions at the top of `dataloader_graph.py`. Past this boundary,
+only the canonical names exist.
 
-1. `load_trips_raw_df(trips_path)` loads the trips. The first load parses the
-   CSV, drops rows with a missing start time, end time, station id, or
-   coordinate, and writes the cleaned table to
-   `data/processed/<csv name>.parquet` (Notations.md §15). Later loads read
-   that parquet copy instead, which is much faster. The copy counts as fresh
-   only while it is newer than its CSV; delete the `processed` folder to force
-   a rebuild — for example after changing the cleaning code.
-2. `get_stations(trips_raw_df)` builds the station table from the trips
-   themselves: every distinct `start_station_id` or `end_station_id` becomes
-   one station, with its coordinates. There is no separate station registry.
-3. Every station gets the constant dock capacity 100 and a fixed cost of 0.
-   The real capacities are not loaded. A sized run replaces this capacity table
-   before the simulator starts.
-4. `get_depots(rng, n)` synthesizes depots at random coordinates inside the
-   city box — one row per depot with `depot_id`, `lat`, `lng`. Their random
-   capacities come from `get_depots_capacities` and their random fixed costs
-   from `get_depots_costs`. The Citi Bike data has no depots, so all three
-   tables are generated from the seed.
-5. `get_trips_df` keeps only the trip columns the rest of the pipeline needs.
-6. `get_trucks_df(n_trucks)` builds the truck table. Every truck starts at
-   `depot_1`; a run can replace the fleet later with `apply_truck_fleet`.
-7. `get_trucks_rates_df` and `get_trucks_capacities_df` set the truck rate and
-   bike capacity.
-8. `get_bike_rates_df` sets the price per hour for the two bike categories.
-
-Everything here still uses the raw column names: `station_id`, `depot_id`,
-`truck_id`, `ride_id`, `rideable_type`.
-
-## The Raw-To-Canonical Boundary
-
-`ResolvedModelData` renames the raw names to the canonical schema
-([Notations.md §4](../../Notations.md#4-facility-and-its-roles-in-a-trip)):
-
-| Raw | Canonical |
-|---|---|
-| `station_id`, `depot_id` | `facility_id` (with `facility_category` = `station` / `depot`) |
-| `truck_id` | `resource_id` |
-| `rideable_type` | `commodity_category` |
-
-The rename happens in the small `get_*` functions at the top of
-`dataloader_graph.py` (`get_facilities_df`, `get_resources_df`,
-`get_facilities_geo_df`, and so on). Past this boundary, only the canonical
-names exist.
-
-## Step 2: `ResolvedModelData` (`dataloader_graph.py`)
-
-`ResolvedModelData.__init__` builds the scenario tables in this order:
-
-| Order | What is built | Names |
-|---|---|---|
-| 1 | Entities | `facilities_df`, `resources_df`, `commodities_categories_df` |
-| 2 | Attributes | `facilities_geo_df`, `facilities_capacities_df`, `resources_capacities_df`, `facilities_costs_df`, `resources_rates_df`, `commodities_categories_rates_df` |
-| 3 | The time grid | `period_len`, `t0`, `periods_df` |
-| 4 | The historical journal and empty resource observations | `historical_flows_df`, `historical_resources_df` |
-| 5 | The base replay initial inventory | `initial_inventory_df` |
-| 6 | The historical marginals | `historical_inventory_df`, `historical_demand_df`, `historical_departures_df`, `historical_arrivals_df`, `historical_od_matrix_df` |
-| 7 | Riding speed and routes | `trip_speed_km_per_period`, `routing_mode`, `routes` |
-| 8 | Empty simulated attributes | `simulated_flows_df = None` and the other `simulated_*` |
-
-The three user-trip phases read this subset: `periods_df`,
-`initial_inventory_df`, `historical_demand_df`, `historical_od_matrix_df`,
-`facilities_capacities_df`, `facilities_geo_df`, and `routes`. A run with
-rebalancing also reads `historical_arrivals_df`, `resources_df`, and
-`resources_capacities_df`.
-
-### The Time Grid
-
-```python
-self.t0 = raw.trips_df["started_at"].min().floor("h")
-self.periods_df = get_periods_df(raw.trips_df, self.t0, period_len)
-```
-
-`t0` is the earliest trip start, floored to the hour. Period `k` runs from
-`t0 + k * period_len` for one `period_len` (default one hour).
-`to_period_id(ts, t0, period_len)` maps any timestamp to its period, and
-`periods_df` lists every period with its start and end timestamps, out to the
-last trip's end.
-
-### The Historical Journal
-
-`get_historical_flows_df(trips_df, t0, period_len)` turns each completed trip
-into one flow with two events:
-
-```python
-departed = departed_events(trips)
-arrived = arrived_events(trips, trips["planned_end_period"])
-journal = pd.concat([departed, arrived], ignore_index=True)
-journal = stamp_history_ordering(journal)
-flows = finalize_flows(journal)
-violations = check_journal_schema(flows)
-if violations:
-    raise ValueError(
-        "historical flow journal breaks the journal schema:\n" + "\n".join(violations)
-    )
-return flows
-```
-
-The finished journal is checked against the journal schema before it is
-returned, so bad input data fails at load time instead of appearing later as
-a run-end violation.
-
-The rows are built with the same builders the simulator uses, and ordered by
-the same `finalize_flows`. History contains only trips that actually happened,
-so there are no `lost` or `redirected` events and every flow stays on one arc
-(`move_id == 0`). `flow_id` gets a `hist_` prefix, so historical and simulated
-flows can never collide in one journal.
-
-The loader has no phases, so it stamps the order columns itself with
-`stamp_history_ordering` before finalizing: `phase_rank` by the timing rule
-`phase_rank_by_timing`, `phase_round` 0, and `step_id` numbering the distinct
-`(period_id, phase_rank, phase_round)` labels (see
-[flow_journal.md](flow_journal.md#finalizing-the-journal)).
-
-### The Historical Marginals
-
-The marginals are computed from the historical journal with the read-model
-functions from `flows.py`. The same functions later compute the simulated
-marginals:
-
-```python
-historical_departures_df = flows_to_departures(self.historical_flows_df)
-self.historical_arrivals_df = flows_to_arrivals(self.historical_flows_df)
-self.historical_od_matrix_df = flows_to_od_matrix(self.historical_flows_df)
-```
-
-`historical_demand_df` is the same table as `historical_departures_df`: in
-history every wanted trip departed, so demand equals departures.
-
-### Sizing The State Tables
-
-A replay needs two state tables before the simulator starts:
-
-- `initial_inventory_df`: bikes docked at each `(facility, commodity)`.
-- `facilities_capacities_df`: dock capacity at each facility.
-
-`ResolvedModelData.__init__` computes `initial_inventory_df` for the base
-replay. It leaves `facilities_capacities_df` as the raw capacity table: 100 for
-each station, plus the generated depot capacities.
-
-Most callers use `run_sized_scenario`. It replaces both tables with the output
-of `size_state_for_demand` before it builds the real `Environment`.
-
-`get_replay_initial_inventory_df` sizes the initial inventory:
-
-```python
-moments = inventory_at_moments(historical_flows_df, grid.assign(quantity=0))
-low = moments.groupby(["facility_id", "commodity_category"], as_index=False)[
-    "inventory_after"
-].min()
-low["quantity"] = (-low["inventory_after"]).clip(lower=0).astype("int64")
-```
-
-Starting from zero bikes everywhere, this function reads the journal step by
-step. For each `(facility, commodity)`, it finds the lowest `inventory_after`
-value. That value is negative when a station gives out more bikes than it
-receives before that step.
-
-The start quantity is the positive amount needed to bring that lowest value up
-to zero. Then every historical departure finds a bike, with no extra bikes
-added.
-
-Important: the low point is taken per step, not per period. A stockout is
-checked inside a period, during the departures phase, before that period's
-same-period arrivals dock. The end-of-period value already counts those late
-arrivals, so it overstates what is on hand at the moment of departure. Sizing
-against end-of-period values would leave real stockouts.
-
-`get_replay_capacities_df` sizes dock capacity for a journal. It lives next to
-its only caller, `size_state_for_demand` in
-`gbp/consumers/simulator/sizing.py`, which calls it after a sizing run.
-
-```python
-moments = inventory_at_moments(historical_flows_df, initial_inventory_df)
-step_totals = occupancy_per_facility(moments, "inventory_after", extra_keys=("step_id",))
-step_peak = step_totals.groupby("facility_id").max()
-initial_total = occupancy_per_facility(initial_inventory_df)
-idx = step_peak.index.union(initial_total.index)
-peak = pd.concat(
-    [step_peak.reindex(idx, fill_value=0), initial_total.reindex(idx, fill_value=0)],
-    axis=1,
-).max(axis=1)
-```
-
-With the initial inventory fixed, it finds each facility's peak total occupancy
-after every step. Occupancy is the inventory summed across commodities, because
-the docks are shared; one function owns that total, `occupancy_per_facility` in
-`gbp/model/flows.py`. The peak is also compared with the initial occupancy, the
-moment before the first step. A station whose inventory only drains has its
-highest occupancy at the start.
-
-The capacity becomes that peak, with `min_capacity = 10` as a floor for
-facilities with no replay traffic.
-
-For scaled demand, `run_sized_scenario` calls `size_state_for_demand`. That
-function first runs the scenario with saturated inventory and saturated
-capacities. Saturated means set far above demand, so no stockout and no
-dock-full can happen. It then calls `get_replay_initial_inventory_df` and
-`get_replay_capacities_df` on that sizing run's journal
-(see [simulator.md](simulator.md#how-a-run-starts)).
-
-`get_saturated_inventory_df` (also in `sizing.py`) builds the artificial
-saturated inventory table: one million bikes per station and commodity
-(`SATURATION_QUANTITY`). `size_state_for_demand` builds the matching saturated
-capacity table itself: `(n_commodities + 1) * SATURATION_QUANTITY` docks per
-facility.
-
-### Riding Speed And Routes
-
-`get_trip_speed_km_per_period` computes the mean riding speed over the
-historical trips: total great-circle distance divided by total ride time.
-
-Note: the speed comes from the raw `started_at` / `ended_at` timestamps, not
-from the OD matrix. The OD matrix stores durations rounded to whole periods,
-and most trips are shorter than one period, so a speed computed from it would
-divide by near-zero times.
-
-`routes` is then built once per scenario:
-
-```python
-self.routes = Routes(
-    self.facilities_geo_df,
-    routing_mode,
-    trip_speed_km_per_period=self.trip_speed_km_per_period,
-    period_len=period_len,
-    osrm_url=osrm_url,
-)
-```
-
-It answers `distance_km(source, target)` and
-`duration_periods(source, target)` for facility pairs
+`ResolvedModelData.__init__` then builds the scenario tables in dependency
+order (its class docstring lists the order): the time grid, the historical
+flow journal, the base replay initial inventory, the historical marginals,
+and `routes` — the object that answers `distance_km` and `duration_periods`
+for facility pairs
 ([Notations.md §13](../../Notations.md#13-routing-distance-and-travel-time-between-facilities)).
-In `osrm` mode the full facility-to-facility table is fetched here, once.
 
-### The Consistency Check
+The historical journal is built with the same builders the simulator uses
+(`departed_events`, `arrived_events`, `finalize_flows`): each completed trip
+is one flow with two events, `flow_id` gets a `hist_` prefix, and the order
+columns come from `stamp_history_ordering`
+([flow_journal.md](flow_journal.md)). The marginals — departures, arrivals,
+the OD matrix — are computed from that journal with the read-models from
+`flows.py`; `historical_demand_df` equals `historical_departures_df`,
+because in history every wanted trip departed.
 
-Near its end, `__init__` asserts that the start-of-period inventory at
-period 0, summed per commodity, equals the initial inventory. The two are
-built by different code paths, so a mistake in either one is caught at load
-time, not in the middle of a run.
+Two sizing helpers live here and are called by `size_state_for_demand` after
+a sizing run ([decision record](../decisions/sizing-run.md)):
+`get_replay_initial_inventory_df` lifts each station's lowest per-step
+inventory to zero, and `get_replay_capacities_df` sets capacity to each
+station's peak occupancy. Their docstrings explain the per-step subtlety.
 
-After the assert, `__init__` ends with `check_engine_tables(self)` — the
-schema check described in the next section. The assert stays separate
-because it is a cross-table consistency check, which a per-table schema
-cannot express.
+The loaders check tables as soon as they build them, so bad data fails at
+load time, not mid-run: the raw trips against `TRIPS_SCHEMA`, the historical
+journal against the journal schema, and every engine-facing table against
+`ENGINE_TABLE_SCHEMAS`, plus one cross-table assert (period-0 inventory
+equals the initial inventory).
 
-### The Schema Checks At The Load Boundary
+## The Two Run-Parameter Substitutions
 
-The loaders check tables as soon as they build them. A table with wrong
-columns, types, values, or keys fails at load time instead of later in the
-middle of a run. Three checks cover the boundary. All three use pandera schemas
-and report every violation at once through `schema_violations`.
+Two functions return a shallow copy of the resolved data with a few fields
+replaced; everything else stays shared.
 
-1. The raw trips. `load_trips_raw_df` checks the trip table against
-   `TRIPS_SCHEMA` (`dataloader_raw.py`) on every load: required columns and
-   dtypes, coordinates inside the service area, and
-   `started_at <= ended_at`. A violation raises `ValueError`. The processed
-   parquet copy is written only after the check passes, so a bad table is
-   never cached.
+`apply_truck_fleet(resolved, truck_homes, ...)` rebuilds only the three
+resource tables. The truck fleet is a run parameter, not part of the loaded
+data; the Run page and the `--truck-homes` runner flag call it.
 
-2. The historical journal. `get_historical_flows_df` runs
-   `check_journal_schema(flows)` on the finished journal and raises on
-   violations (the snippet above).
-
-3. The engine tables. `ResolvedModelData.__init__` ends with
-   `check_engine_tables(self)`: each of the six tables the engine reads
-   (`periods_df`, `initial_inventory_df`, `historical_demand_df`,
-   `historical_od_matrix_df`, `facilities_capacities_df`,
-   `facilities_geo_df`) is checked against its schema in
-   `ENGINE_TABLE_SCHEMAS` (`dataloader_graph.py`). The two sized-state
-   tables are checked again in `run_sized_scenario`, right after sizing
-   replaces them.
-
-## Changing The Truck Fleet
-
-The truck fleet is a run parameter, not part of the loaded data.
-`apply_truck_fleet(resolved, truck_homes, truck_capacity_bikes, truck_rate)`
-returns a shallow copy of the resolved data with only the three resource
-tables rebuilt:
-
-```python
-out = copy.copy(resolved)
-out.resources_df = get_resources_df(trucks_df)
-out.resources_capacities_df = ...
-out.resources_rates_df = ...
-```
-
-`truck_homes` lists the home depot of each truck, one entry per truck. The
-function rejects an empty list and any home that is not a depot facility. Other
-resolved tables are shared with the original object, so changing the fleet does
-not rebuild them. The Run page of the UI and the `--truck-homes` runner flag
-call this function.
-
-## Running On Forecast Demand
-
-A forecast run ([Notations.md §11](../../Notations.md#11-run-kinds)) replays
-a forecast demand table — demand predicted by a model
-([Notations.md §17](../../Notations.md#17-demand-forecasting-the-model-around-the-simulator)) —
-instead of history. `apply_forecast_demand(resolved, forecast_demand_df,
-forecast_periods_df)` is a sibling of `apply_truck_fleet`: it returns a
-shallow copy with four fields replaced.
-
-```python
-out = copy.copy(resolved)
-out.periods_df = forecast_periods_df
-out.t0 = forecast_periods_df["start_timestamp"].iloc[0]
-out.historical_demand_df = forecast_demand_df
-out.historical_od_matrix_df = od_matrix_df
-return out
-```
-
-The forecast table sits in the `historical_demand_df` slot because that is
-the one demand slot the engine reads. The period grid becomes the forecast
-horizon, built by `get_forecast_periods_df(t0, number_of_periods,
-period_len)`: period ids restart at 0, because a forecast run is its own
-scenario with its own clock. Facilities, capacities, routes, and the
-historical observations are shared with the original object, unchanged.
-
-Forecast periods have no history, so they have no OD matrix of their own.
-`map_od_matrix_by_hour_of_week` builds one from the historical matrix. The
-key is the hour of week — `weekday * 24 + hour`, 0..167, computed by
-`hour_of_week`. The historical OD rows that share an hour of week form one
-pool (Monday 08:00 across all weeks is one pool), and every forecast period
-gets the pool of its own hour of week. Within a pool, per `(source, target,
-commodity)`: `count` is the sum of the historical counts, `duration` is the
-count-weighted mean of the historical mean durations (rounded to whole
-periods), and `probability` is recomputed as the pair's share of the pool's
-total, so the shares sum to 1 again.
-
-Like the loader itself, `apply_forecast_demand` is a load boundary. It
-checks the two incoming tables against their schemas (`PERIODS_SCHEMA`,
-`HISTORICAL_DEMAND_SCHEMA`), rejects a forecast grid whose period length
-differs from the scenario's, and adds two cross-table checks a schema cannot
-express: every demand facility must exist in the facility table, and every
-demanded `(facility, commodity, period)` must have OD rows — otherwise the
-engine would silently drop those departures and break the demand-split
-invariant (I1).
-
-The callers are `app/runner.py` (`--demand-source forecast`, which loads the
-named forecast from `data/ml/forecasts/`) and `app/evaluate.py` (the
-two-level evaluation).
+`apply_forecast_demand(resolved, forecast_demand_df, forecast_periods_df)`
+makes the copy a forecast run
+([decision record](../decisions/forecast-replaces-only-demand.md)): the
+forecast demand table goes into the `historical_demand_df` slot — the one
+demand slot the engine reads — together with the forecast period grid and an
+OD matrix pooled from history by hour of week
+(`map_od_matrix_by_hour_of_week`). It is a load boundary like the loader
+itself: schema checks plus two cross-table checks, described in its
+docstring. The callers are `app/runner.py` (`--demand-source forecast`) and
+`app/evaluate.py`.
 
 ## After A Run: `attach_simulation`
 
 `attach_simulation(resolved, simulated_flows_df, ...)` fills the
-`simulated_*` attributes from a finished run's journal:
-
-```python
-resolved.simulated_inventory_df = get_inventory_df(
-    resolved.simulated_flows_df, resolved.initial_inventory_df
-)
-simulated_departures_df = flows_to_departures(resolved.simulated_flows_df)
-```
-
-Every simulated marginal is derived with the same read-model function as its
-historical twin. That makes the two sets directly comparable: in a base replay
-they are equal, table by table.
-
-## The Wide Journal
-
-Widening a journal for analysis is done by two model-layer read-models, not by
-the loader:
-
-```python
-wide = flows_with_inventory(flows_df, initial_inventory_df)
-wide = flows_with_measures(wide, routes=..., rates=..., period_len=...)
-```
-
-`flows_with_inventory` adds each event's own facility inventory just before
-and just after its step (`inventory_before` / `inventory_after`, step-level).
-`flows_with_measures` adds the durations, distances, `rate`,
-`elapsed_periods`, and `cost` — the same call the artifact builder uses.
-
-The canonical notebook (`notebooks/test_pipeline.ipynb`) builds this table.
-The UI does not read it. Its tables are precomputed by `app/artifacts.py`.
-An older loader-layer widening (`get_flows_wide`) rebuilt inventory at period
-level and disagreed with the step-level read-model; it was deleted in favour
-of the two calls above.
+`simulated_*` attributes from a finished run's journal. Every simulated
+marginal is derived with the same read-model function as its historical
+twin, so the two sets are directly comparable: in a base replay they are
+equal, table by table.
 
 ## Why It Is Built This Way
 
 ### Stations Come From The Trips
 
-There is no station registry in the raw data. Deriving stations from the trip
-endpoints guarantees that every station the journal mentions exists in the
-facility tables. It also keeps unused stations out of those tables. Depots and
-trucks have no source data, so they are synthesized from a seed. The result is
-deterministic for a given scenario.
+There is no station registry in the raw data. Deriving stations from the
+trip endpoints guarantees that every station the journal mentions exists in
+the facility tables, and keeps unused stations out. Depots and trucks have
+no source data at all, so they are synthesized from a seed — deterministic
+for a given scenario.
 
 ### The Historical Journal Uses The Simulator's Builders
 
-`get_historical_flows_df` could have built its rows by hand. Instead it calls
-`departed_events`, `arrived_events` and `finalize_flows` from `flows.py`. This
-is what makes the base replay checkable row by row: the historical journal and
-a replay run's journal are produced by the same primitives, so any difference
-between them is a real behavior difference, never a formatting one.
+`get_historical_flows_df` could have built its rows by hand. Calling the
+shared builders instead is what makes the base replay checkable row by row:
+the historical journal and a replay run's journal are produced by the same
+primitives, so any difference between them is a real behavior difference,
+never a formatting one.
 
 ### The Initial State Is Computed, Not Loaded
 
-Today's real station inventory is a current observation. It is unrelated to
-the historical month being replayed. Limiting demand against it would create
-stockouts that never happened in history.
-
-The loader instead computes the smallest starting inventory under which history
-replays cleanly. The computation is a pure function of the journal: it raises
-the lowest step-level inventory value to zero.
-
-For scaled runs, `size_state_for_demand` uses the loader's two sizing helpers
-on the sizing run's journal. It computes starting inventory from the floor at
-zero and dock capacity from peak occupancy, not from a guessed safety margin.
+Today's real station inventory is a current observation, unrelated to the
+historical month being replayed; limiting demand against it would create
+stockouts that never happened. The loader instead computes the smallest
+starting inventory under which history replays cleanly — a pure function of
+the journal ([decision record](../decisions/sizing-run.md)).
 
 ### One Read-Model, Two Views
 
 Every `historical_*` marginal and its `simulated_*` twin are produced by one
-function from `flows.py`. The container just calls it twice, on two journals.
-This supports the base replay check: it compares tables that share one
+function from `flows.py`. The container just calls it twice, on two
+journals, so the base replay check compares tables that share one
 definition.

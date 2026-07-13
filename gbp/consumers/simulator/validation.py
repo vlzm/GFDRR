@@ -47,6 +47,13 @@ def validate_run(
 ) -> list[str]:
     """Check invariants I1-I5 on a finished run; return all violations.
 
+    The five invariants: I1 — demand splits exactly into
+    ``departed + lost(stockout)``; I2 — every departed flow due by run end
+    closes with exactly one ``arrived`` or ``lost(dock_full)``; I3 — the live
+    final inventory equals the inventory recomputed from the journal; I4 —
+    bikes are conserved across final inventory, dock-full losses and
+    ``in_transit``; I5 — no step takes a station's inventory below zero.
+
     Parameters
     ----------
     state : SimulationState

@@ -1,16 +1,17 @@
-# The simulator, step by step
+# The simulator
 
-This document explains how one simulation run works.
-
-The simulator does three things:
+This document explains how one simulation run works. The simulator does three
+things:
 
 1. It moves bikes between pools: station inventory, `in_transit`, and, when
    rebalancing is enabled, trucks.
 2. It writes every movement as rows in `state_flows_df`, the flow journal.
-3. It checks that the final journal and the live state still agree.
+3. It checks that the finished journal and the live state still agree.
 
-The terms are the same as in [`Notations.md`](../../Notations.md). The scenario
-examples, with concrete journal rows, are in [`scenarios.md`](scenarios.md).
+The terms are the same as in [`Notations.md`](../../Notations.md). Worked
+examples with concrete journal rows are in [scenarios.md](scenarios.md). What
+each phase and mechanics function reads, does, and writes is in the
+docstrings of `gbp/consumers/simulator/` — this page only gives the map.
 
 ## Code Map
 
@@ -23,236 +24,77 @@ The simulator code is in `gbp/consumers/simulator/`.
 | `state.py` | Owns `SimulationState`, inventory arithmetic, and the one journal write path. |
 | `phases.py` | Owns the three user-trip phases. |
 | `mechanics.py` | Owns the rules used by phases: docking, redirects, demand, OD expansion. |
-| `rebalancing.py` | Owns truck planning and execution. |
+| `rebalancing.py` | Owns truck planning and execution ([rebalancing.md](rebalancing.md)). |
 | `scenario.py` | Owns `canonical_phases()` and `run_sized_scenario()`. |
 | `sizing.py` | Measures initial inventory and dock capacities for a demand level. |
-| `validation.py` | Checks run invariants I1-I5. |
+| `validation.py` | Checks run invariants I1–I5. |
 | `config.py` | Holds `EnvironmentConfig`, the settings for one run. |
 
-The dependency direction is:
-
-```text
-journal <- state <- mechanics <- phases <- engine
-```
-
-A lower layer does not import a higher layer.
+The dependency direction is `journal <- state <- mechanics <- phases <-
+engine`; a lower layer does not import a higher layer.
 
 ## The Main Idea
 
-The simulator does not keep the run as one editable table.
+The simulator does not keep the run as one editable table. It keeps the
+append-only flow journal `state_flows_df`; each row is a flow event —
+`departed`, `arrived`, `redirected`, or `lost`
+([decision record](../decisions/journal-as-source-of-truth.md)).
 
-It keeps an append-only flow journal:
+`SimulationState` is immutable: a phase reads one state and returns the next.
+Besides the journal, the state carries `state_inventory_df` (bikes docked per
+`(facility_id, commodity_category)`) and `in_transit` (bikes that departed
+but have not docked yet). Both are caches derived from the journal, kept for
+speed; invariant I3 recomputes inventory from the journal at run end and
+compares the two.
 
-```python
-state_flows_df
-```
+Every phase writes through one method, `state.apply_step_events(new_flows,
+phase_rank)`. It stamps the order columns, appends the rows to the journal,
+and moves inventory and `in_transit` by exactly what the events imply — so
+the journal and the two derived values cannot disagree. Its docstring in
+`state.py` lists the exact steps.
 
-Each row is a flow event: `departed`, `arrived`, `redirected`, or `lost`.
-
-The current station inventory is also carried in the state:
-
-```python
-state_inventory_df
-```
-
-This inventory is kept for speed. It is not the source of truth. At the end of
-the run, invariant I3 recomputes inventory from the journal and compares it with
-the live `state_inventory_df`.
-
-`in_transit` is the set of bikes that have departed but have not yet docked. A
-user trip waits there between `departed` and `arrived`. A rebalance flow waits
-there while a bike is on a truck.
-
-## Time In The Simulator
-
-There are two time axes.
-
-### Period
-
-A `period` is one step of the simulation clock. In the canonical setup, a period
-is one hour. `periods_df` maps each `period_id` to its wall-clock start and end.
-
-The engine runs periods in order:
-
-```python
-while not env.is_done:
-    env.step()
-```
-
-### Step
-
-A `step` is smaller than a period. It is one ordered batch of inventory changes.
-
-Examples:
-
-| Batch | Why it is one step |
-|---|---|
-| Planned arrivals docking at their target | All those `+1` changes happen together. |
-| One period's departures | All `-1` departures and stockout losses are one decision. |
-| One redirect round | Those bikes try their next stations together. |
-| One rebalancing round | The truck phase applies three ordered rounds. |
-
-Every journal row has:
-
-| Column | Meaning |
-|---|---|
-| `phase_rank` | Which phase wrote the row inside the period. |
-| `phase_round` | Which ordered round inside that phase. Default is 0. |
-| `step_id` | The run-global order of inventory steps. |
-
-Important: `phase_rank` and `phase_round` are labels. The simulator opens
-`step_id` values from a counter in `SimulationState.apply_step_events()`.
-
-That prevents two ordered batches from accidentally sharing one `step_id`.
-
-## State
-
-`SimulationState` is immutable. A phase does not edit it in place. A phase reads
-one state and returns the next state.
-
-The main fields are:
-
-| Field | Meaning |
-|---|---|
-| `state_period_id_obj` | The current period id and wall-clock bounds. |
-| `state_flows_df` | The append-only flow journal. |
-| `state_inventory_df` | Bikes currently docked, per `(facility_id, commodity_category)`. |
-| `in_transit` | Departed flows that have not docked yet. |
-| `state_resources_df` | Resource observations. Empty in historical replay. |
-| `next_step_id` | The next `step_id` to hand out. |
-| `rebalance_plan` | Bike-level truck plan still to execute. Empty outside a rebalancing window. |
-
-The state exposes nothing derived from `state_flows_df`. Read-models of the
-journal (departures, arrivals, the OD matrix) are plain functions in
-`gbp/model/flows.py`; a reader calls them on the journal directly.
-
-## The One Journal Write Path
-
-All phases write flow events through one method:
-
-```python
-state.apply_step_events(new_flows, phase_rank)
-```
-
-This method does the same work for every phase:
-
-1. Copy the new flow events.
-2. Set `phase_rank` on every row.
-3. Fill missing `phase_round` with 0.
-4. Open one `step_id` per distinct `phase_round`, in round order.
-5. Stamp `step_id` on the rows.
-6. Append the rows to `state_flows_df`.
-7. Move `state_inventory_df` by exactly what the events imply: `-1` at
-   `source_id` per undocking `departed`, `+1` at `realized_target_id` per
-   `arrived` (`inventory_deltas_from_events`).
-8. Update `in_transit`: a `departed` row enters the set; the `arrived`,
-   `redirected`, or `lost` event that ends the same arc removes it
-   (`in_transit_after_events`).
-
-A phase never edits the inventory or `in_transit` on the state directly. It
-builds events and hands them to this one call, so the journal and the two
-values derived from it cannot disagree. When a phase needs to see the effect of
-an earlier batch inside the same period (a redirect round, a truck pickup after
-a dropoff), it keeps a local inventory copy for that decision only.
-
-Empty `new_flows` opens no step and changes nothing. This keeps the step
-numbers continuous.
+Time has two axes. A `period` is one step of the simulation clock (one hour
+in the canonical setup); `periods_df` maps each `period_id` to its wall-clock
+bounds. A `step` is one ordered batch of inventory changes inside a period;
+`step_id` numbers the batches run-globally, from a counter the state owns.
+`phase_rank` and `phase_round` are labels: which phase wrote a row, and which
+ordered round inside that phase.
 
 ## How A Run Starts
 
-Most callers use `run_sized_scenario()`.
+Most callers use `run_sized_scenario()` (`scenario.py`). It runs a sizing run
+first, measures the initial inventory and dock capacities the demand needs,
+replaces those two tables on a copy of the data, runs the real run, and
+validates the result ([decision record](../decisions/sizing-run.md)).
 
-It owns the safe order:
-
-1. Run a sizing run with `canonical_phases()`.
-2. Measure the initial inventory and dock capacities the demand needs.
-3. Copy the resolved data and replace its initial inventory and capacities.
-4. Build an `Environment` with the real run settings.
-5. Run the periods.
-6. Validate the finished journal with I1-I5.
-
-The sizing run and the real run use two independent demand multipliers
-(`gbp/consumers/simulator/scenario.py`):
-
-```python
-sizing_config = EnvironmentConfig(..., demand_scale_factor=sizing_scale_factor, ...)
-run_config = EnvironmentConfig(..., demand_scale_factor=demand_scale_factor, ...)
-```
-
-The state is sized to survive `sizing_scale_factor` with no loss. The run
-itself faces `demand_scale_factor`. Equal values give a clean run with no
-losses. A `demand_scale_factor` above `sizing_scale_factor` is what makes
-`stockout` and `dock_full` events appear at all: the run faces more demand
-than the state was sized for. Both factors are runner flags
-(`--demand-scale` and `--sizing-scale` in `app/runner.py`) and are saved in
-`meta.json`.
-
-The sizing run always uses the canonical three user-trip phases. If the real run
-uses rebalancing, the rebalancing effect is measured against the sized user-trip
-state instead of being hidden by the sizing step.
-
-One more parameter separates what is sized from what runs: `sizing_data`.
-By default the sizing run measures `resolved` itself. Passing different data
-sizes the state on one demand table while the run faces another; the gap
-between the two shows up as lost and redirected events. The two-level
-evaluation uses this for its replay-state forecast runs (Notations.md §11):
-the state is sized on the month's actual demand (`sizing_data`), the run
-faces a model's forecast (`resolved`). The two must describe the same
-scenario — same facilities, period grid, and OD matrix.
+The sizing run and the real run use two independent demand multipliers:
+`sizing_scale_factor` sizes the state, `demand_scale_factor` is what the run
+faces. Equal values give a clean run; a higher run scale is what makes
+`stockout` and `dock_full` events appear at all. The `sizing_data` parameter
+sizes the state on one demand table while the run faces another — the
+two-level evaluation uses this for its forecast runs (Notations.md §11).
+Both multipliers are runner flags (`--demand-scale`, `--sizing-scale`) and
+are saved in `meta.json`.
 
 ## The Phase List
 
-The canonical phase list is:
-
 ```python
 canonical_phases() == [
-    DockArrivals("previous"),
-    FormDeparturesPhase(),
-    DockArrivals("same"),
+    DockArrivals("previous"),   # phase_rank 0
+    FormDeparturesPhase(),      # phase_rank 1
+    DockArrivals("same"),       # phase_rank 2
 ]
 ```
 
-A run with rebalancing appends:
+A run with rebalancing appends `rebalancing_phases(params)`: the plan and
+apply phases, both `phase_rank` 3.
 
-```python
-rebalancing_phases(params) == [
-    PlanRebalancingPhase(params),
-    ApplyRebalancingPhase(),
-]
-```
-
-So one full period can have five phases:
-
-| Order | Phase | `phase_rank` | Always active? |
-|---|---|---:|---|
-| 1 | `DockArrivals("previous")` | 0 | Yes |
-| 2 | `FormDeparturesPhase()` | 1 | Yes |
-| 3 | `DockArrivals("same")` | 2 | Yes |
-| 4 | `PlanRebalancingPhase(params)` | 3 | Only at `window_start_hour` |
-| 5 | `ApplyRebalancingPhase()` | 3 | Only when rebalancing is enabled and work exists |
-
-Each phase declares its `phase_rank` once. Three classes set it as a class
-attribute; `DockArrivals` sets it in `__init__`, because the rank depends on
-the `when` argument (`"previous"` → 0, `"same"` → 2). A normal
-phase implements one method, `build_events`: it reads the state and returns
-this period's events. The base class writes them through `apply_step_events`
-with the declared rank. The two rebalancing phases override `execute` instead,
-because they also replace `rebalance_plan` on the state.
-`PlanRebalancingPhase` writes no flow events, so no journal row carries its
-rank; the rank only places it in the list.
-
-The engine checks at construction time that the phase list is ordered by
-`phase_rank`. Phases execute in list order and the state's counter hands out
-`step_id` in that order, while the declared rank sorts the steps, so the two
-orders must agree; a list out of rank order is refused with
-`SimulatorConfigError`.
-
-Three more guards reject a run that cannot execute. `Environment.__init__`
-raises `SimulatorConfigError` when `number_of_periods` is larger than the
-period grid (the run would silently step fewer periods), and when both
-`historical_demand_df` and `initial_inventory_df` are empty.
-`EnvironmentConfig` raises `ValueError` at construction for
-`number_of_periods < 1` or `demand_scale_factor <= 0`.
+A normal phase implements one method, `build_events`: it reads the state and
+returns this period's events; the base class writes them through
+`apply_step_events` with the phase's declared rank. The two rebalancing
+phases override `execute` instead, because they also replace
+`rebalance_plan` on the state. The engine refuses a phase list that is out of
+`phase_rank` order (`SimulatorConfigError`).
 
 ## One Period At A Glance
 
@@ -282,350 +124,20 @@ sequenceDiagram
     end
 ```
 
-The order matters.
-
-Earlier arrivals dock before departures so those bikes can serve this period's
-demand. Same-period arrivals dock after departures because those trips do not
-exist until the departures phase creates them.
-
-## Phase 1: `DockArrivals("previous")`
-
-This phase handles user trips that:
-
-```text
-planned_end_period == current period
-start_period < current period
-flow_type == "user_trip"
-```
-
-It reads:
-
-| Source | Data |
-|---|---|
-| State | `in_transit`, `state_inventory_df` |
-| Resolved data | capacities, facility geography, OD matrix, `routes` |
-
-It does this:
-
-1. Select due user trips.
-2. Try to dock each bike at its `planned_target_id`.
-3. Split the due rows into `fits` and `overflow` with `dock_up_to_capacity()`.
-4. Redirect overflow bikes to the nearest facility with a free dock.
-5. Dock zero-period redirect legs in redirect rounds.
-6. Mark a bike `lost` with `reason = "dock_full"` only when no facility has a
-   free dock.
-7. Write all events in one `apply_step_events` call. That call adds the `+1`
-   inventory for every docked bike, removes the due rows from `in_transit`,
-   and puts the longer redirect legs in.
-
-It writes:
-
-| Event | Meaning |
-|---|---|
-| `arrived` | A due bike docked. |
-| `redirected` | A bike bounced off a full target. |
-| `departed` | The redirect continuation leg. |
-| `lost` | No dock was available anywhere. |
-
-The planned docking rows are `phase_round = 0`. Redirect rounds are
-`phase_round = 1, 2, ...`.
-
-After the phase:
-
-```text
-due == docked + redirected + lost
-```
-
-Only `arrived` rows move inventory.
-
-## Phase 2: `FormDeparturesPhase`
-
-This phase handles the demand of the current period.
-
-It reads:
-
-| Source | Data |
-|---|---|
-| State | `state_inventory_df` |
-| Resolved data | `historical_demand_df`, `historical_od_matrix_df` |
-| Config | `demand_scale_factor` |
-
-It does this:
-
-1. Take the demand rows where `period_id == current period`.
-2. Scale demand by `demand_scale_factor`.
-3. For each `(facility_id, commodity_category)`, compute:
-
-   ```text
-   departed = min(demand, inventory)
-   lost = demand - departed
-   ```
-
-4. Spread departed bikes across targets with OD probabilities.
-5. Round target counts with the largest-remainder method, so the source total is
-   preserved exactly.
-6. Expand aggregate rows into one `flow_id` per bike.
-7. Write the events in one `apply_step_events` call. That call removes the
-   departed bikes from inventory and puts the new trips into `in_transit`.
-
-It writes:
-
-| Event | Meaning |
-|---|---|
-| `departed` | A user trip left a source. |
-| `lost` with `reason = "stockout"` | Demand did not depart because no bike was available. |
-
-All rows in this phase are one batch: `phase_round = 0`.
-
-After the phase:
-
-```text
-demand == departed + lost(stockout)
-```
-
-A stockout does not move inventory. Only `departed` moves inventory.
-
-## Phase 3: `DockArrivals("same")`
-
-This phase uses the same docking and redirect rules as phase 1.
-
-The only difference is the due-arrival filter:
-
-```text
-planned_end_period == current period
-start_period == current period
-flow_type == "user_trip"
-```
-
-It must run after `FormDeparturesPhase`, because same-period trips are created by
-that phase.
-
-## Phase 4: `PlanRebalancingPhase`
-
-This phase is present only when a run enables rebalancing.
-
-It runs only in periods whose wall-clock start hour equals
-`params.window_start_hour`. Other periods pass through unchanged.
-
-It reads:
-
-| Source | Data |
-|---|---|
-| State | `state_inventory_df` after the user-trip phases |
-| Resolved data | demand, arrivals, periods, capacities, geography, trucks |
-| Config | `demand_scale_factor` |
-
-It does this:
-
-1. Compute `target inventory` for the morning demand window.
-2. Compare current inventory with the target.
-3. Build `imbalance`: positive values mean pickup side, negative values mean
-   dropoff side.
-4. Reduce planned dropoffs to the free docks available at planning time.
-5. Match total pickup and dropoff amounts per commodity.
-6. Split large pickup and dropoff amounts into nodes.
-7. Route trucks through the nodes.
-8. Convert route stops into a bike-level `rebalance_plan`.
-
-It writes no flow events and moves no inventory.
-
-It only replaces:
-
-```python
-state.rebalance_plan
-```
-
-If there is no pickup side or no dropoff side, the plan is empty.
-
-## Phase 5: `ApplyRebalancingPhase`
-
-This phase is present only when rebalancing is enabled.
-
-It runs every period, but it returns the state unchanged when there is no plan
-work and no rebalance bike in `in_transit`.
-
-It has three ordered rounds:
-
-| Round | What happens | Inventory change |
-|---:|---|---|
-| 0 | Dock truck dropoffs due from earlier periods. | `+1` per arrived bike |
-| 1 | Pick up bikes whose `pickup_period` is this period. | `-1` per executed pickup |
-| 2 | Dock truck dropoffs whose pickup and dropoff are in this same period. | `+1` per arrived bike |
-
-Round 1 cuts pickups down to bikes actually on hand. A cut pickup is removed from
-the plan, and the bike stays in inventory.
-
-Truck dropoffs use the same `dock_up_to_capacity()` rule as user arrivals. If a
-station is full, the bike docks at the truck's `home_facility_id`. The depot is
-the last place to unload the bike.
-
-It writes:
-
-| Event | Meaning |
-|---|---|
-| `departed` with `flow_type = "rebalance"` | A truck picked up a bike. |
-| `arrived` with `flow_type = "rebalance"` | A truck dropoff docked a bike. |
-
-After the phase:
-
-```text
-inventory change == docked dropoffs - executed pickups
-```
-
-A rebalance dropoff does not become `lost`.
-
-## Mechanics
-
-Mechanics functions do not touch `SimulationState`.
-
-They take plain tables and return decisions. Phases turn those decisions into
-events and write them through `apply_step_events`, which applies them to the
-state.
-
-### Free Docks
-
-`free_docks(inventory, capacities)` computes free docks per facility:
-
-```text
-free = capacity - docked bikes
-```
-
-Classic and electric bikes share the same physical docks, so the occupied count
-is summed across commodities.
-
-### Docking
-
-`dock_up_to_capacity(due, free)` is the only docking rule.
-
-For each target, it numbers rows in input order:
-
-```python
-rank = due.groupby(target_col).cumcount()
-capacity_here = due[target_col].map(free).fillna(0)
-fits = rank < capacity_here
-```
-
-Rows where `fits` is true dock. The rest are `overflow`.
-
-The same rule is used for:
-
-| Use | Target column |
-|---|---|
-| User trip arriving at the planned station | `planned_target_id` |
-| Redirect leg docking at its chosen station | `realized_target_id` |
-| Truck dropoff docking at its planned station | `planned_target_id` |
-
-### Redirect
-
-`plan_overflow_redirect(...)` resolves user-trip overflow. It returns one row
-per overflow bike with an `outcome` column:
-
-| `outcome` | Meaning |
-|---|---|
-| `docked` | The new leg had zero travel time and a dock was taken for it now. |
-| `riding` | The new leg takes time; whether it fits is decided when it arrives. |
-| `lost` | No facility in the network has a free dock. |
-
-The phase only turns these outcomes into events, so the docking decision for a
-redirect runs once per bike, here.
-
-It resolves in rounds:
-
-1. Find the nearest other facility with a free dock.
-2. Create a redirect leg to that facility.
-3. If the leg has zero-period travel time, try to dock it now.
-4. If it does not fit, it enters the next redirect round.
-5. If the leg takes time, it rides in `in_transit` and docks when it arrives.
-6. If no facility has a free dock, the outcome is `lost`; the phase writes the
-   `lost` event with `reason = "dock_full"`.
-
-The nearest facility is ranked by `neighbor_distance_sq`. Travel time comes from
-the OD matrix when that pair exists there. Otherwise it comes from `routes`.
-
-### Demand
-
-`realize_departures(demand_now, inventory)` computes the demand split:
-
-```text
-departed = min(demand, available)
-lost = demand - departed
-```
-
-`form_potential_trips(departures, od_matrix, period_id)` spreads the departed
-count across targets with OD probabilities.
-
-`expand_potential_trips(...)` turns aggregate rows into one row per bike and
-assigns simulator `flow_id` values with the `sim_` prefix.
-
-## Travel Time And Distance
-
-The simulator uses whole periods for trip time.
-
-For simulated user trips:
-
-```text
-planned_end_period = start period + duration
-```
-
-The `duration` comes from the OD matrix.
-
-For redirect legs:
-
-1. Use the mean OD duration for the pair if the OD matrix has the pair.
-2. Otherwise ask `routes.duration_periods(...)`.
-
-`routes` can use:
-
-| `routing_mode` | Meaning |
-|---|---|
-| `haversine` | Straight-line distance over mean riding speed. |
-| `osrm` | Road-network distance and riding time from a local OSRM server. |
-
-Distance in kilometres is not an input to the user-trip phase. It is mostly
-computed after the run for artifacts such as `flows.parquet`, `arcs.parquet`,
-and `flow_totals.parquet`.
-
-One exception exists: redirect travel time may use `routes` when the OD matrix
-has no duration for a pair.
-
-Truck travel time in rebalancing uses straight-line distance at truck speed. It
-does not use `routes`, because `routes` is built for bike travel time.
+Each phase keeps one balance, checked by the invariants below:
+
+| Phase | Writes | Balance after the phase |
+|---|---|---|
+| `DockArrivals` | `arrived`, `redirected`, `departed` (redirect leg), `lost(dock_full)` | due == docked + redirected + lost |
+| `FormDeparturesPhase` | `departed`, `lost(stockout)` | demand == departed + lost |
+| `PlanRebalancingPhase` | nothing — replaces `rebalance_plan` | — |
+| `ApplyRebalancingPhase` | `departed` / `arrived` with `flow_type = "rebalance"` | inventory change == dropoffs − pickups |
 
 ## Invariants
 
-The simulator checks correctness at three levels.
-
-### Phase Checks
-
-These checks run inside mechanics and phases:
-
-| Place | Check |
-|---|---|
-| `dock_up_to_capacity()` | No target docks more flows than it has free docks. |
-| `plan_overflow_redirect()` | Every overflow flow is either redirected or lost. |
-| `realize_departures()` | Departures never exceed available inventory. |
-| `DockArrivals` | Every due flow docks, redirects, or is lost exactly once. |
-
-Two more properties hold by construction, with no runtime check:
-
-- Stockout losses do not move inventory. `_event_deltas` gives a delta only
-  to docking and undocking events; a `lost` row is neither, so it never
-  produces one.
-- In `ApplyRebalancingPhase`, the inventory change equals docked dropoffs
-  minus pickups. The inventory is derived from the events themselves
-  (`inventory_deltas_from_events`), so there is no second value that could
-  disagree.
-
-### Run Checks
-
-`validate_run()` checks the finished run. It first runs
-`check_journal_schema(flows)` (`gbp/model/journal_schema.py`), so the
-journal's shape is checked on every run, not only in tests. The schema check
-enforces the exact column list, order, and dtypes, the legal `event_type`,
-`flow_type`, and `reason` values, the rule `move_id == event_id // 2`, and
-the rule "`realized_target_id` is set exactly on `arrived` rows".
-
-Then come the five invariants:
+`validate_run()` checks the finished run: first the journal shape
+(`check_journal_schema`, `gbp/model/journal_schema.py`), then five
+invariants:
 
 | Id | Statement |
 |---|---|
@@ -635,113 +147,42 @@ Then come the five invariants:
 | I4 | Bikes are conserved across final inventory, `lost(dock_full)`, and `in_transit`. |
 | I5 | No step takes a station inventory below zero. |
 
-`Environment.run()` calls these checks by default. `run_sized_scenario()` calls
-them itself so it can return the violation list to the caller.
-
-### Journal Shape In Tests
-
-One structural rule is checked only in tests: the order of events inside one
-flow.
-
-```python
-departed(,redirected,departed)*(,(arrived|lost))?
-```
-
-That means:
-
-1. A flow starts with `departed`.
-2. It may bounce one or more times.
-3. Each bounce is `redirected, departed`.
-4. It ends with at most one terminal event: `arrived` or `lost`.
-
-The scenario tables in [`scenarios.md`](scenarios.md) are rebuilt by
-`tests/test_docs_scenarios.py`, so documented journal rows must stay aligned
-with the code.
+`Environment.run()` calls these checks by default; `run_sized_scenario()`
+calls them itself so it can return the violation list to the caller. The
+scenario tables in [scenarios.md](scenarios.md) are rebuilt by
+`tests/test_docs_scenarios.py`, so documented journal rows stay aligned with
+the code.
 
 ## Why It Is Built This Way
 
-### The Journal Is The Source Of Truth
-
-The flow journal records every movement and every loss as rows.
-
-That makes these questions checkable:
-
-| Question | Where the answer comes from |
-|---|---|
-| Did demand depart or become a stockout loss? | `departed` and `lost(reason = "stockout")` rows |
-| Did a bike dock, bounce, or leave the system? | `arrived`, `redirected`, and `lost(reason = "dock_full")` rows |
-| Does live inventory still match the run history? | Inventory recomputed from `state_flows_df` |
-
-If inventory were only updated in place, a missing event could silently change
-the run result. With the journal, the event and the inventory movement can be
-checked against each other.
-
 ### `step_id` Comes From A Counter
 
-The simulator does not derive `step_id` by sorting
-`(period_id, phase_rank, phase_round)`.
-
-Instead, `apply_step_events()` opens the next number from `next_step_id`.
-
-This matters because labels are not enough to prove batch boundaries. If a phase
-needs two ordered batches, they must receive different `step_id` values. The
-counter makes that direct.
-
-The historical loader has no counter, so it stamps its own `step_id` from the
-`(period_id, phase_rank, phase_round)` labels with `stamp_history_ordering`
-before finalizing. That is safe because historical data has only user trips:
-no redirects and no rebalancing rounds, so one label is always one batch.
-`finalize_flows` itself assigns nothing and refuses a journal that arrives
-without the order columns.
+Labels like `(period_id, phase_rank, phase_round)` cannot prove batch
+boundaries: two separately ordered batches must never share a `step_id`.
+`apply_step_events()` opens each number from the state's counter, so a
+number handed out once is never handed out again. The historical loader has
+no counter and stamps `step_id` from the labels (`stamp_history_ordering`) —
+safe there, because history is pure user trips and one label is always one
+batch.
 
 ### Redirect Is A Real Second Leg
 
-A redirect is not stored as one direct trip from the source to the final station.
-
-The journal records the bounce:
-
-```text
-departed -> redirected -> departed -> arrived
-```
-
-This shows the full station where the bike bounced. It also lets the live
-read-models tell a real user departure from a redirect continuation leg:
-
-| Event | Inventory effect |
-|---|---|
-| `departed` with `move_id == 0` | The bike leaves a dock. |
-| `departed` with `move_id >= 1` | A redirect continuation leg; no dock is touched. |
+A redirect is not stored as one direct trip. The journal records the bounce:
+`departed` → `redirected` → `departed` → `arrived`. This shows the full
+station where the bike bounced, and it lets readers tell a real user
+departure (`move_id == 0`, moves inventory) from a redirect continuation leg
+(`move_id >= 1`, moves nothing).
 
 ### Arrivals Are Split Around Departures
 
-The user-trip phases are ordered like this:
-
-```text
-dock earlier arrivals -> form departures -> dock same-period arrivals
-```
-
-One docking pass at the start would miss same-period trips, because those trips
-are created by `FormDeparturesPhase`.
-
-One docking pass at the end would make earlier arrivals unavailable for this
-period's demand.
-
-The split lets bikes that arrived before this period depart in this period, and
-it also lets trips that start and end in the same period dock after they are
-created.
+One docking pass at the start would miss same-period trips — they do not
+exist until `FormDeparturesPhase` creates them. One pass at the end would
+make earlier arrivals unavailable for this period's demand. The split gives
+both: earlier arrivals can serve this period, same-period trips can dock.
 
 ### Mechanics Decide, Phases Apply
 
-Mechanics functions answer questions such as:
-
-```text
-Which rows fit?
-Which rows overflow?
-Where should overflow bikes go?
-How many demanded trips can depart?
-```
-
-Phases then update inventory, update `in_transit`, and write journal events.
-
-This keeps the rules easy to test on small tables, while all journal writing
-still goes through `apply_step_events()`.
+Mechanics functions take plain tables and return decisions: which rows fit,
+where overflow goes, how many trips depart. Phases turn decisions into
+events and write them through `apply_step_events`. The rules stay testable
+on small tables, while all journal writing goes through one path.
