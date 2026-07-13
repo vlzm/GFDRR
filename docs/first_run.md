@@ -133,7 +133,7 @@ CSVs; a year of months is about 9 GB on disk.
 Download one month into `data/raw/` (the data folders are Notations.md §15):
 
 ```bash
-python -m gbp.ml.data --months 202601
+python -m gbp.loaders.download --months 202601
 ```
 
 Then run one scenario on it from the terminal:

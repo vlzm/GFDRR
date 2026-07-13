@@ -15,8 +15,8 @@ import types
 import pandas as pd
 import pytest
 
+from gbp.loaders.download import month_bounds
 from gbp.ml import monitoring
-from gbp.ml.data import month_bounds
 from gbp.ml.forecast import ForecastMeta, save_forecast
 
 CLASSIC = "classic_bike"

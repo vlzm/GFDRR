@@ -50,13 +50,8 @@ from gbp.loaders.dataloader_graph import (
     HISTORICAL_DEMAND_SCHEMA,
     get_forecast_periods_df,
 )
-from gbp.ml.data import (
-    load_weather_daily,
-    ml_dir,
-    month_bounds,
-    month_period_grid,
-    normalize_month,
-)
+from gbp.loaders.download import month_bounds, normalize_month
+from gbp.ml.data import load_weather_daily, ml_dir, month_period_grid
 from gbp.ml.features import HISTORY_WEEKS, build_features, clip_history_window
 from gbp.ml.models import DemandModel, create_model
 from gbp.model.journal_schema import schema_violations

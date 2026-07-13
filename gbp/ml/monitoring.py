@@ -56,7 +56,8 @@ from typing import Any
 import pandas as pd
 
 from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN
-from gbp.ml.data import ml_dir, month_bounds, normalize_month
+from gbp.loaders.download import month_bounds, normalize_month
+from gbp.ml.data import ml_dir
 from gbp.ml.features import HISTORY_FEATURES, WEATHER_FEATURES
 from gbp.ml.forecast import (
     ForecastMeta,

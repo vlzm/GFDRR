@@ -8,8 +8,10 @@ slot the engine reads).
 
 The process, one module per step:
 
-- ``data`` and ``station_status`` download the source files (trips, weather,
-  station-status snapshots) into ``data/raw/``;
+- ``data`` holds the forecasting data helpers: the ``data/ml/`` root, the
+  month period grid, and the weather download; ``station_status`` downloads
+  the station-status snapshots. The trip CSVs themselves come from
+  ``gbp/loaders/download.py``, shared with the base replay;
 - ``training`` builds the training table, one parquet partition per month
   under ``data/ml/training/``, with the feature columns from ``features``;
 - ``models`` holds the four ``DemandModel`` families (seasonal naive,

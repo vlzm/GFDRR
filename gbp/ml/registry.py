@@ -38,7 +38,8 @@ from mlflow.entities.model_registry import ModelVersion
 from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 
-from gbp.ml.data import ml_dir, normalize_month
+from gbp.loaders.download import normalize_month
+from gbp.ml.data import ml_dir
 from gbp.ml.models import DemandModel, load_model
 
 #: The one registered model every version belongs to.

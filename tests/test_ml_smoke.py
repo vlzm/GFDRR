@@ -13,8 +13,8 @@ import pandas as pd
 import pytest
 
 from gbp.loaders.dataloader_graph import HISTORICAL_DEMAND_SCHEMA
+from gbp.loaders.download import month_bounds
 from gbp.ml import registry
-from gbp.ml.data import month_bounds
 from gbp.ml.forecast import build_model_forecast, load_forecast
 from gbp.ml.pipeline import STEPS, run_pipeline
 from gbp.model.journal_schema import schema_violations

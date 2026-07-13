@@ -58,7 +58,8 @@ from collections.abc import Callable, Sequence
 import mlflow
 import pandas as pd
 
-from gbp.ml.data import load_weather_daily, month_bounds, month_period_grid, normalize_month
+from gbp.loaders.download import month_bounds, normalize_month
+from gbp.ml.data import load_weather_daily, month_period_grid
 from gbp.ml.forecast import forecast_input, naive_month_prediction
 from gbp.ml.metrics import forecast_metrics
 from gbp.ml.models import MODEL_FAMILIES, create_model

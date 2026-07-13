@@ -149,7 +149,7 @@ forecast --forecast-name <name>` saves a valid run artifact (empty
 Goal: many months of trips on disk, versioned, and a training table built
 from them.
 
-1. Downloader in `gbp/ml/data.py`: take a list of months, download the
+1. Downloader in `gbp/loaders/download.py`: take a list of months, download the
    monthly zip files from the public Citi Bike S3 bucket into `data/raw/`,
    skip months already present.
 2. Schema harmonization: the published schema changed in February 2021

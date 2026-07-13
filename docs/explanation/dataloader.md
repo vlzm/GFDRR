@@ -16,6 +16,7 @@ and the design.
 
 | File | Main role |
 |---|---|
+| `download.py` | Downloads the published monthly trip CSVs into `data/raw/` and loads files of either published schema into the one trips schema. |
 | `dataloader_raw.py` | Reads the trip CSV, builds raw tables, and owns `RawModelData`. |
 | `dataloader_graph.py` | Builds `ResolvedModelData` from `RawModelData`; owns `apply_truck_fleet`, `apply_forecast_demand`, and `attach_simulation`. |
 

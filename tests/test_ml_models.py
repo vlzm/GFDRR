@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from gbp.loaders.download import month_bounds
 from gbp.ml import features
 from gbp.ml.backtest import (
     EXPERIMENT_NAME,
@@ -17,7 +18,6 @@ from gbp.ml.backtest import (
     comparison_table,
     run_backtest,
 )
-from gbp.ml.data import month_bounds
 from gbp.ml.metrics import (
     align_forecast,
     busy_facility_ids,

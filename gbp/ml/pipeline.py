@@ -45,14 +45,14 @@ from collections.abc import Callable, Sequence
 import pandas as pd
 from mlflow.entities.model_registry import ModelVersion
 
-from gbp.ml.backtest import data_version, latest_comparison, run_backtest
-from gbp.ml.data import (
+from gbp.loaders.download import (
     download_months,
-    ml_dir,
     month_zip_keys,
     normalize_month,
     raw_trip_months,
 )
+from gbp.ml.backtest import data_version, latest_comparison, run_backtest
+from gbp.ml.data import ml_dir
 from gbp.ml.models import MODEL_FAMILIES, create_model
 from gbp.ml.registry import MlflowStore
 from gbp.ml.station_status import download_status_months, next_month

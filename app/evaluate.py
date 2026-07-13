@@ -50,8 +50,9 @@ from gbp.loaders.dataloader_graph import (
     apply_forecast_demand,
     restrict_demand_to_scenario,
 )
+from gbp.loaders.download import month_bounds, normalize_month
 from gbp.ml import forecast
-from gbp.ml.data import ml_dir, month_bounds, month_period_grid, normalize_month
+from gbp.ml.data import ml_dir, month_period_grid
 from gbp.ml.metrics import busy_facility_ids, forecast_metrics
 from gbp.ml.training import load_actual_month, training_dir
 

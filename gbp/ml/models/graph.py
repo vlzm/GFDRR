@@ -54,7 +54,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from gbp.ml.data import load_trips_any_schema, month_csvs, normalize_month
+from gbp.loaders.download import load_trips_any_schema, month_csvs, normalize_month
 from gbp.ml.features import FEATURE_COLUMNS, HISTORY_FEATURES, WEATHER_FEATURES
 from gbp.ml.models.base import DemandModel, fractional_demand
 
@@ -76,7 +76,7 @@ def station_graph_edges(months: list[str], raw: pathlib.Path | None = None) -> p
         csvs = month_csvs(normalize_month(month), raw)
         if not csvs:
             raise FileNotFoundError(
-                f"no raw CSVs for {month}; download them first (python -m gbp.ml.data)"
+                f"no raw CSVs for {month}; download them first (python -m gbp.loaders.download)"
             )
         for path in csvs:
             trips = load_trips_any_schema(str(path))
