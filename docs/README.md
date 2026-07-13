@@ -107,7 +107,11 @@ and how the trucks execute it period by period.
 schema, the builders, the read-models, the checks. [app.md](explanation/app.md): how a
 finished run becomes a saved artifact and how the web interface draws it.
 [api.md](explanation/api.md): the HTTP service that serves saved runs to clients and
-starts runs on a server.
+starts runs on a server. One more document covers the model around the
+simulator — [ml.md](explanation/ml.md): how raw trip files become a training
+table, the feature columns, the model families, the backtest and the
+two-level evaluation, the model registry, the retraining pipeline, and
+monitoring.
 
 Level 4a — exact contracts. [`Notations.md`](../Notations.md) (repository
 root) defines every column, status, and table name.

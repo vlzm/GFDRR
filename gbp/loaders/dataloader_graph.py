@@ -529,6 +529,55 @@ def map_od_matrix_by_hour_of_week(
     ].reset_index(drop=True)
 
 
+def restrict_demand_to_scenario(
+    demand_df: pd.DataFrame,
+    resolved: "ResolvedModelData",
+    periods_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, float]:
+    """Keep the demand rows the scenario can run; report the dropped share.
+
+    A forecast run maps the scenario's OD matrix onto the forecast periods by
+    hour of week, so a demand row can only run when its ``(facility,
+    commodity, hour of week)`` has OD rows in the scenario. Rows at stations
+    the scenario has never seen have no OD rows either, so one rule covers
+    both. :func:`apply_forecast_demand` refuses exactly the rows this cut
+    drops.
+
+    Parameters
+    ----------
+    demand_df : pandas.DataFrame
+        A demand table on the ``periods_df`` grid.
+    resolved : ResolvedModelData
+        The scenario whose OD matrix the run will use.
+    periods_df : pandas.DataFrame
+        The period grid of ``demand_df`` (maps ``period_id`` to wall-clock).
+
+    Returns
+    -------
+    tuple of (pandas.DataFrame, float)
+        The kept rows (same columns, sorted) and the dropped share of the
+        demand total (0.0 when nothing was dropped).
+    """
+    od = resolved.historical_od_matrix_df.merge(
+        resolved.periods_df[["period_id", "start_timestamp"]], on="period_id"
+    )
+    covered = (
+        od.assign(hour_of_week=hour_of_week(od["start_timestamp"]))[
+            ["source_id", "commodity_category", "hour_of_week"]
+        ]
+        .drop_duplicates()
+        .rename(columns={"source_id": "facility_id"})
+    )
+    rows = demand_df.merge(periods_df[["period_id", "start_timestamp"]], on="period_id")
+    rows["hour_of_week"] = hour_of_week(rows["start_timestamp"])
+    kept = rows.merge(covered, on=["facility_id", "commodity_category", "hour_of_week"])
+    total = demand_df["quantity"].sum()
+    dropped_share = float(1.0 - kept["quantity"].sum() / total) if total else 0.0
+    columns = list(HISTORICAL_DEMAND_SCHEMA.columns)
+    kept = kept[columns].sort_values(columns[:3]).reset_index(drop=True)
+    return kept, dropped_share
+
+
 def apply_forecast_demand(
     resolved: "ResolvedModelData",
     forecast_demand_df: pd.DataFrame,

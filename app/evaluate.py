@@ -48,15 +48,12 @@ from gbp.consumers.simulator import run_sized_scenario
 from gbp.loaders.dataloader_graph import (
     ResolvedModelData,
     apply_forecast_demand,
-    hour_of_week,
+    restrict_demand_to_scenario,
 )
 from gbp.ml import forecast
 from gbp.ml.data import ml_dir, month_bounds, month_period_grid, normalize_month
 from gbp.ml.metrics import busy_facility_ids, forecast_metrics
 from gbp.ml.training import load_actual_month, training_dir
-
-#: The columns of a demand table (``HISTORICAL_DEMAND_SCHEMA`` order).
-DEMAND_COLUMNS = ["period_id", "facility_id", "commodity_category", "quantity"]
 
 
 def evaluation_dir(month: str) -> pathlib.Path:
@@ -74,53 +71,6 @@ def actual_demand_table(month: str) -> pd.DataFrame:
     """
     counts = load_actual_month(month)
     return counts[counts["quantity"] > 0].reset_index(drop=True)
-
-
-def restrict_demand_to_scenario(
-    demand_df: pd.DataFrame,
-    graph_data: ResolvedModelData,
-    periods_df: pd.DataFrame,
-) -> tuple[pd.DataFrame, float]:
-    """Keep the demand rows the scenario can run; report the dropped share.
-
-    A forecast run maps the scenario's OD matrix onto the forecast periods by
-    hour of week, so a demand row can only run when its ``(facility,
-    commodity, hour of week)`` has OD rows in the scenario. Rows at stations
-    the scenario has never seen have no OD rows either, so one rule covers
-    both. ``apply_forecast_demand`` refuses exactly the rows this cut drops.
-
-    Parameters
-    ----------
-    demand_df : pandas.DataFrame
-        A demand table on the ``periods_df`` grid.
-    graph_data : ResolvedModelData
-        The scenario whose OD matrix the run will use.
-    periods_df : pandas.DataFrame
-        The period grid of ``demand_df`` (maps ``period_id`` to wall-clock).
-
-    Returns
-    -------
-    tuple of (pandas.DataFrame, float)
-        The kept rows (same columns, sorted) and the dropped share of the
-        demand total (0.0 when nothing was dropped).
-    """
-    od = graph_data.historical_od_matrix_df.merge(
-        graph_data.periods_df[["period_id", "start_timestamp"]], on="period_id"
-    )
-    covered = (
-        od.assign(hour_of_week=hour_of_week(od["start_timestamp"]))[
-            ["source_id", "commodity_category", "hour_of_week"]
-        ]
-        .drop_duplicates()
-        .rename(columns={"source_id": "facility_id"})
-    )
-    rows = demand_df.merge(periods_df[["period_id", "start_timestamp"]], on="period_id")
-    rows["hour_of_week"] = hour_of_week(rows["start_timestamp"])
-    kept = rows.merge(covered, on=["facility_id", "commodity_category", "hour_of_week"])
-    total = demand_df["quantity"].sum()
-    dropped_share = float(1.0 - kept["quantity"].sum() / total) if total else 0.0
-    kept = kept[DEMAND_COLUMNS].sort_values(DEMAND_COLUMNS[:3]).reset_index(drop=True)
-    return kept, dropped_share
 
 
 def ensure_forecast(
@@ -169,6 +119,7 @@ def _ensure_run(
     run_name: str,
     demand_source: str,
     forecast_name: str | None = None,
+    forecast_dropped_share: float | None = None,
     sizing_demand_df: pd.DataFrame | None = None,
     root: pathlib.Path | None = None,
     log: Callable[[str], None] = print,
@@ -204,6 +155,7 @@ def _ensure_run(
         number_of_periods=len(periods_df),
         demand_source=demand_source,
         forecast_name=forecast_name,
+        forecast_dropped_share=forecast_dropped_share,
         root=root,
     )
     meta = artifacts.load_run_meta(run_name, root)
@@ -330,6 +282,7 @@ def evaluate_month(
             run_name=run_name,
             demand_source="forecast",
             forecast_name=forecast_names[model_name],
+            forecast_dropped_share=dropped,
             sizing_demand_df=actual_df,
             root=root,
             log=log,

@@ -574,6 +574,11 @@ class RunMeta(pydantic.BaseModel):
     demand_source: str = "history"
     #: Name of the forecast artifact a forecast run used; None on history runs.
     forecast_name: str | None = None
+    #: Share of the forecast demand total cut before the run because the
+    #: scenario has no OD rows for it (stations or station-hours the trip CSV
+    #: has never seen). 0.0 when nothing was cut; None on history runs and on
+    #: artifacts saved before this field existed.
+    forecast_dropped_share: float | None = None
     #: File names of the raw source files the run was built from (for the
     #: canonical pipeline: the trip CSV). Empty for runs built from a
     #: synthetic journal, like the test fixtures.
@@ -637,6 +642,7 @@ def build_meta(
     rebalancing: dict[str, Any] | None = None,
     demand_source: str = "history",
     forecast_name: str | None = None,
+    forecast_dropped_share: float | None = None,
 ) -> RunMeta:
     """Build the ``meta.json`` model for one run: parameters, violations, totals.
 
@@ -683,6 +689,10 @@ def build_meta(
     forecast_name : str, optional
         The forecast artifact a forecast run used; pass it whenever
         ``demand_source="forecast"``, so the run names its forecast.
+    forecast_dropped_share : float, optional
+        Share of the forecast demand total cut before the run
+        (``restrict_demand_to_scenario``); pass it whenever
+        ``demand_source="forecast"``. None on history runs.
 
     Returns
     -------
@@ -704,6 +714,7 @@ def build_meta(
         created_at=datetime.datetime.now().isoformat(timespec="seconds"),
         demand_source=demand_source,
         forecast_name=forecast_name,
+        forecast_dropped_share=forecast_dropped_share,
         inputs=list(inputs),
         code_version=code_version(),
         violations=violations,
@@ -822,6 +833,7 @@ def save_scenario_run(
     rebalancing: dict[str, Any] | None = None,
     demand_source: str = "history",
     forecast_name: str | None = None,
+    forecast_dropped_share: float | None = None,
     root: pathlib.Path | None = None,
 ) -> pathlib.Path:
     """Save one finished sized run as a run artifact: build the tables, the meta, write.
@@ -858,6 +870,9 @@ def save_scenario_run(
         ``"forecast"``.
     forecast_name : str, optional
         The forecast artifact a forecast run used.
+    forecast_dropped_share : float, optional
+        Share of the forecast demand total cut before the run
+        (``restrict_demand_to_scenario``). None on history runs.
     root : pathlib.Path, optional
         Runs root override (defaults to :func:`runs_root`).
 
@@ -890,6 +905,7 @@ def save_scenario_run(
         rebalancing=rebalancing,
         demand_source=demand_source,
         forecast_name=forecast_name,
+        forecast_dropped_share=forecast_dropped_share,
     )
     return save_run(run_name, tables, meta, root)
 

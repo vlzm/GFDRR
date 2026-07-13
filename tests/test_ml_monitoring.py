@@ -17,7 +17,6 @@ import pytest
 
 from gbp.ml import monitoring
 from gbp.ml.data import month_bounds
-from gbp.ml.features import FEATURE_COLUMNS
 from gbp.ml.forecast import ForecastMeta, save_forecast
 
 CLASSIC = "classic_bike"
@@ -269,9 +268,13 @@ def test_drift_report_compares_the_month_against_the_champions_training_data(roo
     assert summary["champion_version"] == "7"
     assert summary["current_rows"] == 500
     columns = {c["column"]: c for c in summary["columns"]}
-    assert set(columns) == set(FEATURE_COLUMNS)
+    # Only the weather and demand-history columns are checked; the calendar
+    # columns (month above all) would drift by construction.
+    assert set(columns) == set(monitoring.DRIFT_COLUMNS)
+    assert "month" not in columns
     assert columns["temperature_max_c"]["drifted"] is True
-    assert columns["hour_of_day"]["drifted"] is False
+    assert columns["temperature_max_c"]["threshold"] == monitoring.DRIFT_NUM_THRESHOLD
+    assert columns["precipitation_mm"]["drifted"] is False
     assert summary["drifted_count"] >= 2  # both temperature columns moved
     html_path, _ = monitoring.drift_report_paths("202601", roots.monitoring)
     assert html_path.exists()

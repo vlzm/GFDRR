@@ -28,13 +28,16 @@ monitoring" page only reads it.
 The drift report (:func:`drift_report`) answers a different question: does
 the new month still look like the data the champion was trained on? Drift
 means the feature distributions moved. The report compares the new month's
-feature columns against the champion's training months (the monitored month
-itself is left out of the reference) with Evidently, on a row sample from
-both sides. Two files go to ``data/ml/monitoring/``: the full HTML report
-and a small JSON summary the monitoring page lists. Per column the drift
-measure is a distance (Wasserstein for numbers, Jensen-Shannon for
-categories) — the column has drifted when the distance is at or above its
-threshold.
+weather and demand-history columns (``DRIFT_COLUMNS``) against the
+champion's training months (the monitored month itself is left out of the
+reference) with Evidently, on a row sample from both sides. The calendar
+columns are not checked: their distributions are set by the calendar, not
+by the riders — one monitored month holds exactly one ``month`` value, so
+that column would be flagged every time and the flag would mean nothing.
+Two files go to ``data/ml/monitoring/``: the full HTML report and a small
+JSON summary the monitoring page lists. Per column the drift measure is the
+Wasserstein distance in units of the reference standard deviation — the
+column has drifted when the distance is at or above ``DRIFT_NUM_THRESHOLD``.
 
 Terminal use (score the month, then build its drift report)::
 
@@ -54,7 +57,7 @@ import pandas as pd
 
 from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN
 from gbp.ml.data import ml_dir, month_bounds, normalize_month
-from gbp.ml.features import FEATURE_COLUMNS
+from gbp.ml.features import HISTORY_FEATURES, WEATHER_FEATURES
 from gbp.ml.forecast import (
     ForecastMeta,
     forecast_periods_from_meta,
@@ -70,6 +73,19 @@ ROLLING_MONTHS = 3
 
 #: How many rows each side of the drift comparison is sampled down to.
 DRIFT_SAMPLE_ROWS = 200_000
+
+#: The columns the drift report checks: weather and demand history. The
+#: calendar columns (hour_of_day, day_of_week, month, is_holiday) are left
+#: out on purpose — their distributions are set by the calendar, so one
+#: monitored month against a mix of training months would flag them every
+#: time (the month column of one monitored month is a single value).
+DRIFT_COLUMNS = WEATHER_FEATURES + HISTORY_FEATURES
+
+#: When a column counts as drifted: its Wasserstein distance, in units of
+#: the reference standard deviation, is at or above this value. Evidently's
+#: default is 0.1 — a tenth of a standard deviation, which ordinary
+#: month-to-month variation crosses easily.
+DRIFT_NUM_THRESHOLD = 0.25
 
 #: The columns of one metrics-table row.
 METRICS_COLUMNS = [
@@ -347,10 +363,11 @@ def drift_report(
 ) -> pathlib.Path:
     """Compare the month's feature distributions against the champion's training data.
 
-    The reference side is the feature columns of the champion's training
-    months (read off their partitions, the monitored month itself left out);
-    the current side is the month's own partition. Both sides are sampled
-    down to ``sample_rows`` rows. The Evidently report goes to
+    The reference side is the drift columns (``DRIFT_COLUMNS``: weather and
+    demand history) of the champion's training months (read off their
+    partitions, the monitored month itself left out); the current side is
+    the month's own partition. Both sides are sampled down to
+    ``sample_rows`` rows. The Evidently report goes to
     ``drift_<month>.html`` and its summary to ``drift_<month>.json``
     (:func:`_drift_summary` plus the report's context: month, champion,
     reference months, row counts). Returns the JSON summary path.
@@ -380,7 +397,7 @@ def drift_report(
             f"the champion's training months give no reference besides {month} itself"
         )
 
-    current = pd.read_parquet(partition_path(month, training_root), columns=FEATURE_COLUMNS)
+    current = pd.read_parquet(partition_path(month, training_root), columns=DRIFT_COLUMNS)
     current = _sample_rows(current, sample_rows, seed)
     per_month = -(-sample_rows // len(reference_months))
     frames = []
@@ -391,16 +408,25 @@ def drift_report(
                 f"the champion trained on {reference_month} but its partition is gone; "
                 "rebuild it first (python -m gbp.ml.training)"
             )
-        frames.append(_sample_rows(pd.read_parquet(path, columns=FEATURE_COLUMNS), per_month, seed))
+        frames.append(_sample_rows(pd.read_parquet(path, columns=DRIFT_COLUMNS), per_month, seed))
     reference = pd.concat(frames, ignore_index=True)
 
     log(
         f"drift {month}: {len(current):,} current rows vs {len(reference):,} reference rows "
         f"({reference_months[0]}..{reference_months[-1]}, champion v{champion.version})"
     )
-    # Distance methods for every column, so one reading holds regardless of
-    # sample size: the column drifted when the distance >= its threshold.
-    report = Report([DataDriftPreset(num_method="wasserstein", cat_method="jensenshannon")])
+    # A distance method, so one reading holds regardless of sample size: the
+    # column drifted when the distance >= DRIFT_NUM_THRESHOLD. Every drift
+    # column is numeric, so only the numeric method is set.
+    report = Report(
+        [
+            DataDriftPreset(
+                columns=DRIFT_COLUMNS,
+                num_method="wasserstein",
+                num_threshold=DRIFT_NUM_THRESHOLD,
+            )
+        ]
+    )
     snapshot = report.run(reference_data=reference, current_data=current)
 
     html_path, summary_path = drift_report_paths(month, root)
@@ -419,7 +445,7 @@ def drift_report(
     }
     summary_path.write_text(json.dumps(summary, indent=2))
     log(
-        f"drift {month}: {summary['drifted_count']} of {len(FEATURE_COLUMNS)} feature "
+        f"drift {month}: {summary['drifted_count']} of {len(DRIFT_COLUMNS)} drift "
         f"columns drifted -> {summary_path}"
     )
     return summary_path

@@ -33,6 +33,7 @@ from gbp.loaders.dataloader_graph import (
     ResolvedModelData,
     apply_forecast_demand,
     apply_truck_fleet,
+    restrict_demand_to_scenario,
 )
 from gbp.loaders.dataloader_raw import RawModelData
 from gbp.logging import configure_logging
@@ -179,13 +180,24 @@ def run_scenario(
     homes = list(truck_homes) if truck_homes is not None else list(DEFAULT_TRUCK_HOMES)
     data = graph_data
     phases = None
+    forecast_dropped_share: float | None = None
     if demand_source == "forecast":
         assert forecast_name is not None
         progress(f"Loading forecast {forecast_name} and mapping the OD matrix onto its horizon")
         forecast_demand_df, forecast_meta = forecast.load_forecast(forecast_name)
-        data = apply_forecast_demand(
-            data, forecast_demand_df, forecast.forecast_periods_from_meta(forecast_meta)
+        forecast_periods_df = forecast.forecast_periods_from_meta(forecast_meta)
+        # A forecast can name stations or station-hours the scenario's trip
+        # CSV has never seen; those rows have no OD rows to run on, so they
+        # are cut first, like the evaluation does (app/evaluate.py).
+        forecast_demand_df, forecast_dropped_share = restrict_demand_to_scenario(
+            forecast_demand_df, data, forecast_periods_df
         )
+        if forecast_dropped_share > 0:
+            progress(
+                f"Cut {forecast_dropped_share:.2%} of the forecast demand: rows the "
+                "scenario has no OD rows for (unknown stations or station-hours)"
+            )
+        data = apply_forecast_demand(data, forecast_demand_df, forecast_periods_df)
     if rebalancing:
         progress(f"Applying the truck fleet: {len(homes)} trucks")
         data = apply_truck_fleet(data, homes, truck_capacity_bikes, DEFAULT_TRUCK_RATE)
@@ -221,6 +233,7 @@ def run_scenario(
         rebalancing=rebalancing_meta,
         demand_source=demand_source,
         forecast_name=forecast_name,
+        forecast_dropped_share=forecast_dropped_share,
         root=root,
     )
 
