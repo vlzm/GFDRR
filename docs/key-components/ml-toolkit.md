@@ -1,4 +1,4 @@
-# Demand forecasting
+# The ML toolkit — demand forecasting
 
 This document explains how `gbp/ml/` turns Citi Bike trip history into a
 forecast that the simulator can run.

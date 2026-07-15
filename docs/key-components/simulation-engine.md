@@ -1,4 +1,4 @@
-# The simulator
+# The simulation engine
 
 This document explains how one simulation run works. The simulator does three
 things:

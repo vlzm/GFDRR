@@ -1,6 +1,7 @@
-# The app
+# Visualization — from a finished run to the screen
 
-This document explains `app/` — the path from a finished run to the screen.
+This document explains `app/`, the visualization side of the framework: the
+path from a finished run to the screen.
 The app has three parts, in the order a run passes through them:
 
 1. `runner.py` runs one scenario end to end and saves the result.

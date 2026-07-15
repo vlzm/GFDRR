@@ -1,16 +1,34 @@
-# The data loaders
+# The data model
 
-This document explains `gbp/loaders/`: the code that turns the raw Citi Bike
-trip CSV into `ResolvedModelData`, the input tables the simulator reads. The
-simulator reads them through its contract `ScenarioInputs`
-(`gbp/consumers/simulator/inputs.py`); `ResolvedModelData` is one supplier of
-that contract.
+This document explains the data model and the code that builds it,
+`gbp/loaders/`: from the raw Citi Bike trip CSV to `ResolvedModelData`, the
+input tables the simulator reads. The simulator reads them through its
+contract `ScenarioInputs` (`gbp/consumers/simulator/inputs.py`);
+`ResolvedModelData` is one supplier of that contract.
 
-The terms are the same as in [`Notations.md`](../../Notations.md). What the
-simulator does with these tables is [simulation-engine.md](simulation-engine.md); the journal
-functions used here are explained in [flow-journal.md](flow-journal.md).
-Each function's exact behavior is in its docstring — this page gives the map
-and the design.
+## The Four Entities
+
+Every table the loaders build is about one of the four entities of a flow
+graph, with the words fixed in [Notations.md](../../Notations.md):
+
+- `commodity` (§8) — what moves: a bike.
+- `edge` (§4b) — along what: a pair of facilities with a distance and a
+  travel time, answered by `routes` (§13).
+- `resource` (§5b) — what carries commodities between facilities: a truck.
+- `facility` (§4) — where a flow starts, ends, and where commodities are
+  stored: a station or a depot.
+
+The raw files use their own column names (`station_id`, `rideable_type`);
+canonical names exist only past the loader boundary. The rule and the full
+rename mapping are "The raw → canonical boundary" in
+[Notations.md §4](../../Notations.md#4-facility-and-its-roles-in-a-trip).
+How the four entities map onto the Citi Bike domain end to end is the
+scenario page, [citibike.md](../scenarios/citibike.md).
+
+What the simulator does with these tables is
+[simulation-engine.md](simulation-engine.md); the journal functions used
+here are explained in [flow-journal.md](flow-journal.md). Each function's
+exact behavior is in its docstring — this page gives the map and the design.
 
 ## Code Map
 

@@ -1,8 +1,8 @@
-# Scenario catalog: flow journal examples
+# Worked examples — the flow journal on small scenarios
 
-This document lists the canonical scenarios of the simulator. Each scenario is
-a small example about one bike (or one truck route), a sequence diagram, and a
-small journal table with real values. The tables are not written by hand: each
+This document is the catalog of worked examples, one per simulator mechanic.
+Each example is a small synthetic scenario about one bike (or one truck
+route), a sequence diagram, and a small journal table with real values. The tables are not written by hand: each
 one was produced by running the real engine on a small synthetic scenario, and
 a test compares the document with a fresh run cell by cell. If the code
 changes the journal rows, the test fails before this document can go out of

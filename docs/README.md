@@ -24,13 +24,12 @@ Tutorials: follow the steps and compare with the expected output.
 ## Key Components
 
 Explanations: how each part works and why it is built this way — no
-step-by-step instructions. Read the first two pages first; every other page
-assumes them.
+step-by-step instructions. Read the first page first; every other page
+assumes it.
 
-- [concepts.md](concepts.md) — the five concepts: period, demand, station
-  inventory, flow journal, run artifact.
-- [architecture.md](explanation/architecture.md) — the system as diagrams
-  at three zoom levels, ending with the full module map.
+- [overview.md](key-components/overview.md) — the five concepts (period,
+  demand, station inventory, flow journal, run artifact), then the system
+  as diagrams at three zoom levels, ending with the full module map.
 - [data-model.md](key-components/data-model.md) — the loaders: from the raw
   trip CSV to the input tables the simulator reads.
 - [flow-journal.md](key-components/flow-journal.md) — the journal library

@@ -1,9 +1,97 @@
-# Architecture — the system in diagrams
+# Overview — the five concepts and the system in diagrams
 
-This page shows the system at three zoom levels, then gives a module depth
-table. The diagrams stay high-level on purpose: every arrow names what one
-block gives another, such as "passes the flow journal" — not a function
-signature. Exact names and table contracts live in
+This page is the starting point of Key Components. It first defines the five
+concepts every other page assumes — period, demand, station inventory, flow
+journal, run artifact — then shows the system at three zoom levels and ends
+with a module depth table. The exact contracts live in
+[Notations.md](../../Notations.md) — open it by section when you need a
+column list, not before.
+
+## The five concepts
+
+### Period
+
+A period is one step of the simulation clock. Everything in a run — a
+departure, a docking, a redirect — happens in some period, identified by
+`period_id`: 0, 1, 2, … By default one period is one hour (`period_len`), and
+period 0 starts at `t0`, the hour of the earliest historical trip.
+
+Example: with `t0 = 2026-01-01 00:00`, period 5 covers 05:00–06:00 of
+January 1. A trip that departs in period 5 and docks in period 6 took one
+period.
+
+Exact contract: [Notations.md §6](../../Notations.md#6-time).
+
+### Demand
+
+Demand is the number of trips users wanted to start, per period, station, and
+bike type: a table with the columns `period_id`, `facility_id`,
+`commodity_category`, `quantity`. The simulator reads this table the same way
+whether the quantities come from history or from a forecast model. Wanted does
+not mean happened: demand splits exactly into `departed` plus `lost` with
+`reason = "stockout"`.
+
+Example: demand of 5 at station `s1` in period 3, but only 3 bikes are docked
+there — 3 trips depart and 2 are lost to a stockout.
+
+Exact contract: [Notations.md §2](../../Notations.md#2-core-state) and
+[§7](../../Notations.md#7-departures).
+
+### Station inventory
+
+Inventory is how many bikes each station holds at a moment: one row per
+station and bike type, columns `facility_id`, `commodity_category`,
+`quantity`. It changes only by whole bikes — `-1` when a bike leaves a dock,
+`+1` when a bike docks — and every change is recorded as a flow event, so
+inventory at any moment can be recomputed from the initial inventory plus the
+journal.
+
+Example: `s1` starts with 5 bikes; one trip departs in period 0; from that
+step on `s1` holds 4.
+
+Exact contract: [Notations.md §2](../../Notations.md#2-core-state).
+
+### Flow journal
+
+The flow journal is the run's event table and its single source of truth: one
+row per event of one bike's movement, and rows are only appended, never
+edited. `event_type` is one of four outcomes — `departed`, `arrived`,
+`redirected`, `lost`. Everything else the project shows (inventories, maps,
+costs) is computed from the journal.
+
+Example: the smallest journal — one trip `s1 → s2`, one flow, two rows
+(showing five of the columns; §0 lists them all):
+
+| flow_id | event_type | source_id | planned_target_id | period_id |
+|---|---|---|---|---|
+| sim_0_0 | departed | s1 | s2 | 0 |
+| sim_0_0 | arrived | s1 | s2 | 1 |
+
+Exact contract: [Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table)
+(the columns) and [§1](../../Notations.md#1-the-four-flow-outcomes-and-the-two-reasons)
+(the four outcomes).
+
+### Run artifact
+
+A run artifact is a finished run saved to disk: the folder
+`data/runs/<run_name>/`, built once by `app/artifacts.py`. It holds
+`meta.json` (the run's parameters, totals, and invariant violations) and five
+parquet tables; the two you meet first are `flows.parquet` — the journal —
+and `panel.parquet` — per period and station: inventory, demand, departures,
+losses. The web interface only reads these files; it never simulates.
+
+Example: `python app/runner.py --run-name demo` writes `data/runs/demo/`, and
+`streamlit run app/main.py` lists it.
+
+Exact contract: [Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads).
+
+Scenarios 1–3 of [worked-examples.md](worked-examples.md) show these five
+concepts working together on real journal tables, each re-run by a test.
+
+The rest of this page shows the system at three zoom levels, then gives a
+module depth table. The diagrams stay high-level on purpose: every arrow
+names what one block gives another, such as "passes the flow journal" — not
+a function signature. Exact names and table contracts live in
 [Notations.md](../../Notations.md) and in the per-module documents linked
 below.
 
@@ -14,14 +102,14 @@ flowchart LR
     user["User<br/>terminal + browser"]
     csv["Citi Bike trip CSVs<br/>data/raw/"]
     osrm["OSRM server<br/>optional, local"]
-    system["Citi Bike Simulation Platform<br/>runs scenarios, saves them, shows them"]
+    system["The framework (this repository)<br/>runs scenarios, saves them, shows them"]
 
     user -->|"starts a run; browses finished runs"| system
     csv -->|"one month of historical trips"| system
     system -.->|"in osrm mode, asks once per scenario for the<br/>facility-to-facility distance table"| osrm
 ```
 
-The platform takes one month of published Citi Bike trips and replays that
+The framework takes one month of published Citi Bike trips and replays that
 demand period by period, with optional changes (scaled demand, overnight
 rebalancing by truck). It can also run on predicted demand: a model trained
 on past months saves a forecast demand table, and a forecast run
@@ -64,27 +152,27 @@ flowchart LR
 
 One line per block, with its document:
 
-- **loaders** ([data-model.md](../key-components/data-model.md)) — resolve the raw trip CSV
+- **loaders** ([data-model.md](data-model.md)) — resolve the raw trip CSV
   into `ResolvedModelData`, the input tables of one scenario. The simulator
   is typed against `ScenarioInputs` (`gbp/consumers/simulator/inputs.py`);
   `ResolvedModelData` is one supplier of that contract.
-- **simulator** ([simulation-engine.md](../key-components/simulation-engine.md)) — plays the scenario period
+- **simulator** ([simulation-engine.md](simulation-engine.md)) — plays the scenario period
   by period and produces the flow journal. Overnight rebalancing
-  ([rebalancing.md](../key-components/rebalancing.md)) is an opt-in part of it.
-- **artifact builder** ([visualization.md](../key-components/visualization.md)) — turns a finished run into a run
+  ([rebalancing.md](rebalancing.md)) is an opt-in part of it.
+- **artifact builder** ([visualization.md](visualization.md)) — turns a finished run into a run
   artifact: a folder of tables plus `meta.json`.
-- **web interface** ([visualization.md](../key-components/visualization.md)) — saved-run pages load saved tables
+- **web interface** ([visualization.md](visualization.md)) — saved-run pages load saved tables
   and draw them; the `Run scenario` page starts a run.
 - **run-artifact API** ([api.md](../reference/api.md)) — serves the same folders over
   HTTP and can start new runs.
-- **demand forecasting** ([ml-toolkit.md](../key-components/ml-toolkit.md)) — trains demand models on past
+- **demand forecasting** ([ml-toolkit.md](ml-toolkit.md)) — trains demand models on past
   months, keeps versions in a local MLflow store, saves forecasts under
   `data/ml/forecasts/`. A forecast run is the same run chain with one
   substitution: the forecast demand table takes the place of the historical
   demand ([decision record](../decisions/forecast-replaces-only-demand.md)).
 
 Two shared libraries serve several blocks, so they are not separate blocks
-here: `gbp/model/` ([flow-journal.md](../key-components/flow-journal.md)) owns the journal's
+here: `gbp/model/` ([flow-journal.md](flow-journal.md)) owns the journal's
 event schema, its builders and its read-models; `gbp/routing.py` answers
 distance and travel-time questions for facility pairs. `app/runner.py` runs
 the full sequence from CSV to saved folder; the terminal, the API and the
@@ -265,7 +353,7 @@ review the design.
 No test catches a stale arrow, so the arrows stay high-level: domain words,
 no signatures, no column names. Update this page only when a module appears,
 disappears, or changes what it takes or gives. How a module works inside
-belongs to the per-module documents ([data-model.md](../key-components/data-model.md),
-[simulation-engine.md](../key-components/simulation-engine.md), [rebalancing.md](../key-components/rebalancing.md),
-[flow-journal.md](../key-components/flow-journal.md), [visualization.md](../key-components/visualization.md), [api.md](../reference/api.md),
-[ml-toolkit.md](../key-components/ml-toolkit.md)).
+belongs to the per-module documents ([data-model.md](data-model.md),
+[simulation-engine.md](simulation-engine.md), [rebalancing.md](rebalancing.md),
+[flow-journal.md](flow-journal.md), [visualization.md](visualization.md), [api.md](../reference/api.md),
+[ml-toolkit.md](ml-toolkit.md)).

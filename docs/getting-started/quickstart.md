@@ -69,7 +69,7 @@ it at `s2` in period 1. The inventory confirms it: `s1` went from 5 bikes to
 the departure is step 0, the docking is step 1 (Notations.md §0.1).
 
 Note: the console prints missing values as `<NA>` and quantities as floats
-(`4.0`); this page writes `NA` and `4`, like the [scenario catalog](../key-components/worked-examples.md).
+(`4.0`); this page writes `NA` and `4`, like the [worked examples](../key-components/worked-examples.md).
 
 ## Run 2: a full dock forces a redirect
 
@@ -118,7 +118,7 @@ bikes raised `s2` from 50 − 3 departed to 51.
 - [ui.md](ui.md) — run the simulator on a month of real trips and browse
   the saved run in the web interface (needs the data download from
   [installation.md](installation.md), step 2).
-- [Scenario catalog](../key-components/worked-examples.md) — the same kind of story for
+- [Worked examples](../key-components/worked-examples.md) — the same kind of story for
   every mechanic: stockout, delayed redirect, redirect chain, truck
   rebalancing. Each table there is checked against a fresh engine run by
   `tests/test_docs_scenarios.py`.
