@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Citi Bike Simulation Platform — vertical bike-sharing simulation built on the Citi Bike domain. Current phase: **demand forecasting** — a model predicts future demand, and the simulator runs on that forecast next to the base replay on history. Plan: `docs/plans/ml_demand_forecast_plan.md`.
+A framework for problems on flow graphs — networks where commodities move between facilities; the first and so far only scenario is the Citi Bike bike-sharing system in New York City. Current phase: **demand forecasting** — a model predicts future demand, and the simulator runs on that forecast next to the base replay on history. Plan: `docs/plans/ml_demand_forecast_plan.md`.
 
 **Source of truth:** the canonical scenario is two runs. The base replay stays in `notebooks/test_pipeline.ipynb`, unchanged. The forecast run (Notations.md §11) gets a second notebook next to it, `notebooks/forecast_pipeline.ipynb`, created in phase 1 of the plan. Everything in the codebase must serve one of these two runs. If it doesn't, it should be removed.
 
@@ -59,7 +59,7 @@ Target (code, then narration — write like this):
 
 ## Codebase Rules
 
-- **Vertical, not horizontal.** No "domain-agnostic" abstractions. If the canonical scenario doesn't use it, it doesn't belong in the codebase.
+- **Vertical, not horizontal.** No "domain-agnostic" abstractions. If the canonical scenario doesn't use it, it doesn't belong in the codebase. The flow-graph sentence at the top of this file describes the data model, not a promise of a domain-independent layer — do not build abstractions to match it.
 - **Minimalism.** Code must be hackable. No factories, heavy DI containers, or hidden magic.
 - **Vectorization first.** All math via pandas/NumPy. No `for` loops over data in hot paths.
 - **Strict typing.** Pydantic for all contracts. Type hints on all public functions.

@@ -207,6 +207,16 @@ correct in `dataloader_raw.py` only. The loaders rename them at the boundary:
 `rideable_type` → `commodity_category`. Past the loader, only the canonical
 names exist.
 
+### 4b. Edge (the pair of facilities a flow moves along)
+
+| Canonical | Meaning |
+|---|---|
+| `edge` | A pair of facilities with a distance and a travel time between them. There is no edge table in the code today: edges appear as the answers of `routes` (§13) — `distance_km(source, target)` and `duration_periods(source, target)`. |
+
+With `facility` (§4), `resource` (§5b) and `commodity` (§8), `edge` completes
+the four entities of a flow graph: what moves (commodity), from where to where
+(facility), along what (edge), carried by what (resource).
+
 ---
 
 ## 5. Planned vs realized
@@ -383,6 +393,9 @@ dictionaries and the KPI row are all built from it.
 ---
 
 ## 13. Routing (distance and travel time between facilities)
+
+Routing is how an `edge` (§4b) shows up in the code: `routes` answers the
+distance and the travel time for any pair of facilities.
 
 | Canonical | Meaning | Instead of |
 |---|---|---|

@@ -1,4 +1,4 @@
-"""Citi Bike Simulation Platform — vertical bike-sharing simulation.
+"""A framework for problems on flow graphs; the first scenario is Citi Bike NYC.
 
 Top-level convenience imports so users can write::
 

@@ -1,8 +1,10 @@
 # Citi Bike Simulation Platform
 
-A bike-sharing simulator built on the Citi Bike domain: the `gbp/` package runs
-the simulation, the `app/` folder is a Streamlit web interface that shows saved
-runs. The canonical scenario is two runs: the base replay of history in
+A framework for problems on flow graphs — networks where commodities move
+between facilities; the first and so far only scenario is the Citi Bike
+bike-sharing system in New York City. The `gbp/` package runs the simulation,
+the `app/` folder is a Streamlit web interface that shows saved runs. The
+canonical scenario is two runs: the base replay of history in
 `notebooks/test_pipeline.ipynb` and the run on forecast demand in
 `notebooks/forecast_pipeline.ipynb`.
 
