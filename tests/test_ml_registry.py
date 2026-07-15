@@ -117,6 +117,33 @@ def test_promotion_moves_the_alias_and_tags_the_old_champion(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# The comparison storage seam
+# ---------------------------------------------------------------------------
+def test_latest_comparison_is_none_on_an_empty_store(tmp_path):
+    store = registry.MlflowStore(tmp_path / "mlflow")
+    assert store.latest_comparison() is None
+
+
+def test_log_comparison_round_trips_the_table_and_data_version(tmp_path):
+    store = registry.MlflowStore(tmp_path / "mlflow")
+    first = comparison_frame({"seasonal_naive": 1.0, "lightgbm": 0.8})
+    store.log_comparison(first, params={"data_version": "v1", "n_splits": 3})
+
+    saved = store.latest_comparison()
+    assert saved is not None
+    assert saved.data_version == "v1"
+    pd.testing.assert_frame_equal(saved.table, first)
+
+    # A second write is the one that latest_comparison returns.
+    second = comparison_frame({"seasonal_naive": 0.5})
+    store.log_comparison(second, params={"data_version": "v2"})
+    newest = store.latest_comparison()
+    assert newest is not None
+    assert newest.data_version == "v2"
+    pd.testing.assert_frame_equal(newest.table, second)
+
+
+# ---------------------------------------------------------------------------
 # The promote rule
 # ---------------------------------------------------------------------------
 def test_promote_decision_first_version_needs_no_champion():

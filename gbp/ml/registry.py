@@ -30,10 +30,13 @@ promotes or keeps the champion by the backtest comparison.
 
 from __future__ import annotations
 
+import dataclasses
 import pathlib
 import tempfile
+import typing
 
 import mlflow
+import pandas as pd
 from mlflow.entities.model_registry import ModelVersion
 from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
@@ -50,6 +53,25 @@ CHAMPION_ALIAS = "champion"
 
 #: The experiment the training runs (one per registered version) log into.
 TRAINING_EXPERIMENT = "demand-training"
+
+#: The experiment the backtest runs (per split and per model) log into. The
+#: cross-model comparison is one more run in it, stored by the two methods
+#: below.
+BACKTEST_EXPERIMENT = "demand-backtest"
+
+#: How a saved comparison is found inside the backtest experiment: the run
+#: name and the CSV file name. Only :meth:`MlflowStore.log_comparison` and
+#: :meth:`MlflowStore.latest_comparison` know them.
+_COMPARISON_RUN_NAME = "comparison"
+_COMPARISON_FILE = "comparison.csv"
+
+
+@dataclasses.dataclass(frozen=True)
+class BacktestComparison:
+    """One saved comparison: the cross-model table and the data version it scored."""
+
+    table: pd.DataFrame
+    data_version: str
 
 
 def version_tags(family: str, train_months: list[str], data_version: str) -> dict[str, str]:
@@ -235,3 +257,51 @@ class MlflowStore:
                 "first (python -m gbp.ml.pipeline)"
             )
         return self.load_version_model(version), version
+
+    def log_comparison(self, table: pd.DataFrame, *, params: dict[str, object]) -> None:
+        """Write the backtest comparison: its parameters and the table as one CSV.
+
+        The read half is :meth:`latest_comparison`; together they are the
+        only code that knows how a comparison is stored. ``params`` are the
+        backtest settings the writer wants kept next to the table (the month
+        span, the split count, the model families, the data version).
+        """
+        self.set_experiment(BACKTEST_EXPERIMENT)
+        with mlflow.start_run(run_name=_COMPARISON_RUN_NAME):
+            mlflow.log_params(params)
+            with tempfile.TemporaryDirectory() as folder:
+                path = pathlib.Path(folder) / _COMPARISON_FILE
+                table.to_csv(path, index=False)
+                mlflow.log_artifact(str(path))
+
+    def latest_comparison(self) -> BacktestComparison | None:
+        """Read the newest saved comparison back, or None if there is none.
+
+        This is how a standalone promote step finds the scores when the
+        backtest ran in an earlier command — backtest state lives in MLflow,
+        not in the process.
+        """
+        self.activate()
+        experiment = mlflow.get_experiment_by_name(BACKTEST_EXPERIMENT)
+        if experiment is None:
+            return None
+        runs = typing.cast(
+            pd.DataFrame,
+            mlflow.search_runs(
+                [experiment.experiment_id],
+                filter_string=f"tags.mlflow.runName = '{_COMPARISON_RUN_NAME}'",
+                order_by=["attributes.start_time DESC"],
+                max_results=1,
+            ),
+        )
+        if runs.empty:
+            return None
+        newest = runs.iloc[0]
+        with tempfile.TemporaryDirectory() as folder:
+            path = mlflow.artifacts.download_artifacts(
+                f"runs:/{newest['run_id']}/{_COMPARISON_FILE}", dst_path=folder
+            )
+            table = pd.read_csv(path)
+        return BacktestComparison(
+            table=table, data_version=str(newest.get("params.data_version", ""))
+        )

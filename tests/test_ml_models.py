@@ -13,7 +13,6 @@ import pytest
 from gbp.loaders.download import month_bounds
 from gbp.ml import features
 from gbp.ml.backtest import (
-    EXPERIMENT_NAME,
     backtest_splits,
     comparison_table,
     run_backtest,
@@ -27,7 +26,7 @@ from gbp.ml.metrics import (
 )
 from gbp.ml.models import MODEL_FAMILIES, create_model
 from gbp.ml.models.graph import GraphSageModel, station_graph_edges
-from gbp.ml.registry import MlflowStore
+from gbp.ml.registry import BACKTEST_EXPERIMENT, MlflowStore
 
 CLASSIC = "classic_bike"
 
@@ -411,7 +410,7 @@ def test_run_backtest_logs_every_split_to_mlflow(tmp_path):
     import mlflow
 
     store.activate()
-    runs = mlflow.search_runs(experiment_names=[EXPERIMENT_NAME])
+    runs = mlflow.search_runs(experiment_names=[BACKTEST_EXPERIMENT])
     names = set(runs["tags.mlflow.runName"])
     assert names == {"seasonal_naive-202504", "comparison"}
     model_run = runs[runs["tags.mlflow.runName"] == "seasonal_naive-202504"].iloc[0]

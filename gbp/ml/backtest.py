@@ -29,10 +29,10 @@ month forecast of each held-out month (``naive_month_prediction`` in
 ``gbp/ml/forecast.py``). One asymmetry to know: the families are scored on
 their fractional demand, while the shared naive baseline goes through
 ``predict_horizon`` and is therefore rounded to whole bikes before its
-score is computed. How that run is stored is this module's own
-knowledge: the write half (``_log_comparison``) and the read half
-(:func:`latest_comparison`, used by the pipeline's promote step) live here
-side by side.
+score is computed. How that run is stored is the store's knowledge:
+:meth:`gbp.ml.registry.MlflowStore.log_comparison` writes it and
+:meth:`~gbp.ml.registry.MlflowStore.latest_comparison` (used by the
+pipeline's promote step) reads it back.
 
 Terminal use (all four families, three splits, all partitions on disk)::
 
@@ -52,7 +52,6 @@ import pathlib
 import subprocess
 import tempfile
 import time
-import typing
 from collections.abc import Callable, Sequence
 
 import mlflow
@@ -63,21 +62,13 @@ from gbp.ml.data import load_weather_daily, month_period_grid
 from gbp.ml.forecast import forecast_input, naive_month_prediction
 from gbp.ml.metrics import forecast_metrics
 from gbp.ml.models import MODEL_FAMILIES, create_model
-from gbp.ml.registry import MlflowStore
+from gbp.ml.registry import BACKTEST_EXPERIMENT, MlflowStore
 from gbp.ml.training import (
     load_actual_month,
     load_history_counts,
     load_training_table,
     training_dir,
 )
-
-#: The one MLflow experiment all model families log into.
-EXPERIMENT_NAME = "demand-backtest"
-
-#: How a saved comparison is found inside the experiment: the run name and
-#: the CSV file name. Only the write and read halves below know them.
-_COMPARISON_RUN_NAME = "comparison"
-_COMPARISON_FILE = "comparison.csv"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -187,74 +178,6 @@ def comparison_table(
     return table.reset_index()
 
 
-def _log_comparison(
-    table: pd.DataFrame,
-    *,
-    months: Sequence[str],
-    model_names: Sequence[str],
-    n_splits: int,
-    version: str,
-) -> None:
-    """Write the comparison run: the backtest parameters and the table as one CSV.
-
-    The read half is :func:`latest_comparison`; together they are the only
-    code that knows how a comparison is stored.
-    """
-    with mlflow.start_run(run_name=_COMPARISON_RUN_NAME):
-        mlflow.log_params(
-            {
-                "months": f"{sorted(months)[0]}..{sorted(months)[-1]}",
-                "n_splits": n_splits,
-                "models": " ".join(model_names),
-                "data_version": version,
-            }
-        )
-        with tempfile.TemporaryDirectory() as folder:
-            path = pathlib.Path(folder) / _COMPARISON_FILE
-            table.to_csv(path, index=False)
-            mlflow.log_artifact(str(path))
-
-
-@dataclasses.dataclass(frozen=True)
-class BacktestComparison:
-    """One saved comparison: the cross-model table and the data version it scored."""
-
-    table: pd.DataFrame
-    data_version: str
-
-
-def latest_comparison(store: MlflowStore | None = None) -> BacktestComparison | None:
-    """Read the newest saved comparison back from the store, or None if there is none.
-
-    This is how a standalone promote step finds the scores when the backtest
-    ran in an earlier command — backtest state lives in MLflow, not in the
-    process.
-    """
-    store = store or MlflowStore()
-    store.activate()
-    experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
-    if experiment is None:
-        return None
-    runs = typing.cast(
-        pd.DataFrame,
-        mlflow.search_runs(
-            [experiment.experiment_id],
-            filter_string=f"tags.mlflow.runName = '{_COMPARISON_RUN_NAME}'",
-            order_by=["attributes.start_time DESC"],
-            max_results=1,
-        ),
-    )
-    if runs.empty:
-        return None
-    newest = runs.iloc[0]
-    with tempfile.TemporaryDirectory() as folder:
-        path = mlflow.artifacts.download_artifacts(
-            f"runs:/{newest['run_id']}/{_COMPARISON_FILE}", dst_path=folder
-        )
-        table = pd.read_csv(path)
-    return BacktestComparison(table=table, data_version=str(newest.get("params.data_version", "")))
-
-
 def run_backtest(
     months: Sequence[str],
     model_names: Sequence[str] = MODEL_FAMILIES,
@@ -279,7 +202,7 @@ def run_backtest(
     version = data_version()
 
     store = store or MlflowStore()
-    store.set_experiment(EXPERIMENT_NAME)
+    store.set_experiment(BACKTEST_EXPERIMENT)
 
     records: list[dict[str, object]] = []
     baseline_records: list[dict[str, object]] = []
@@ -325,8 +248,14 @@ def run_backtest(
         del train_table, features
 
     table = comparison_table(records, baseline_records)
-    _log_comparison(
-        table, months=months, model_names=model_names, n_splits=n_splits, version=version
+    store.log_comparison(
+        table,
+        params={
+            "months": f"{sorted(months)[0]}..{sorted(months)[-1]}",
+            "n_splits": n_splits,
+            "models": " ".join(model_names),
+            "data_version": version,
+        },
     )
     return table
 

@@ -51,7 +51,7 @@ from gbp.loaders.download import (
     normalize_month,
     raw_trip_months,
 )
-from gbp.ml.backtest import data_version, latest_comparison, run_backtest
+from gbp.ml.backtest import data_version, run_backtest
 from gbp.ml.data import ml_dir
 from gbp.ml.models import MODEL_FAMILIES, create_model
 from gbp.ml.registry import MlflowStore
@@ -460,7 +460,7 @@ def run_pipeline(
     if "promote" not in ordered:
         return None
     if comparison is None and champion is not None and not already_champion:
-        saved = latest_comparison(store)
+        saved = store.latest_comparison()
         if saved is not None:
             if saved.data_version == version:
                 comparison = saved.table
