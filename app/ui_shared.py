@@ -86,7 +86,7 @@ def table_cache_key(run_name: str, table: str) -> float:
     """Cache key of one saved table: the file mtime locally, a constant over HTTP.
 
     The backend owns the rule (a local file can be rewritten; a served
-    artifact never changes — docs/explanation/api.md).
+    artifact never changes — docs/reference/api.md).
     """
     return backend.current().table_cache_key(run_name, table)
 

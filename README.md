@@ -120,7 +120,7 @@ of the four that did not fit: it departs `s1` toward `s3`, bounces off the
 full dock (`redirected`, reason `dock_full`), and docks at the nearest free
 station `s2`. The inventory confirms it: `s3` holds exactly its capacity
 of 2. The step-by-step walkthrough of this run is
-[docs/first_run.md](docs/first_run.md).
+[docs/getting-started/quickstart.md](docs/getting-started/quickstart.md).
 
 ## Web interface
 
@@ -143,7 +143,7 @@ saved runs. Other pages draw the station map, individual trips, truck
 routes, costs, and the model-monitoring report.
 
 The same run artifacts are served over HTTP by the run-artifact API:
-`uvicorn api:app --app-dir app` ([docs/explanation/api.md](docs/explanation/api.md)).
+`uvicorn api:app --app-dir app` ([docs/reference/api.md](docs/reference/api.md)).
 
 ## Run with Docker
 
@@ -178,7 +178,7 @@ repository layout.
 ```
 <DATA_DIR>/
   raw/    # source trip CSVs (e.g. 202601-citibike-tripdata_1.csv)
-  osrm/   # road graph files for the OSRM server (created by the setup in docs/guides/osrm_setup.md)
+  osrm/   # road graph files for the OSRM server (created by the setup in docs/how-to/set-up-osrm.md)
   runs/   # saved run artifacts, one folder per run
 ```
 

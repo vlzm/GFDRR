@@ -19,9 +19,9 @@ and the design.
 |---|---|
 | `runner.py` | Owns `build_graph_data` and `run_scenario`; the terminal entry point (`python app/runner.py --help` lists the flags). |
 | `artifacts.py` | Owns the `build_*` functions, the `METRICS` table, and save/load. |
-| `evaluate.py` | The two-level evaluation (Notations.md §17): a second terminal entry point ([ml.md](ml.md)). |
+| `evaluate.py` | The two-level evaluation (Notations.md §17): a second terminal entry point ([ml-toolkit.md](ml-toolkit.md)). |
 | `main.py` | The Streamlit entry point: the page list and navigation. |
-| `backend.py` | The one place the app chooses its backend — local files, or HTTP when `API_URL` is set ([api.md](api.md)). |
+| `backend.py` | The one place the app chooses its backend — local files, or HTTP when `API_URL` is set ([api.md](../reference/api.md)). |
 | `ui_shared.py` | Shared page helpers: cached typed loaders, scenario pickers, the KPI row, charts. |
 | `views/*.py` | One file per page. Every page reads saved tables and draws them. |
 
@@ -57,7 +57,7 @@ run is created. `DATA_DIR` moves the data folder.
 
 `runner.py` splits the work by runtime. `build_graph_data` is the slow step
 — it loads the CSV into `RawModelData` and resolves `ResolvedModelData`
-([dataloader.md](dataloader.md)), takes minutes, and is independent of the
+([data-model.md](data-model.md)), takes minutes, and is independent of the
 run parameters, so callers run it once and reuse it. `run_scenario` does one
 run against loaded data: the forecast substitution if asked
 (`--demand-source forecast`), the truck fleet on a shallow copy if
@@ -68,13 +68,13 @@ page shares one cached copy across runs.
 `artifacts.py` computes everything once, at save time. `build_run_tables`
 builds the five tables from one finalized journal; the panel itself is a
 model-layer read-model (`flows_to_panel`,
-[flow_journal.md](flow_journal.md)). A metric — one value the UI can show —
+[flow-journal.md](flow-journal.md)). A metric — one value the UI can show —
 is described once in the `METRICS` list; the panel columns, the picker
 labels, the KPI row, and `meta["totals"]` are all derived from it.
 
 The UI reads through one front door: the typed accessors in `ui_shared.py`
 (`load_panel`, `load_meta`, ...), which go through `backend.current()` —
-local files, or the API client when `API_URL` is set ([api.md](api.md)).
+local files, or the API client when `API_URL` is set ([api.md](../reference/api.md)).
 Pages never import `api_client` and never check `API_URL` themselves. Every
 page follows one pattern: pick the scenario pair, load its tables through
 the cache, slice, draw. The one exception is the Run scenario page, which
@@ -92,7 +92,7 @@ The pages, and which artifact tables each reads:
 | Costs | `views/costs.py` | `flow_totals` |
 | Distance & duration | `views/distance_duration.py` | `flow_totals` |
 | Single facility | `views/facility_detail.py` | `panel`, `facilities` |
-| Model monitoring | `views/model_monitoring.py` | not run artifacts: `data/ml/monitoring/` ([ml.md](ml.md)) |
+| Model monitoring | `views/model_monitoring.py` | not run artifacts: `data/ml/monitoring/` ([ml-toolkit.md](ml-toolkit.md)) |
 | Download data | `views/downloads.py` | `flow_totals`, `panel` as CSV |
 
 ## Why It Is Built This Way

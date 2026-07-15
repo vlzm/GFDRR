@@ -6,7 +6,7 @@ scenario built from a few hand-written trips and read the two tables every run
 produces: the flow journal and the station inventory.
 
 Three words this page uses (exact contracts live in
-[Notations.md](../Notations.md)):
+[Notations.md](../../Notations.md)):
 
 - A **period** is one step of simulated time; here every period is one hour.
 - The **flow journal** is the run's event table: one row per event
@@ -15,14 +15,14 @@ Three words this page uses (exact contracts live in
 
 ## What runs
 
-The builders in [tests/scenarios.py](../tests/scenarios.py) assemble the
+The builders in [tests/scenarios.py](../../tests/scenarios.py) assemble the
 simulator's input contract, `ScenarioInputs`, from a handful of hand-written
 trips: the period grid, the initial inventory, the dock capacities, the
 geography. `run()` then runs the real `Environment` on it with the canonical
 phases — the same engine the full runs use; only the input tables are
 synthetic. Each scenario finishes in well under a second.
 
-Prerequisite: the install from the root [README.md](../README.md); the base
+Prerequisite: the install from the root [README.md](../../README.md); the base
 package (`uv pip install -e .`) is enough. Run everything from the repository root.
 
 ## Run 1: one bike, one trip
@@ -68,7 +68,7 @@ it at `s2` in period 1. The inventory confirms it: `s1` went from 5 bikes to
 the departure is step 0, the docking is step 1 (Notations.md §0.1).
 
 Note: the console prints missing values as `<NA>` and quantities as floats
-(`4.0`); this page writes `NA` and `4`, like the [scenario catalog](explanation/scenarios.md).
+(`4.0`); this page writes `NA` and `4`, like the [scenario catalog](../key-components/worked-examples.md).
 
 ## Run 2: a full dock forces a redirect
 
@@ -114,11 +114,11 @@ bikes raised `s2` from 50 − 3 departed to 51.
 
 ## Where to go next
 
-- [Scenario catalog](explanation/scenarios.md) — the same kind of story for
+- [Scenario catalog](../key-components/worked-examples.md) — the same kind of story for
   every mechanic: stockout, delayed redirect, redirect chain, truck
   rebalancing. Each table there is checked against a fresh engine run by
   `tests/test_docs_scenarios.py`.
-- [Notations.md](../Notations.md) — the exact journal schema (§0), the step
+- [Notations.md](../../Notations.md) — the exact journal schema (§0), the step
   axis (§0.1), the four outcomes (§1).
 - The other builders in `tests/scenarios.py` (`stockout`, `network_full`,
   ...) run the same way: pass them to `run()`.

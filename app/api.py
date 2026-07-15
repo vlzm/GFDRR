@@ -1,4 +1,4 @@
-"""HTTP service over the run artifacts (docs/explanation/api.md).
+"""HTTP service over the run artifacts (docs/reference/api.md).
 
 The API is a reader and a saver of run artifacts (Notations.md §12): it
 serves the saved files as they are, and it starts runs through the same
@@ -168,7 +168,7 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="missing or wrong X-API-Key header")
 
 
-app = FastAPI(title="Citi Bike run artifacts", description="See docs/explanation/api.md.")
+app = FastAPI(title="Citi Bike run artifacts", description="See docs/reference/api.md.")
 protected = APIRouter(dependencies=[Depends(require_api_key)])
 
 

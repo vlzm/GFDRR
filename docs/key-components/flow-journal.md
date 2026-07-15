@@ -9,7 +9,7 @@ computed from it.
 The column-by-column schema is
 [Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table).
 Worked examples with concrete journal rows are in
-[scenarios.md](scenarios.md). Each function's exact behavior is in its
+[worked-examples.md](worked-examples.md). Each function's exact behavior is in its
 docstring in `flows.py` — this page gives the map and the design.
 
 ## Code Map
@@ -97,7 +97,7 @@ columns, value sets, `move_id == event_id // 2`, which fields each event
 type fills — are `check_journal_schema` in `journal_schema.py`. The other
 invariants (I3–I5) need the live simulator state, so they live in
 `gbp/consumers/simulator/validation.py`
-([simulator.md](simulator.md#invariants)).
+([simulation-engine.md](simulation-engine.md#invariants)).
 
 ## Who Calls What
 

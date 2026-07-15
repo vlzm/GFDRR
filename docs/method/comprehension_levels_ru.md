@@ -170,7 +170,7 @@ pydantic-схеме или в тщательно написанной docstring.
 журнал с колонками-мерами; в `panel.parquet` одна строка на
 `(period_id, facility_id, commodity_category)`; в `arcs.parquet` одна строка на
 пару `(flow_id, move_id)`. Внутри ребалансировщика
-([`rebalancing.md`](../explanation/rebalancing.md)) есть
+([`rebalancing.md`](../key-components/rebalancing.md)) есть
 `solve_rebalance_vrp(nodes, travel_minutes, trucks, params)`, возвращающая
 таблицу остановок, с гарантиями: каждый грузовик начинает и заканчивает
 маршрут пустым на своём домашнем депо, загрузка грузовика никогда не уходит
@@ -211,11 +211,11 @@ pydantic-схеме или в тщательно написанной docstring.
 производная величина — инвентарь, спрос, панель — считается из журнала, поэтому
 симулятор и исторический загрузчик можно сверить строка к строке. Это несущее
 решение, оно записано в секции «Why it is built this way» в
-[`simulator.md`](../explanation/simulator.md#why-it-is-built-this-way). Знает, почему
+[`simulation-engine.md`](../key-components/simulation-engine.md#why-it-is-built-this-way). Знает, почему
 ребалансировка планируется один раз на окно, а исполняется период за периодом,
 на каждом шаге заново проверяя свободные доки и велосипеды в наличии, вместо
 того чтобы верить плану
-([`rebalancing.md`](../explanation/rebalancing.md#why-it-is-built-this-way)). А вот то, что
+([`rebalancing.md`](../key-components/rebalancing.md#why-it-is-built-this-way)). А вот то, что
 солвер считает время в десятых долях минуты (`_MINUTE_SCALE` в
 `rebalancing.py`), — решение произвольное: OR-Tools работает с целыми числами,
 и десятых достаточно по точности; сотые работали бы так же, ничего бы не
@@ -347,8 +347,8 @@ modules) — для этого человека нет никого, с кем �
 **Во-вторых**, 4b (теорию модуля) надо фиксировать письменно — в записях о
 дизайн-решениях, спецификациях, дизайн-документах. В этом репозитории она
 живёт в секциях «Why it is built this way» в
-[`simulator.md`](../explanation/simulator.md#why-it-is-built-this-way) и
-[`rebalancing.md`](../explanation/rebalancing.md#why-it-is-built-this-way). Иначе она
+[`simulation-engine.md`](../key-components/simulation-engine.md#why-it-is-built-this-way) и
+[`rebalancing.md`](../key-components/rebalancing.md#why-it-is-built-this-way). Иначе она
 размывается со временем даже в голове у автора, не говоря уже о других людях.
 
 **В-третьих**, если для какого-то модуля вы приняли решение работать на 4a без

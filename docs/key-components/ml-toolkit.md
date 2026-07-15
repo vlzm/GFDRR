@@ -80,7 +80,7 @@ preserves each `(period, commodity)` group total).
 A saved forecast is an artifact — `demand.parquet` plus `meta.json`, written
 last — under `data/ml/forecasts/<forecast_name>/`. A forecast run loads it
 by name and runs the same chain as a replay
-([dataloader.md](dataloader.md)).
+([data-model.md](data-model.md)).
 
 ## Operating The Model
 

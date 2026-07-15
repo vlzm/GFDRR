@@ -15,7 +15,7 @@ Pick the door that matches what you came for.
 
 ## Run it
 
-[first_run.md](first_run.md) takes a clean clone to its first flow journal in
+[quickstart.md](getting-started/quickstart.md) takes a clean clone to its first flow journal in
 a few minutes, on a synthetic scenario — no data download. The same page ends
 with the real-data variant: where the trip CSVs come from, how much they
 weigh, which command downloads a month.
@@ -26,7 +26,7 @@ Three short reads, from concrete to general:
 
 1. [concepts.md](concepts.md) — the five concepts every other page assumes:
    period, demand, station inventory, flow journal, run artifact.
-2. [scenarios.md](explanation/scenarios.md), scenarios 1–3 — the smallest
+2. [worked-examples.md](key-components/worked-examples.md), scenarios 1–3 — the smallest
    real journal tables: a stockout, a trip that docks in the same period, a
    trip that docks a period later. Every table there is re-run by a test.
 3. [architecture.md](explanation/architecture.md) — the system as diagrams at
@@ -52,13 +52,13 @@ without one, find the part you are changing on the module map in
 
 | Part | Document |
 |---|---|
-| raw trip CSV → simulator inputs | [dataloader.md](explanation/dataloader.md) |
-| the simulation loop | [simulator.md](explanation/simulator.md) |
-| truck rebalancing | [rebalancing.md](explanation/rebalancing.md) |
-| the journal library (`gbp/model/flows.py`) | [flow_journal.md](explanation/flow_journal.md) |
-| run artifacts and the web interface | [app.md](explanation/app.md) |
-| the run-artifact API | [api.md](explanation/api.md) |
-| demand forecasting | [ml.md](explanation/ml.md) |
+| raw trip CSV → simulator inputs | [data-model.md](key-components/data-model.md) |
+| the simulation loop | [simulation-engine.md](key-components/simulation-engine.md) |
+| truck rebalancing | [rebalancing.md](key-components/rebalancing.md) |
+| the journal library (`gbp/model/flows.py`) | [flow-journal.md](key-components/flow-journal.md) |
+| run artifacts and the web interface | [visualization.md](key-components/visualization.md) |
+| the run-artifact API | [api.md](reference/api.md) |
+| demand forecasting | [ml-toolkit.md](key-components/ml-toolkit.md) |
 
 Each document ends with a "Why It Is Built This Way" section: the
 load-bearing decisions, each with the alternative that was rejected and the
@@ -70,17 +70,17 @@ reason. Decisions that span several modules live as short records in
 [Notations.md](../Notations.md) (repository root) is the project dictionary:
 every column, status, and table name — one concept, one word. Open it by
 section when you need a contract; it is a reference, not a reading route.
-The HTTP contract is in [api.md](explanation/api.md); the command list is in
+The HTTP contract is in [api.md](reference/api.md); the command list is in
 the root [README.md](../README.md).
 
 ## The rest of docs/
 
-- `explanation/` — the per-module documents from the table above.
-- `how-to/` — the task recipes from the "Change it" door above.
+- `key-components/` — the per-module documents from the table above.
+- `how-to/` — the task recipes from the "Change it" door above, plus
+  [set-up-osrm.md](how-to/set-up-osrm.md): the optional road-network
+  routing server.
 - `decisions/` — short records of design decisions that cannot be derived
   from the code, one record per decision.
-- `guides/` — [osrm_setup.md](guides/osrm_setup.md): the optional road-network
-  routing server.
 - `plans/` — the plans of the current work.
 - `reports/` — saved evaluation and review reports.
 - `method/` — the author's personal notes on how to work.

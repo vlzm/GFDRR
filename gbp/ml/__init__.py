@@ -26,5 +26,5 @@ The process, one module per step:
   builds the drift reports.
 
 Each module's docstring carries its own details; the map of the subsystem is
-``docs/explanation/ml.md``.
+``docs/key-components/ml-toolkit.md``.
 """

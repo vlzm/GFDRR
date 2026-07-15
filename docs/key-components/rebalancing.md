@@ -61,7 +61,7 @@ rule as user trips; a bike that does not fit docks at the truck's home depot
 — there is no redirect chain and no `lost` for a truck bike. Rebalance
 pickups do remove inventory, but demand read-models filter them out with
 `is_user_departure`, so they never count as demand
-([flow_journal.md](flow_journal.md)).
+([flow-journal.md](flow-journal.md)).
 
 ## What Is Checked
 
@@ -71,7 +71,7 @@ Planning has the module's only two asserts, in `assign_bikes_to_stops`: a
 dropoff must not exceed the bikes on the truck, and every route must end
 with an empty truck. Correctness of the executed flows is enforced after the
 run by `validate_run` — I2, I4, and I5 cover rebalance flows like user trips
-([simulator.md](simulator.md#invariants)).
+([simulation-engine.md](simulation-engine.md#invariants)).
 
 ## Why It Is Built This Way
 

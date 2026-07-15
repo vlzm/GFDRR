@@ -84,5 +84,5 @@ Exact contract: [Notations.md §12](../Notations.md#12-run-artifacts-the-files-t
 
 ## Where to go next
 
-Scenarios 1–3 of the [scenario catalog](explanation/scenarios.md) show these
+Scenarios 1–3 of the [scenario catalog](key-components/worked-examples.md) show these
 concepts working together on real journal tables, each re-run by a test.

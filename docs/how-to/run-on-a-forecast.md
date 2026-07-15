@@ -64,4 +64,4 @@ month.
 
 The canonical forecast run lives in `notebooks/forecast_pipeline.ipynb`; the
 model side (training, backtest, evaluation) is described in
-[ml.md](../explanation/ml.md).
+[ml-toolkit.md](../key-components/ml-toolkit.md).

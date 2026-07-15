@@ -7,7 +7,7 @@ and never check ``API_URL`` themselves, so the two backends cannot drift
 page by page: the choice is made here, once.
 
 ``DiskBackend`` reads ``data/runs/`` and executes runs in this process.
-``ApiBackend`` talks to the run-artifact API (docs/explanation/api.md)
+``ApiBackend`` talks to the run-artifact API (docs/reference/api.md)
 through ``api_client``. The two classes answer the same calls, so a caller
 never asks which one it holds — except the Run page, which asks
 :meth:`list_forecasts` and :meth:`default_trips_path` and reads ``None`` as
@@ -105,7 +105,7 @@ class DiskBackend:
 
 
 class ApiBackend:
-    """Runs live on the server; reads and starts go over HTTP (docs/explanation/api.md)."""
+    """Runs live on the server; reads and starts go over HTTP (docs/reference/api.md)."""
 
     def list_runs(self) -> list[str]:
         """Names of every saved run on the server."""
@@ -119,7 +119,7 @@ class ApiBackend:
         """Return a constant cache key.
 
         A served artifact never changes (the API is the only writer on the
-        server and never overwrites a saved run — docs/explanation/api.md),
+        server and never overwrites a saved run — docs/reference/api.md),
         so ``(run_name, table)`` alone identifies the content.
         """
         return 0.0

@@ -1,6 +1,6 @@
-"""Every toy table in docs/explanation/scenarios.md, replayed against the real engine.
+"""Every toy table in docs/key-components/worked-examples.md, replayed against the real engine.
 
-docs/explanation/scenarios.md shows one journal table per canonical scenario. Each table
+docs/key-components/worked-examples.md shows one journal table per canonical scenario. Each table
 sits under an anchor comment (``<!-- table:scenario-04 -->``). A test here
 rebuilds the same scenario, runs the real engine, selects the same rows from
 the fresh journal, and compares them with the table parsed out of the
@@ -25,7 +25,7 @@ from gbp.model import flows as J
 from tests import scenarios
 from tests.invariants import check_journal_well_formed
 
-DOC_PATH = Path(__file__).resolve().parent.parent / "docs" / "explanation" / "scenarios.md"
+DOC_PATH = Path(__file__).resolve().parent.parent / "docs" / "key-components" / "worked-examples.md"
 
 #: Columns of a user-trip table in the document.
 TRIP_COLUMNS = [
@@ -161,7 +161,7 @@ def read_doc_table(anchor: str) -> pd.DataFrame:
     """Parse the markdown table that follows ``<!-- table:<anchor> -->``."""
     text = DOC_PATH.read_text(encoding="utf-8")
     marker = f"<!-- table:{anchor} -->"
-    assert marker in text, f"docs/explanation/scenarios.md has no anchor {marker}"
+    assert marker in text, f"docs/key-components/worked-examples.md has no anchor {marker}"
     lines: list[str] = []
     for line in text.split(marker, 1)[1].splitlines():
         stripped = line.strip()

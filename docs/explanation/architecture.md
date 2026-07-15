@@ -29,7 +29,7 @@ on past months saves a forecast demand table, and a forecast run
 through the same run chain. Each run is saved as one folder on disk — a run
 artifact ([Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads)) —
 and the web interface shows the saved runs. The only optional outside service
-is a local OSRM routing server ([osrm_setup.md](../guides/osrm_setup.md));
+is a local OSRM routing server ([set-up-osrm.md](../how-to/set-up-osrm.md));
 without it, distances come from the haversine formula (the straight line
 between two points on the globe).
 
@@ -64,27 +64,27 @@ flowchart LR
 
 One line per block, with its document:
 
-- **loaders** ([dataloader.md](dataloader.md)) — resolve the raw trip CSV
+- **loaders** ([data-model.md](../key-components/data-model.md)) — resolve the raw trip CSV
   into `ResolvedModelData`, the input tables of one scenario. The simulator
   is typed against `ScenarioInputs` (`gbp/consumers/simulator/inputs.py`);
   `ResolvedModelData` is one supplier of that contract.
-- **simulator** ([simulator.md](simulator.md)) — plays the scenario period
+- **simulator** ([simulation-engine.md](../key-components/simulation-engine.md)) — plays the scenario period
   by period and produces the flow journal. Overnight rebalancing
-  ([rebalancing.md](rebalancing.md)) is an opt-in part of it.
-- **artifact builder** ([app.md](app.md)) — turns a finished run into a run
+  ([rebalancing.md](../key-components/rebalancing.md)) is an opt-in part of it.
+- **artifact builder** ([visualization.md](../key-components/visualization.md)) — turns a finished run into a run
   artifact: a folder of tables plus `meta.json`.
-- **web interface** ([app.md](app.md)) — saved-run pages load saved tables
+- **web interface** ([visualization.md](../key-components/visualization.md)) — saved-run pages load saved tables
   and draw them; the `Run scenario` page starts a run.
-- **run-artifact API** ([api.md](api.md)) — serves the same folders over
+- **run-artifact API** ([api.md](../reference/api.md)) — serves the same folders over
   HTTP and can start new runs.
-- **demand forecasting** ([ml.md](ml.md)) — trains demand models on past
+- **demand forecasting** ([ml-toolkit.md](../key-components/ml-toolkit.md)) — trains demand models on past
   months, keeps versions in a local MLflow store, saves forecasts under
   `data/ml/forecasts/`. A forecast run is the same run chain with one
   substitution: the forecast demand table takes the place of the historical
   demand ([decision record](../decisions/forecast-replaces-only-demand.md)).
 
 Two shared libraries serve several blocks, so they are not separate blocks
-here: `gbp/model/` ([flow_journal.md](flow_journal.md)) owns the journal's
+here: `gbp/model/` ([flow-journal.md](../key-components/flow-journal.md)) owns the journal's
 event schema, its builders and its read-models; `gbp/routing.py` answers
 distance and travel-time questions for facility pairs. `app/runner.py` runs
 the full sequence from CSV to saved folder; the terminal, the API and the
@@ -254,7 +254,7 @@ review the design.
 | `runner.py`          | `build_graph_data(...)`, `run_scenario(graph_data, ...) -> saved folder` | the stage order and the progress reporting                                                             |
 | `artifacts.py`       | `save_scenario_run(result, data, ...)`, `load_run_table`, `load_run_meta` | one build function per saved table, which result field feeds which builder, the artifact's pandera schemas, the `METRICS` registry, run naming |
 | `evaluate.py`        | `python app/evaluate.py --month <YYYYMM>`                                 | the reference run, one replay-state forecast run per model, the shared demand cut (`restrict_demand_to_scenario`), `comparison.csv`          |
-| `api.py`             | six HTTP endpoints ([api.md](api.md))                                    | the single worker thread, the run queue, the disk fallback after a restart                             |
+| `api.py`             | six HTTP endpoints ([api.md](../reference/api.md))                                    | the single worker thread, the run queue, the disk fallback after a restart                             |
 | `api_client.py`      | `list_runs`, `load_table`, `start_run`, `run_status`                     | URL building, the API-key header, response decoding                                                    |
 | `backend.py`         | `current()` — the chosen backend: reads, and `run_and_wait`              | the disk-or-API choice (`API_URL`), local in-process runs vs POST-and-poll over HTTP                   |
 | `ui_shared.py`       | typed loaders: `load_panel(run_name)`, `load_meta(run_name)`, ...        | caching, old-artifact fallbacks                                                                        |
@@ -265,7 +265,7 @@ review the design.
 No test catches a stale arrow, so the arrows stay high-level: domain words,
 no signatures, no column names. Update this page only when a module appears,
 disappears, or changes what it takes or gives. How a module works inside
-belongs to the per-module documents ([dataloader.md](dataloader.md),
-[simulator.md](simulator.md), [rebalancing.md](rebalancing.md),
-[flow_journal.md](flow_journal.md), [app.md](app.md), [api.md](api.md),
-[ml.md](ml.md)).
+belongs to the per-module documents ([data-model.md](../key-components/data-model.md),
+[simulation-engine.md](../key-components/simulation-engine.md), [rebalancing.md](../key-components/rebalancing.md),
+[flow-journal.md](../key-components/flow-journal.md), [visualization.md](../key-components/visualization.md), [api.md](../reference/api.md),
+[ml-toolkit.md](../key-components/ml-toolkit.md)).

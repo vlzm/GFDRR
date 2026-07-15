@@ -9,7 +9,7 @@ things:
 3. It checks that the finished journal and the live state still agree.
 
 The terms are the same as in [`Notations.md`](../../Notations.md). Worked
-examples with concrete journal rows are in [scenarios.md](scenarios.md). What
+examples with concrete journal rows are in [worked-examples.md](worked-examples.md). What
 each phase and mechanics function reads, does, and writes is in the
 docstrings of `gbp/consumers/simulator/` — this page only gives the map.
 
@@ -149,7 +149,7 @@ invariants:
 
 `Environment.run()` calls these checks by default; `run_sized_scenario()`
 calls them itself so it can return the violation list to the caller. The
-scenario tables in [scenarios.md](scenarios.md) are rebuilt by
+scenario tables in [worked-examples.md](worked-examples.md) are rebuilt by
 `tests/test_docs_scenarios.py`, so documented journal rows stay aligned with
 the code.
 

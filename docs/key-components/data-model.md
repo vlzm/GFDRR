@@ -7,8 +7,8 @@ simulator reads them through its contract `ScenarioInputs`
 that contract.
 
 The terms are the same as in [`Notations.md`](../../Notations.md). What the
-simulator does with these tables is [simulator.md](simulator.md); the journal
-functions used here are explained in [flow_journal.md](flow_journal.md).
+simulator does with these tables is [simulation-engine.md](simulation-engine.md); the journal
+functions used here are explained in [flow-journal.md](flow-journal.md).
 Each function's exact behavior is in its docstring — this page gives the map
 and the design.
 
@@ -56,7 +56,7 @@ The historical journal is built with the same builders the simulator uses
 (`departed_events`, `arrived_events`, `finalize_flows`): each completed trip
 is one flow with two events, `flow_id` gets a `hist_` prefix, and the order
 columns come from `stamp_history_ordering`
-([flow_journal.md](flow_journal.md)). The marginals — departures, arrivals,
+([flow-journal.md](flow-journal.md)). The marginals — departures, arrivals,
 the OD matrix — are computed from that journal with the read-models from
 `flows.py`; `historical_demand_df` equals `historical_departures_df`,
 because in history every wanted trip departed.
