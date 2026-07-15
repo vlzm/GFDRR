@@ -368,6 +368,61 @@ def load_forecast(
     return demand_df, meta
 
 
+def _finish_forecast(
+    model: DemandModel,
+    *,
+    t0: pd.Timestamp,
+    horizon_periods: int,
+    period_len: pd.Timedelta,
+    forecast_name: str,
+    model_version: str,
+    history_start: pd.Timestamp,
+    history_end: pd.Timestamp,
+    inputs: list[str],
+    root: pathlib.Path | None,
+    history_df: pd.DataFrame | None = None,
+    training_root: pathlib.Path | None = None,
+    weather_df: pd.DataFrame | None = None,
+) -> pathlib.Path:
+    """Predict the horizon and save the artifact — the tail every builder ends with.
+
+    The three public builders differ only in how the model, the history
+    window, and the horizon weather are obtained. Once those are in hand, the
+    rest is one recipe: build the forecast period grid
+    (:func:`get_forecast_periods_df`), predict it in whole bikes
+    (:func:`predict_horizon`), fill the :class:`ForecastMeta` contract, and
+    write the artifact (:func:`save_forecast`). This function owns that tail so
+    the ``meta.json`` contract is assembled in one place.
+
+    The fields that differ between builders are passed in: ``model_version``
+    (``"1"`` for a freshly fitted model, the registry version for the
+    champion), ``history_start`` / ``history_end`` / ``inputs`` (what the
+    forecast input read), and the prediction inputs (``history_df`` or
+    ``training_root``, plus an already-resolved ``weather_df``).
+    """
+    forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, period_len)
+    forecast_demand_df = predict_horizon(
+        model,
+        forecast_periods_df,
+        history_df=history_df,
+        training_root=training_root,
+        weather_df=weather_df,
+    )
+    meta = ForecastMeta(
+        forecast_name=forecast_name,
+        model_name=model.name,
+        model_version=model_version,
+        created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+        t0=pd.Timestamp(t0).isoformat(),
+        horizon_periods=horizon_periods,
+        period_len_hours=period_len / pd.Timedelta(hours=1),
+        history_start=pd.Timestamp(history_start).isoformat(),
+        history_end=pd.Timestamp(history_end).isoformat(),
+        inputs=list(inputs),
+    )
+    return save_forecast(forecast_demand_df, meta, root)
+
+
 def build_seasonal_naive_forecast(
     demand_df: pd.DataFrame,
     periods_df: pd.DataFrame,
@@ -411,24 +466,22 @@ def build_seasonal_naive_forecast(
     """
     t0 = periods_df["end_timestamp"].iloc[-1]
     period_len = periods_df["end_timestamp"].iloc[0] - periods_df["start_timestamp"].iloc[0]
-    forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, period_len)
     counts = counts_from_demand(demand_df, periods_df)
     model = create_model("seasonal_naive")
     model.fit(counts)
-    forecast_demand_df = predict_horizon(model, forecast_periods_df, history_df=counts)
-    meta = ForecastMeta(
-        forecast_name=forecast_name,
-        model_name=model.name,
-        model_version="1",
-        created_at=datetime.datetime.now().isoformat(timespec="seconds"),
-        t0=pd.Timestamp(t0).isoformat(),
+    return _finish_forecast(
+        model,
+        t0=t0,
         horizon_periods=horizon_periods,
-        period_len_hours=period_len / pd.Timedelta(hours=1),
-        history_start=pd.Timestamp(periods_df["start_timestamp"].iloc[0]).isoformat(),
-        history_end=pd.Timestamp(periods_df["end_timestamp"].iloc[-1]).isoformat(),
-        inputs=list(inputs),
+        period_len=period_len,
+        forecast_name=forecast_name,
+        model_version="1",
+        history_start=periods_df["start_timestamp"].iloc[0],
+        history_end=periods_df["end_timestamp"].iloc[-1],
+        inputs=inputs,
+        root=root,
+        history_df=counts,
     )
-    return save_forecast(forecast_demand_df, meta, root)
 
 
 def _horizon_weather(
@@ -514,26 +567,23 @@ def build_model_forecast(
     model.fit(train_table)
 
     t0 = month_bounds(months[-1])[1]
-    forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, DEFAULT_PERIOD_LEN)
-    horizon_end = forecast_periods_df["end_timestamp"].iloc[-1]
+    horizon_end = t0 + horizon_periods * DEFAULT_PERIOD_LEN
     weather_df = _horizon_weather(t0, horizon_end, raw, weather_df, log)
     log(f"Predicting {horizon_periods} periods from {t0} ...")
-    forecast_demand_df = predict_horizon(
-        model, forecast_periods_df, training_root=training_root, weather_df=weather_df
-    )
-    meta = ForecastMeta(
-        forecast_name=forecast_name,
-        model_name=model.name,
-        model_version="1",
-        created_at=datetime.datetime.now().isoformat(timespec="seconds"),
-        t0=pd.Timestamp(t0).isoformat(),
+    return _finish_forecast(
+        model,
+        t0=t0,
         horizon_periods=horizon_periods,
-        period_len_hours=DEFAULT_PERIOD_LEN / pd.Timedelta(hours=1),
-        history_start=pd.Timestamp(month_bounds(months[0])[0]).isoformat(),
-        history_end=pd.Timestamp(t0).isoformat(),
+        period_len=DEFAULT_PERIOD_LEN,
+        forecast_name=forecast_name,
+        model_version="1",
+        history_start=month_bounds(months[0])[0],
+        history_end=t0,
         inputs=[f"{month}.parquet" for month in months],
+        root=root,
+        training_root=training_root,
+        weather_df=weather_df,
     )
-    return save_forecast(forecast_demand_df, meta, root)
 
 
 def build_champion_forecast(
@@ -603,27 +653,24 @@ def build_champion_forecast(
     else:
         t0 = month_bounds(t0_month)[0]
 
-    forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, DEFAULT_PERIOD_LEN)
-    horizon_end = forecast_periods_df["end_timestamp"].iloc[-1]
+    horizon_end = t0 + horizon_periods * DEFAULT_PERIOD_LEN
     weather_df = _horizon_weather(t0, horizon_end, raw, weather_df, log)
     log(f"Predicting {horizon_periods} periods from {t0} ...")
-    forecast_demand_df = predict_horizon(
-        model, forecast_periods_df, training_root=training_root, weather_df=weather_df
-    )
     window = [m for m in history_months(t0_month) if partition_path(m, training_root).exists()]
-    meta = ForecastMeta(
-        forecast_name=forecast_name,
-        model_name=model.name,
-        model_version=str(version.version),
-        created_at=datetime.datetime.now().isoformat(timespec="seconds"),
-        t0=pd.Timestamp(t0).isoformat(),
+    return _finish_forecast(
+        model,
+        t0=t0,
         horizon_periods=horizon_periods,
-        period_len_hours=DEFAULT_PERIOD_LEN / pd.Timedelta(hours=1),
-        history_start=pd.Timestamp(month_bounds(window[0])[0] if window else t0).isoformat(),
-        history_end=pd.Timestamp(t0).isoformat(),
+        period_len=DEFAULT_PERIOD_LEN,
+        forecast_name=forecast_name,
+        model_version=str(version.version),
+        history_start=month_bounds(window[0])[0] if window else t0,
+        history_end=t0,
         inputs=[f"{month}.parquet" for month in window],
+        root=root,
+        training_root=training_root,
+        weather_df=weather_df,
     )
-    return save_forecast(forecast_demand_df, meta, root)
 
 
 def main() -> None:
