@@ -34,7 +34,7 @@ import types
 
 import pandas as pd
 
-from gbp.consumers.simulator import ScenarioInputs, canonical_phases
+from gbp.consumers.simulator import ScenarioInputs, canonical_phases, scaled_demand_inputs
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.engine import Environment
 from gbp.consumers.simulator.phases import Phase
@@ -146,18 +146,23 @@ def run(
     ``phases`` defaults to the canonical three-phase loop; a rebalancing story
     passes ``canonical_phases() + rebalancing_phases(...)`` instead.
 
+    ``demand_scale_factor`` is bound into the demand table before the run, the
+    same way :func:`run_sized_scenario` binds it at the run boundary, so the run
+    faces the scaled demand and the returned journal can be validated against the
+    same scaled inputs.
+
     Invariant checking is switched off here so the caller can assert on the
     violation list directly (a clearer failure than a raised error); the tests
     call :func:`validate_run` themselves.
     """
+    faced = scaled_demand_inputs(resolved, demand_scale_factor)
     config = EnvironmentConfig(
         phases=phases if phases is not None else canonical_phases(),
         scenario_id="test",
         validate=False,
-        demand_scale_factor=demand_scale_factor,
-        number_of_periods=len(resolved.periods_df),
+        number_of_periods=len(faced.periods_df),
     )
-    env = Environment(resolved, config)
+    env = Environment(faced, config)
     state = env.run()
     return env.simulated_flows_df, state
 

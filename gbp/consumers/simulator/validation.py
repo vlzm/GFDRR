@@ -33,7 +33,6 @@ from gbp.model import (
 from gbp.model.journal_schema import check_journal_schema
 
 from .inputs import ScenarioInputs
-from .mechanics import scale_demand
 from .state import SimulationState
 
 if TYPE_CHECKING:
@@ -49,37 +48,33 @@ class RunInvariantError(AssertionError):
 
 
 def faced_demand(resolved: ScenarioInputs, config: EnvironmentConfig | None) -> pd.DataFrame:
-    """Return the demand the run actually faced: scaled and cut to its horizon.
+    """Return the demand the run actually faced: the table cut to its horizon.
 
     The demand-split invariant I1 compares the journal against the demand the
-    run saw, not the raw historical table. ``FormDeparturesPhase`` scales each
-    period's demand by ``config.demand_scale_factor`` (the shared
-    :func:`~gbp.consumers.simulator.mechanics.scale_demand` rule) and never sees
-    periods at or past ``config.number_of_periods``. This applies the same two
-    steps once, so the validator reads a value instead of redoing the engine's
-    work with scalars a caller must keep in sync.
+    run saw. The run's scale is already bound into ``resolved.historical_demand_df``
+    at the run boundary (``scaled_demand_inputs``), so the same table
+    ``FormDeparturesPhase`` splits is the one I1 checks against; there is nothing
+    to rescale here. The one thing still to apply is the horizon: the run never
+    sees periods at or past ``config.number_of_periods``.
 
     Parameters
     ----------
     resolved : ScenarioInputs
-        The scenario inputs; its ``historical_demand_df`` is the raw table.
+        The scenario inputs the run faced; its ``historical_demand_df`` already
+        carries the run's demand scale.
     config : EnvironmentConfig or None
-        The run's config. None means a plain full-grid replay (scale 1.0, the
-        whole table) -- the default for a direct :func:`validate_run` call.
+        The run's config. None means a plain full-grid replay (the whole
+        table) -- the default for a direct :func:`validate_run` call.
 
     Returns
     -------
     pandas.DataFrame
-        The demand rows the run faced, with ``quantity`` already scaled.
+        The demand rows the run faced.
     """
     demand = resolved.historical_demand_df
     if config is None:
         return demand
-    demand = demand[demand["period_id"] < config.number_of_periods]
-    if config.demand_scale_factor != 1.0:
-        demand = demand.copy()
-        demand["quantity"] = scale_demand(demand["quantity"], config.demand_scale_factor)
-    return demand
+    return demand[demand["period_id"] < config.number_of_periods]
 
 
 def validate_run(
@@ -104,12 +99,10 @@ def validate_run(
         The scenario inputs (initial inventory and historical demand).
     config : EnvironmentConfig or None, optional
         The config the run used. The demand-split check I1 compares the journal
-        against the demand the run actually faced, which the config's
-        ``demand_scale_factor`` and ``number_of_periods`` define
-        (:func:`faced_demand`). Passing the config -- one object -- keeps the
-        validator and the engine in step: a caller cannot hand over scalars
-        that disagree with the run. None (the default) means a plain full-grid
-        replay at scale 1.0.
+        against the demand the run actually faced: ``resolved.historical_demand_df``
+        (already scaled at the run boundary) cut to ``config.number_of_periods``
+        (:func:`faced_demand`). None (the default) means a plain full-grid
+        replay over the whole table.
 
     Returns
     -------

@@ -289,11 +289,12 @@ def plan_overflow_redirect(
 def scale_demand(quantity: pd.Series, demand_scale_factor: float) -> pd.Series:
     """Scale a demand count by the run's factor and round it to whole bikes.
 
-    The one scaling rule (``EnvironmentConfig.demand_scale_factor``), applied
-    per row. Everything that scales demand must round the same way, or the
-    demand-split invariant I1 would compare the journal against a demand the
-    run never faced: the departures phase, the run validator and the
-    rebalancing target all call this function.
+    The one scaling rule, applied per row. The run boundary
+    (``scaled_demand_inputs``) calls it once on the demand and arrivals tables,
+    so the whole run -- the departures phase, the run validator, the rebalancing
+    target -- reads the demand the run faces instead of rescaling it. Rounding
+    is per row, so scaling the whole table once matches scaling each period in
+    turn.
     """
     return (quantity * demand_scale_factor).round().astype("Int64")
 

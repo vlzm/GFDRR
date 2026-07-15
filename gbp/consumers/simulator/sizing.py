@@ -136,9 +136,9 @@ def size_state_for_demand(
     """Smallest initial inventory and capacities for this config's demand.
 
     Runs the sizing run (see the module docstring): the scenario in ``config`` —
-    including its ``demand_scale_factor`` and ``number_of_periods`` — against a
-    saturated copy of ``resolved``, and reads the requirements from the
-    resulting journal with :func:`get_replay_initial_inventory_df` and
+    its phases and ``number_of_periods`` — against a saturated copy of
+    ``resolved``, and reads the requirements from the resulting journal with
+    :func:`get_replay_initial_inventory_df` and
     :func:`get_replay_capacities_df`. The saturated inventory is
     :func:`get_saturated_inventory_df`; the saturated capacity is
     ``(n_commodities + 1) * SATURATION_QUANTITY`` docks per facility, above
@@ -152,13 +152,14 @@ def size_state_for_demand(
     Parameters
     ----------
     resolved : ScenarioInputs
-        The scenario data to size. Only ``initial_inventory_df`` and
-        ``facilities_capacities_df`` are replaced for the sizing run; every
-        other table is shared as-is.
+        The scenario data to size, with its demand already scaled to the level
+        the state must survive (``scaled_demand_inputs``). Only
+        ``initial_inventory_df`` and ``facilities_capacities_df`` are replaced
+        for the sizing run; every other table is shared as-is.
     config : EnvironmentConfig
         The configuration the real run will use. The sizing run uses the same
-        phases, demand scale, and period count, so the measured state matches
-        the run it is meant for.
+        phases and period count, so the measured state matches the run it is
+        meant for.
 
     Returns
     -------

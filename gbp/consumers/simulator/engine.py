@@ -140,7 +140,7 @@ class Environment:
         period = self._periods[self._period_cursor]
         with structlog.contextvars.bound_contextvars(period_id=period.period_id):
             for phase in self._config.phases:
-                self._state = phase.execute(self._state, self._resolved, period, self._config)
+                self._state = phase.execute(self._state, self._resolved, period)
 
         self._period_cursor += 1
         if not self.is_done:

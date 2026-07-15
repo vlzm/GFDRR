@@ -12,18 +12,21 @@ import copy
 import pandas as pd
 import pytest
 
-from gbp.consumers.simulator import run_sized_scenario, size_state_for_demand
+from gbp.consumers.simulator import (
+    run_sized_scenario,
+    scaled_demand_inputs,
+    size_state_for_demand,
+)
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.validation import validate_run
 from tests import scenarios
 
 
-def _config(resolved, demand_scale_factor: float = 1.0) -> EnvironmentConfig:
+def _config(resolved) -> EnvironmentConfig:
     return EnvironmentConfig(
         phases=scenarios.canonical_phases(),
         scenario_id="sizing_test",
         validate=False,
-        demand_scale_factor=demand_scale_factor,
         number_of_periods=len(resolved.periods_df),
     )
 
@@ -53,10 +56,13 @@ def test_sizing_does_not_mutate_the_scenario_data():
 
 
 def test_sized_inventory_grows_with_the_demand_scale():
-    # Doubling the demand must not shrink the measured start inventory.
+    # Doubling the demand must not shrink the measured start inventory. The scale
+    # is bound into the demand table before sizing (``scaled_demand_inputs``),
+    # the same way the run boundary binds it.
     resolved = scenarios.stockout()
     inventory_1x, _ = size_state_for_demand(resolved, _config(resolved))
-    inventory_2x, _ = size_state_for_demand(resolved, _config(resolved, demand_scale_factor=2.0))
+    doubled = scaled_demand_inputs(resolved, 2.0)
+    inventory_2x, _ = size_state_for_demand(doubled, _config(doubled))
     assert int(inventory_2x["quantity"].sum()) > int(inventory_1x["quantity"].sum())
 
 

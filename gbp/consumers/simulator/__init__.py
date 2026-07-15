@@ -25,7 +25,12 @@ from .rebalancing import (
     rebalancing_phases,
     solve_rebalance_vrp,
 )
-from .scenario import ScenarioRun, canonical_phases, run_sized_scenario
+from .scenario import (
+    ScenarioRun,
+    canonical_phases,
+    run_sized_scenario,
+    scaled_demand_inputs,
+)
 from .sizing import size_state_for_demand
 from .state import SimulationState, SimulatorConfigError
 
@@ -45,6 +50,7 @@ __all__ = [
     "canonical_phases",
     "rebalancing_phases",
     "run_sized_scenario",
+    "scaled_demand_inputs",
     "size_state_for_demand",
     "solve_rebalance_vrp",
 ]

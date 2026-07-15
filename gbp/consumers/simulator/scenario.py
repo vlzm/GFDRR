@@ -32,6 +32,7 @@ from gbp.model.journal_schema import schema_violations
 from .config import EnvironmentConfig
 from .engine import Environment
 from .inputs import ScenarioInputs
+from .mechanics import scale_demand
 from .phases import DockArrivals, FormDeparturesPhase, Phase
 from .sizing import size_state_for_demand
 from .state import SimulationState
@@ -58,6 +59,52 @@ def canonical_phases() -> list[Phase]:
     ``phase_rank``, which confirms the two agree.
     """
     return [_PHASE_BUILDERS[spec.name]() for spec in CANONICAL_PHASE_ORDER]
+
+
+def scaled_demand_inputs(resolved: ScenarioInputs, factor: float) -> ScenarioInputs:
+    """Bind the run's demand scale into the scenario tables, once, at the boundary.
+
+    The run faces a scaled version of the demand. Instead of every phase, the
+    validator and the rebalancer each rescaling the raw table with the same
+    factor, the scale is applied here once and the whole run reads the demand it
+    actually faces. Two tables carry the demand: ``historical_demand_df`` (the
+    departures ``FormDeparturesPhase`` forms) and ``historical_arrivals_df`` (the
+    arrivals the rebalancer's ``target_inventory`` reads); both scale by the same
+    factor. Rounding is per row (:func:`~gbp.consumers.simulator.mechanics.scale_demand`),
+    so scaling the whole table once matches scaling each period in turn.
+
+    ``resolved`` is not modified: the scaled tables land on a shallow copy.
+    ``factor == 1.0`` returns ``resolved`` unchanged (no copy).
+
+    Parameters
+    ----------
+    resolved : ScenarioInputs
+        The scenario inputs to scale. Every table other than the two demand
+        tables is shared as-is.
+    factor : float
+        The demand multiplier; must be positive.
+
+    Returns
+    -------
+    ScenarioInputs
+        The inputs the run faces, with the two demand tables scaled.
+    """
+    if factor <= 0:
+        raise ValueError(f"demand scale factor must be > 0, got {factor}")
+    if factor == 1.0:
+        return resolved
+    scaled = copy.copy(resolved)
+    demand = resolved.historical_demand_df.copy()
+    demand["quantity"] = scale_demand(demand["quantity"], factor)
+    scaled.historical_demand_df = demand
+    # The arrivals table is read only by the rebalancer's target inventory, so a
+    # base run may not carry it. Scale it when it is there, matching the demand.
+    arrivals = getattr(resolved, "historical_arrivals_df", None)
+    if arrivals is not None:
+        arrivals = arrivals.copy()
+        arrivals["quantity"] = scale_demand(arrivals["quantity"], factor)
+        scaled.historical_arrivals_df = arrivals
+    return scaled
 
 
 @dataclasses.dataclass(frozen=True)
@@ -134,10 +181,18 @@ def run_sized_scenario(
         The finalized journal, the final state, the sized state tables, and
         the invariant violations (empty = valid).
     """
+    # Bind each run's demand scale into its data once, here at the boundary. The
+    # sizing run and the real run face different scales, so they get different
+    # scaled copies; from here on the engine and the phases read the demand they
+    # face, never the scale.
+    sizing_inputs = scaled_demand_inputs(
+        sizing_data if sizing_data is not None else resolved, sizing_scale_factor
+    )
+    run_inputs = scaled_demand_inputs(resolved, demand_scale_factor)
+
     sizing_config = EnvironmentConfig(
         phases=canonical_phases(),
         scenario_id=scenario_id,
-        demand_scale_factor=sizing_scale_factor,
         number_of_periods=number_of_periods,
     )
     log.info(
@@ -148,7 +203,7 @@ def run_sized_scenario(
     )
     sizing_started = time.monotonic()
     initial_inventory_df, facilities_capacities_df = size_state_for_demand(
-        sizing_data if sizing_data is not None else resolved, sizing_config
+        sizing_inputs, sizing_config
     )
     log.info(
         "sizing_run_finished",
@@ -166,7 +221,7 @@ def run_sized_scenario(
     if sizing_violations:
         raise ValueError("sized state tables break their schemas:\n" + "\n".join(sizing_violations))
 
-    sized = copy.copy(resolved)
+    sized = copy.copy(run_inputs)
     sized.initial_inventory_df = initial_inventory_df
     sized.facilities_capacities_df = facilities_capacities_df
 
@@ -177,7 +232,6 @@ def run_sized_scenario(
         phases=list(phases) if phases is not None else canonical_phases(),
         scenario_id=scenario_id,
         validate=True,
-        demand_scale_factor=demand_scale_factor,
         number_of_periods=number_of_periods,
     )
     log.info(

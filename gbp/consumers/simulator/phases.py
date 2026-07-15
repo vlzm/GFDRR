@@ -32,7 +32,6 @@ from gbp.model import (
     redirected_events,
 )
 
-from .config import EnvironmentConfig
 from .inputs import ScenarioInputs
 from .mechanics import (
     dock_up_to_capacity,
@@ -41,7 +40,6 @@ from .mechanics import (
     free_docks,
     plan_overflow_redirect,
     realize_departures,
-    scale_demand,
 )
 from .state import PeriodRow, SimulationState
 
@@ -71,10 +69,9 @@ class Phase:
         state: SimulationState,
         resolved: ScenarioInputs,
         period: PeriodRow,
-        config: EnvironmentConfig,
     ) -> SimulationState:
         """Run the phase: build this period's events and write them as one batch."""
-        events = self.build_events(state, resolved, period, config)
+        events = self.build_events(state, resolved, period)
         log.debug("phase_executed", phase=type(self).__name__, events=len(events))
         return state.apply_step_events(events, self.phase_rank)
 
@@ -83,7 +80,6 @@ class Phase:
         state: SimulationState,
         resolved: ScenarioInputs,
         period: PeriodRow,
-        config: EnvironmentConfig,
     ) -> pd.DataFrame:
         """Build this period's events; an empty frame means nothing happened.
 
@@ -140,7 +136,6 @@ class DockArrivals(Phase):
         state: SimulationState,
         resolved: ScenarioInputs,
         period: PeriodRow,
-        config: EnvironmentConfig,
     ) -> pd.DataFrame:
         """Dock this period's due arrivals, redirect the overflow, lose what fits nowhere."""
         due = self._due_arrivals(state.in_transit, period.period_id)
@@ -216,10 +211,11 @@ class FormDeparturesPhase(Phase):
 
     The period's own activity (:data:`PERIOD_OWN_RANK`), start to finish:
 
-    1. Take the period's demand, scaled by ``config.demand_scale_factor``
-       (:func:`~gbp.consumers.simulator.mechanics.scale_demand`). Decide how
-       many bikes leave each ``(source, commodity)`` --
-       ``min(demand, inventory)`` -- and take them out of the inventory.
+    1. Take the period's demand (``resolved.historical_demand_df``, already
+       scaled by the run's factor at the run boundary via
+       ``scaled_demand_inputs``). Decide how many bikes leave each
+       ``(source, commodity)`` -- ``min(demand, inventory)`` -- and take them
+       out of the inventory.
     2. Book the demand that did *not* fit as ``lost`` events
        (``reason="stockout"``), so the journal keeps the full split
        ``demand = departed + lost`` instead of quietly dropping the lost demand.
@@ -243,15 +239,11 @@ class FormDeparturesPhase(Phase):
         state: SimulationState,
         resolved: ScenarioInputs,
         period: PeriodRow,
-        config: EnvironmentConfig,
     ) -> pd.DataFrame:
         """Split this period's demand into departed flows and stockout losses."""
         t = period.period_id
         demand = resolved.historical_demand_df
-        demand_now = demand[demand["period_id"] == t].copy()
-        demand_now.loc[:, "quantity"] = scale_demand(
-            demand_now["quantity"], config.demand_scale_factor
-        )
+        demand_now = demand[demand["period_id"] == t]
         if demand_now.empty:
             return empty_flows_journal()
 

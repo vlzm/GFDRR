@@ -107,7 +107,7 @@ def test_plan_rebalance_builds_the_plan_with_a_scripted_solver():
         return scenarios.scripted_stops(3)
 
     plan = plan_rebalance(
-        state, resolved, _period(resolved, 1), RebalancingParams(), 1.0, scripted_solver
+        state, resolved, _period(resolved, 1), RebalancingParams(), scripted_solver
     )
     assert len(calls) == 1
     assert len(plan) == 3
@@ -127,7 +127,7 @@ def test_plan_rebalance_with_no_shortage_returns_empty_and_skips_the_solver():
         raise AssertionError("the solver must not be called when nothing is short")
 
     plan = plan_rebalance(
-        state, resolved, _period(resolved, 1), RebalancingParams(), 1.0, failing_solver
+        state, resolved, _period(resolved, 1), RebalancingParams(), failing_solver
     )
     assert plan.empty
 

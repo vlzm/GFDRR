@@ -13,11 +13,13 @@ rebalancing phases read (a depot, the truck fleet, the historical arrivals
 and the period length).
 """
 
+import types
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from gbp.consumers.simulator import canonical_phases, rebalancing_phases
+from gbp.consumers.simulator import canonical_phases, rebalancing_phases, scaled_demand_inputs
 from gbp.consumers.simulator.rebalancing import (
     RebalancingParams,
     assign_bikes_to_stops,
@@ -96,8 +98,14 @@ def test_target_inventory_is_the_peak_of_running_departures_minus_arrivals():
     assert target.set_index("facility_id")["target"].to_dict() == {"s1": 5}
 
 
-def test_target_inventory_scales_with_demand():
-    """The demand scale factor multiplies both departures and arrivals."""
+def test_scaled_demand_inputs_scales_both_departures_and_arrivals():
+    """The run's demand scale multiplies both the demand and the arrivals tables.
+
+    Scaling is bound into the data at the run boundary
+    (:func:`scaled_demand_inputs`), so the rebalancer's target inventory already
+    reads the scaled tables. Here 2x turns demand 4 and arrivals 1 into 8 and 2,
+    and the target is the (8 - 2) morning shortfall.
+    """
     demand = pd.DataFrame(
         {
             "period_id": [6],
@@ -114,15 +122,21 @@ def test_target_inventory_scales_with_demand():
             "quantity": [1],
         }
     )
+    resolved = types.SimpleNamespace(
+        historical_demand_df=demand, historical_arrivals_df=arrivals
+    )
+    faced = scaled_demand_inputs(resolved, 2.0)
+    assert faced.historical_demand_df["quantity"].tolist() == [8]
+    assert faced.historical_arrivals_df["quantity"].tolist() == [2]
+
     target = target_inventory(
-        demand,
-        arrivals,
+        faced.historical_demand_df,
+        faced.historical_arrivals_df,
         _morning_grid(),
         pd.Timestamp("2026-01-01 01:00"),
         RebalancingParams(),
-        demand_scale_factor=2.0,
     )
-    assert target["target"].tolist() == [6]  # (4 - 1) * 2
+    assert target["target"].tolist() == [6]  # 8 - 2
 
 
 def test_station_imbalance_signs():

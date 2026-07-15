@@ -54,9 +54,8 @@ from gbp.model import (
     rebalance_departed_events,
 )
 
-from .config import EnvironmentConfig
 from .inputs import ScenarioInputs
-from .mechanics import dock_up_to_capacity, free_docks, scale_demand
+from .mechanics import dock_up_to_capacity, free_docks
 from .phases import Phase
 from .state import PeriodRow, SimulationState, SimulatorConfigError
 
@@ -167,7 +166,6 @@ def target_inventory(
     periods_df: pd.DataFrame,
     plan_start: pd.Timestamp,
     params: RebalancingParams,
-    demand_scale_factor: float = 1.0,
 ) -> pd.DataFrame:
     """Bikes each station should hold for the morning (Notations.md §14).
 
@@ -182,9 +180,10 @@ def target_inventory(
     ----------
     demand : pandas.DataFrame
         Expected departures per ``(period_id, facility_id, commodity_category)``
-        with ``quantity`` (the historical demand).
+        with ``quantity``. This is the demand the run faces, already scaled by
+        the run's factor at the run boundary (``scaled_demand_inputs``).
     arrivals : pandas.DataFrame
-        Expected arrivals, same shape (the historical arrivals).
+        Expected arrivals, same shape, already scaled the same way.
     periods_df : pandas.DataFrame
         The period grid with ``period_id`` and ``start_timestamp``; picks the
         morning periods by wall-clock hour.
@@ -193,9 +192,6 @@ def target_inventory(
         day, hours ``[params.target_start_hour, params.target_end_hour)``.
     params : RebalancingParams
         The window settings.
-    demand_scale_factor : float, optional
-        The run's demand multiplier; both departures and arrivals are scaled
-        by it, matching the demand the run actually faces.
 
     Returns
     -------
@@ -222,7 +218,7 @@ def target_inventory(
 
     def _signed(marginal: pd.DataFrame, sign: int) -> pd.DataFrame:
         rows = marginal[marginal["period_id"].isin(period_ids)].copy()
-        rows["net"] = sign * scale_demand(rows["quantity"], demand_scale_factor)
+        rows["net"] = sign * rows["quantity"]
         return rows[["period_id", *_KEYS, "net"]]
 
     net = pd.concat([_signed(demand, +1), _signed(arrivals, -1)], ignore_index=True)
@@ -660,14 +656,11 @@ class PlanRebalancingPhase(Phase):
         state: SimulationState,
         resolved: ScenarioInputs,
         period: PeriodRow,
-        config: EnvironmentConfig,
     ) -> SimulationState:
         """Compute the imbalance, route the trucks, store the bike-level plan."""
         if period.start_timestamp.hour != self.params.window_start_hour:
             return state
-        plan = plan_rebalance(
-            state, resolved, period, self.params, config.demand_scale_factor, self._solver
-        )
+        plan = plan_rebalance(state, resolved, period, self.params, self._solver)
         return state.with_rebalance_plan(plan)
 
 
@@ -676,7 +669,6 @@ def plan_rebalance(
     resolved: ScenarioInputs,
     period: PeriodRow,
     params: RebalancingParams,
-    demand_scale_factor: float,
     solver: SolverFn = solve_rebalance_vrp,
 ) -> pd.DataFrame:
     """Build the bike-level rebalance plan for the window opening at ``period``.
@@ -699,7 +691,6 @@ def plan_rebalance(
         resolved.periods_df,
         period.start_timestamp,
         params,
-        demand_scale_factor,
     )
     imbalance = station_imbalance(state.state_inventory_df, target)
     imbalance = clip_dropoffs_to_free_docks(
@@ -764,7 +755,6 @@ class ApplyRebalancingPhase(Phase):
         state: SimulationState,
         resolved: ScenarioInputs,
         period: PeriodRow,
-        config: EnvironmentConfig,
     ) -> SimulationState:
         """Apply this period's pickups and dropoffs; return the next state."""
         events, remaining_plan = apply_rebalance(state, resolved, period.period_id)

@@ -22,6 +22,7 @@ fail.
 import pandas as pd
 import pytest
 
+from gbp.consumers.simulator import scaled_demand_inputs
 from gbp.consumers.simulator.config import EnvironmentConfig
 from gbp.consumers.simulator.engine import Environment
 from gbp.consumers.simulator.phases import DockArrivals, FormDeparturesPhase
@@ -52,29 +53,20 @@ def test_run_invariants_hold(name, run_scenario):
 
 
 # ---------------------------------------------------------------------------
-# validate_run reads the run's config, not loose scalars
+# validate_run reads the demand the run faced, bound into the data
 # ---------------------------------------------------------------------------
-def test_validate_run_honours_the_config_demand_scale():
-    # A 2x run's journal is valid only against 2x demand. Passing the run's own
-    # config makes the demand-split check I1 face the demand the run faced; a
-    # config at the wrong scale makes I1 compare against a demand the run never
-    # saw and report a violation.
+def test_validate_run_reads_the_demand_the_run_faced():
+    # A 2x run's journal is valid only against 2x demand. The scale is bound into
+    # the demand table at the run boundary, so validating against the same scaled
+    # inputs passes; validating against the unscaled (1x) inputs makes the
+    # demand-split check I1 compare the journal to a demand the run never saw.
     resolved = scenarios.canonical()
+    faced = scaled_demand_inputs(resolved, 2.0)
     _flows, state = scenarios.run(resolved, demand_scale_factor=2.0)
-    matched = EnvironmentConfig(
-        phases=[],
-        scenario_id="t",
-        demand_scale_factor=2.0,
-        number_of_periods=len(resolved.periods_df),
-    )
-    mismatched = EnvironmentConfig(
-        phases=[],
-        scenario_id="t",
-        demand_scale_factor=1.0,
-        number_of_periods=len(resolved.periods_df),
-    )
-    assert validate_run(state, resolved, matched) == []
-    assert any(v.startswith("I1") for v in validate_run(state, resolved, mismatched))
+    n = len(resolved.periods_df)
+    config = EnvironmentConfig(phases=[], scenario_id="t", number_of_periods=n)
+    assert validate_run(state, faced, config) == []
+    assert any(v.startswith("I1") for v in validate_run(state, resolved, config))
 
 
 def test_validate_run_honours_the_config_horizon():
