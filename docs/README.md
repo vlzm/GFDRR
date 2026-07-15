@@ -1,98 +1,100 @@
 # Documentation — start here
 
-The project is a simulator of a bike-sharing system, built on real Citi Bike
-data. The input is a month of trips; the simulator replays that demand period
-by period, and every change is written as one row of the flow journal — an
-append-only table that alone holds the full history of a run. The current
-phase is demand forecasting: a model predicts future demand, and the simulator
-runs on that forecast next to the base replay on history. The canonical
-scenario is therefore two runs — the base replay in
-`notebooks/test_pipeline.ipynb` and the forecast run in
-`notebooks/forecast_pipeline.ipynb`; everything in the codebase must serve one
-of them.
+A framework for problems on flow graphs — networks where commodities move
+between facilities; the first and so far only scenario is the Citi Bike
+bike-sharing system in New York City. This page is the map of `docs/`:
 
-Pick the door that matches what you came for.
+- To run it, go to [Getting Started](#getting-started).
+- To understand it, go to [Key Components](#key-components).
+- To change it, go to [How-to](#how-to).
+- To find the exact contract, go to [Reference](#reference).
 
-## Run it
+## Getting Started
 
-[quickstart.md](getting-started/quickstart.md) takes a clean clone to its first flow journal in
-a few minutes, on a synthetic scenario — no data download. The same page ends
-with the real-data variant: where the trip CSVs come from, how much they
-weigh, which command downloads a month.
+Tutorials: follow the steps and compare with the expected output.
 
-## Understand it
+- [quickstart.md](getting-started/quickstart.md) — from a clean clone to a
+  first flow journal in a few minutes, on a synthetic scenario with no data
+  download; ends with the real-data variant (where the trip CSVs come from,
+  which command downloads a month).
 
-Three short reads, from concrete to general:
+## Key Components
 
-1. [concepts.md](concepts.md) — the five concepts every other page assumes:
-   period, demand, station inventory, flow journal, run artifact.
-2. [worked-examples.md](key-components/worked-examples.md), scenarios 1–3 — the smallest
-   real journal tables: a stockout, a trip that docks in the same period, a
-   trip that docks a period later. Every table there is re-run by a test.
-3. [architecture.md](explanation/architecture.md) — the system as diagrams at
-   three zoom levels, ending with the full module map.
+Explanations: how each part works and why it is built this way — no
+step-by-step instructions. Read the first two pages first; every other page
+assumes them.
 
-## Change it
+- [concepts.md](concepts.md) — the five concepts: period, demand, station
+  inventory, flow journal, run artifact.
+- [architecture.md](explanation/architecture.md) — the system as diagrams
+  at three zoom levels, ending with the full module map.
+- [data-model.md](key-components/data-model.md) — the loaders: from the raw
+  trip CSV to the input tables the simulator reads.
+- [flow-journal.md](key-components/flow-journal.md) — the journal library
+  (`gbp/model/`): the append-only table that holds the full history of a run.
+- [worked-examples.md](key-components/worked-examples.md) — the smallest
+  real journal tables, one scenario each; every table is re-run by a test.
+- [simulation-engine.md](key-components/simulation-engine.md) — how one run
+  works: the period loop, its phases, the invariants.
+- [rebalancing.md](key-components/rebalancing.md) — how the simulator moves
+  bikes by truck at night.
+- [ml-toolkit.md](key-components/ml-toolkit.md) — the demand-forecast
+  pipeline: training, backtesting, champion promotion, monitoring.
+- [visualization.md](key-components/visualization.md) — from a finished run
+  to the screen: the runner, the run artifact, the Streamlit app.
 
-The common changes have a recipe in [how-to/](how-to/) — one page each: the
-task, the steps with real commands and files, the expected result.
+## Scenarios
+
+The first scenario is the Citi Bike system in New York City. Its canonical
+form is two runs, one notebook each:
+
+- [test_pipeline.ipynb](../notebooks/test_pipeline.ipynb) — the base replay
+  of one month of history.
+- [forecast_pipeline.ipynb](../notebooks/forecast_pipeline.ipynb) — the same
+  run on forecast demand.
+
+## How-to
+
+Recipes, one task per page: the steps, real commands, the expected result.
+A new recipe is added when the same task comes up twice.
 
 - [change-the-demand.md](how-to/change-the-demand.md) — scale the demand a
   run faces, or replay another month.
-- [run-on-a-forecast.md](how-to/run-on-a-forecast.md) — run the simulator on
-  a saved forecast instead of history.
+- [run-on-a-forecast.md](how-to/run-on-a-forecast.md) — run the simulator
+  on a saved forecast instead of history.
 - [add-a-table-to-the-run-artifact.md](how-to/add-a-table-to-the-run-artifact.md)
   — precompute a new table into every saved run.
 - [debug-an-invariant-violation.md](how-to/debug-an-invariant-violation.md)
   — find which invariant (I1–I5) broke and which journal rows to look at.
+- [set-up-osrm.md](how-to/set-up-osrm.md) — set up the optional
+  road-network routing server.
 
-A new recipe is added when the same task comes up twice. For a change
-without one, find the part you are changing on the module map in
-[architecture.md](explanation/architecture.md), then open its document:
+## Reference
 
-| Part | Document |
-|---|---|
-| raw trip CSV → simulator inputs | [data-model.md](key-components/data-model.md) |
-| the simulation loop | [simulation-engine.md](key-components/simulation-engine.md) |
-| truck rebalancing | [rebalancing.md](key-components/rebalancing.md) |
-| the journal library (`gbp/model/flows.py`) | [flow-journal.md](key-components/flow-journal.md) |
-| run artifacts and the web interface | [visualization.md](key-components/visualization.md) |
-| the run-artifact API | [api.md](reference/api.md) |
-| demand forecasting | [ml-toolkit.md](key-components/ml-toolkit.md) |
+Exact contracts, for lookup — not a reading route:
 
-Each document ends with a "Why It Is Built This Way" section: the
-load-bearing decisions, each with the alternative that was rejected and the
-reason. Decisions that span several modules live as short records in
-[decisions/](decisions/).
+- [Notations.md](../Notations.md) (repository root) — the project
+  dictionary: every column, status, and table name; one concept, one word.
+- [api.md](reference/api.md) — the HTTP contract of the run-artifact API.
+- [reference/README.md](reference/README.md) — the section index and the
+  command table.
 
-## Find the exact contract
+## Decisions
 
-[Notations.md](../Notations.md) (repository root) is the project dictionary:
-every column, status, and table name — one concept, one word. Open it by
-section when you need a contract; it is a reference, not a reading route.
-The HTTP contract is in [api.md](reference/api.md); the command list is in
-the root [README.md](../README.md).
+Design decisions that span several modules, one short record each;
+single-module decisions stay in each page's "Why It Is Built This Way" section.
+
+- [journal-as-source-of-truth.md](decisions/journal-as-source-of-truth.md)
+  — the run is kept as an append-only journal, not one editable state table.
+- [sizing-run.md](decisions/sizing-run.md) — the initial inventory and dock
+  capacities are measured by a sizing run, not loaded from a file.
+- [forecast-replaces-only-demand.md](decisions/forecast-replaces-only-demand.md)
+  — a forecast run replaces only the demand table of the base replay.
 
 ## The rest of docs/
 
-- `key-components/` — the per-module documents from the table above.
-- `how-to/` — the task recipes from the "Change it" door above, plus
-  [set-up-osrm.md](how-to/set-up-osrm.md): the optional road-network
-  routing server.
-- `decisions/` — short records of design decisions that cannot be derived
-  from the code, one record per decision.
-- `plans/` — the plans of the current work.
-- `reports/` — saved evaluation and review reports.
-- `method/` — the author's personal notes on how to work.
-  [comprehension_levels.md](method/comprehension_levels.md) describes a way to
-  read a codebase in five levels of understanding — background reading, not
-  part of the route above.
-
-## Languages
-
-The canonical language of the documents is English. A Russian companion
-(`*_ru.md`) exists only for the files the author rereads regularly: this page
-([README_ru.md](README_ru.md)),
-[comprehension_levels_ru.md](method/comprehension_levels_ru.md), and
-[working-method.ru.md](method/working-method.ru.md). Each pair is kept in
-sync.
+`plans/` holds the plans of the current work; `reports/` holds saved
+evaluation and review reports; `method/` holds the author's personal notes
+on how to work — background reading, not part of the route above. The
+documents are English; this page has a Russian companion,
+[README_ru.md](README_ru.md), kept in sync.
