@@ -48,6 +48,7 @@ import pydantic
 from gbp.loaders.dataloader_graph import (
     DEFAULT_PERIOD_LEN,
     HISTORICAL_DEMAND_SCHEMA,
+    PeriodGrid,
     get_forecast_periods_df,
 )
 from gbp.loaders.download import month_bounds, normalize_month
@@ -99,14 +100,19 @@ class ForecastMeta(pydantic.BaseModel):
     #: File names of the raw source files the history came from.
     inputs: list[str]
 
+    @property
+    def grid(self) -> PeriodGrid:
+        """The forecast horizon this meta describes, as a :class:`PeriodGrid`."""
+        return PeriodGrid(
+            pd.Timestamp(self.t0),
+            self.horizon_periods,
+            pd.Timedelta(hours=self.period_len_hours),
+        )
+
 
 def forecast_periods_from_meta(meta: ForecastMeta) -> pd.DataFrame:
     """Rebuild the forecast period grid a saved forecast was built for."""
-    return get_forecast_periods_df(
-        pd.Timestamp(meta.t0),
-        meta.horizon_periods,
-        pd.Timedelta(hours=meta.period_len_hours),
-    )
+    return meta.grid.frame()
 
 
 def counts_from_demand(demand_df: pd.DataFrame, periods_df: pd.DataFrame) -> pd.DataFrame:

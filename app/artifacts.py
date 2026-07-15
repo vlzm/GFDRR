@@ -26,6 +26,7 @@ import pandas as pd
 import pandera.pandas as pa
 import pydantic
 
+from gbp.loaders.dataloader_graph import PeriodGrid
 from gbp.model import (
     PANEL_KEYS,
     flows_to_panel,
@@ -888,15 +889,19 @@ def save_scenario_run(
         period_len=data.period_len,
         routes=data.routes,
     )
+    # The run's horizon is one period grid; meta.json stores its three facts
+    # (t0, number_of_periods, period_len_hours) as separate fields, all read
+    # off the same PeriodGrid so they cannot disagree.
+    run_grid = PeriodGrid(data.t0, request.number_of_periods, data.period_len)
     meta = build_meta(
         tables,
         run_name=request.run_name,
         demand_scale_factor=request.demand_scale_factor,
         sizing_scale_factor=request.sizing_scale_factor,
-        number_of_periods=request.number_of_periods,
-        period_len_hours=data.period_len / pd.Timedelta(hours=1),
+        number_of_periods=run_grid.n_periods,
+        period_len_hours=run_grid.period_len_hours,
         routing_mode=data.routing_mode,
-        t0=data.t0,
+        t0=run_grid.t0,
         inputs=[pathlib.Path(data.trips_path).name] if data.trips_path else [],
         violations=result.violations,
         rebalancing=request.rebalancing_meta(),

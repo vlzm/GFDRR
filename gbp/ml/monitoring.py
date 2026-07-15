@@ -55,13 +55,11 @@ from typing import Any
 
 import pandas as pd
 
-from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN
-from gbp.loaders.download import month_bounds, normalize_month
-from gbp.ml.data import ml_dir
+from gbp.loaders.download import normalize_month
+from gbp.ml.data import ml_dir, month_grid
 from gbp.ml.features import HISTORY_FEATURES, WEATHER_FEATURES
 from gbp.ml.forecast import (
     ForecastMeta,
-    forecast_periods_from_meta,
     list_forecasts,
     load_forecast,
     naive_month_prediction,
@@ -148,29 +146,15 @@ def month_period_map(meta: ForecastMeta, month: str) -> pd.DataFrame:
 
     A forecast numbers its periods 0, 1, 2, … from its own ``t0``; a month's
     training partition numbers its hours 0, 1, 2, … from the month's first
-    hour. The two are lined up by wall-clock time. Returns one row per
-    forecast period that falls inside the month: ``period_id`` (the
-    forecast's) and ``month_period_id``. Empty when the horizon does not
-    touch the month, or when the forecast's periods are not the month's
-    hours (a different period length, or a start between hours).
+    hour. The two grids are lined up by wall-clock time
+    (:meth:`PeriodGrid.align_to`). Returns one row per forecast period that
+    falls inside the month: ``period_id`` (the forecast's) and
+    ``month_period_id``. Empty when the horizon does not touch the month, or
+    when the forecast's periods are not the month's hours (a different period
+    length, or a start between hours).
     """
-    empty = pd.DataFrame({"period_id": [], "month_period_id": []}).astype("int64")
-    if pd.Timedelta(hours=meta.period_len_hours) != DEFAULT_PERIOD_LEN:
-        return empty
-    grid = forecast_periods_from_meta(meta)
-    start, end = month_bounds(month)
-    inside = grid[(grid["start_timestamp"] >= start) & (grid["start_timestamp"] < end)]
-    if inside.empty:
-        return empty
-    offsets = inside["start_timestamp"] - start
-    if (offsets % DEFAULT_PERIOD_LEN != pd.Timedelta(0)).any():
-        return empty
-    return pd.DataFrame(
-        {
-            "period_id": inside["period_id"].astype("int64"),
-            "month_period_id": (offsets // DEFAULT_PERIOD_LEN).astype("int64"),
-        }
-    ).reset_index(drop=True)
+    mapping = meta.grid.align_to(month_grid(month))
+    return mapping.rename(columns={"other_period_id": "month_period_id"})
 
 
 def score_forecast_against_month(

@@ -260,6 +260,7 @@ trip event). The rebalancing phases (§14) are their first user.
 | `trip_speed_km_per_period` | Mean riding speed over the historical trips, in km per period. `routes` (§13) turns a straight-line distance into a travel time with it. |
 | `period_len` | Wall-clock length of one period (default one hour); `start_timestamp` / `end_timestamp` are the period's bounds. |
 | `t0` | Wall-clock start of period 0: the earliest historical trip start, floored to the hour. Saved in `meta.json`, so the UI can show times instead of period ids. |
+| `PeriodGrid` | The numbering of periods from a `t0` with a fixed `period_len`: period `k` covers `[t0 + k * period_len, t0 + (k + 1) * period_len)`, numbered 0, 1, 2, … The one place that rule is written (`PeriodGrid` in `gbp/loaders/dataloader_graph.py`). `.frame()` builds the rows (`period_id`, `start_timestamp`, `end_timestamp`); `.align_to(other)` lines two grids up by wall-clock time. The forecast horizon, the month period grid, and the run's `meta.json` all build their grids from it. |
 
 ### 6.1. Rate and cost (money)
 

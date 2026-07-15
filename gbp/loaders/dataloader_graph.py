@@ -11,6 +11,7 @@ of that contract (declared statically at the bottom of this module).
 """
 
 import copy
+import dataclasses
 import pathlib
 from typing import TYPE_CHECKING
 
@@ -159,6 +160,62 @@ def hour_of_week(ts: pd.Series) -> pd.Series:
     return (ts.dt.dayofweek * 24 + ts.dt.hour).astype("int64")
 
 
+@dataclasses.dataclass(frozen=True)
+class PeriodGrid:
+    """A numbering of periods from ``t0`` with a fixed period length.
+
+    The one place the rule "period ``k`` covers
+    ``[t0 + k * period_len, t0 + (k + 1) * period_len)``, numbered 0, 1, 2, …"
+    is written. Every task that numbers periods from a start builds its grid
+    here -- the forecast horizon, the month period grid, monitoring's
+    forecast-to-month alignment, and the run's ``meta.json`` -- so their
+    numbering cannot drift apart.
+    """
+
+    t0: pd.Timestamp
+    n_periods: int
+    period_len: pd.Timedelta = DEFAULT_PERIOD_LEN
+
+    @property
+    def period_len_hours(self) -> float:
+        """The period length as a number of hours (the ``meta.json`` field)."""
+        return float(self.period_len / pd.Timedelta(hours=1))
+
+    def frame(self) -> pd.DataFrame:
+        """One row per period: ``period_id``, ``start_timestamp``, ``end_timestamp``."""
+        periods_df = pd.DataFrame({"period_id": range(self.n_periods)})
+        periods_df["start_timestamp"] = self.t0 + periods_df["period_id"] * self.period_len
+        periods_df["end_timestamp"] = periods_df["start_timestamp"] + self.period_len
+        return periods_df
+
+    def align_to(self, other: "PeriodGrid") -> pd.DataFrame:
+        """Line this grid's periods up with ``other``'s by wall-clock time.
+
+        Returns one row per period of this grid whose start falls inside
+        ``other``'s span and lands on one of ``other``'s period boundaries:
+        ``period_id`` (this grid's) next to ``other_period_id`` (the matching
+        period of ``other``). Empty when the two grids use different period
+        lengths, or when no period of this grid lines up with ``other``.
+        """
+        empty = pd.DataFrame({"period_id": [], "other_period_id": []}).astype("int64")
+        if self.period_len != other.period_len:
+            return empty
+        grid = self.frame()
+        span_end = other.t0 + other.n_periods * other.period_len
+        inside = grid[(grid["start_timestamp"] >= other.t0) & (grid["start_timestamp"] < span_end)]
+        if inside.empty:
+            return empty
+        offsets = inside["start_timestamp"] - other.t0
+        if (offsets % other.period_len != pd.Timedelta(0)).any():
+            return empty
+        return pd.DataFrame(
+            {
+                "period_id": inside["period_id"].astype("int64"),
+                "other_period_id": (offsets // other.period_len).astype("int64"),
+            }
+        ).reset_index(drop=True)
+
+
 def get_periods_df(
     trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta
 ) -> pd.DataFrame:
@@ -170,10 +227,7 @@ def get_periods_df(
     hour.
     """
     n_periods = int(to_period_id(trips_df["ended_at"], t0, period_len).max()) + 1
-    periods_df = pd.DataFrame({"period_id": range(n_periods)})
-    periods_df["start_timestamp"] = t0 + periods_df["period_id"] * period_len
-    periods_df["end_timestamp"] = periods_df["start_timestamp"] + period_len
-    return periods_df
+    return PeriodGrid(t0, n_periods, period_len).frame()
 
 
 def get_forecast_periods_df(
@@ -187,10 +241,7 @@ def get_forecast_periods_df(
     (the demand filter per period, the invariant checks, the panel) all count
     periods from 0.
     """
-    periods_df = pd.DataFrame({"period_id": range(number_of_periods)})
-    periods_df["start_timestamp"] = t0 + periods_df["period_id"] * period_len
-    periods_df["end_timestamp"] = periods_df["start_timestamp"] + period_len
-    return periods_df
+    return PeriodGrid(t0, number_of_periods, period_len).frame()
 
 
 # ---------------------------------------------------------------------------

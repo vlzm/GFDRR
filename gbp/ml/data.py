@@ -25,7 +25,7 @@ from collections.abc import Callable
 import pandas as pd
 import requests
 
-from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN, get_forecast_periods_df
+from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN, PeriodGrid
 from gbp.loaders.download import month_bounds, raw_dir
 
 _DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[2] / "data"
@@ -40,6 +40,17 @@ def ml_dir() -> pathlib.Path:
     return pathlib.Path(os.environ.get("DATA_DIR", _DEFAULT_DATA_DIR)) / "ml"
 
 
+def month_grid(month: str) -> PeriodGrid:
+    """Build the hourly period grid of one calendar month, as a :class:`PeriodGrid`.
+
+    ``period_id`` is 0 at the month's first hour. Callers that need the rows
+    use :func:`month_period_grid`; monitoring keeps the grid object to line a
+    forecast horizon up with the month (:meth:`PeriodGrid.align_to`).
+    """
+    start, end = month_bounds(month)
+    return PeriodGrid(start, int((end - start) / DEFAULT_PERIOD_LEN), DEFAULT_PERIOD_LEN)
+
+
 def month_period_grid(month: str) -> pd.DataFrame:
     """Build the hourly period grid of one calendar month (Notations.md §17).
 
@@ -49,10 +60,7 @@ def month_period_grid(month: str) -> pd.DataFrame:
     its hours on it, and a forecast of a held-out month uses it as the
     forecast horizon (the backtest and the monitoring baseline).
     """
-    start, end = month_bounds(month)
-    return get_forecast_periods_df(
-        start, int((end - start) / DEFAULT_PERIOD_LEN), DEFAULT_PERIOD_LEN
-    )
+    return month_grid(month).frame()
 
 
 # ---------------------------------------------------------------------------
