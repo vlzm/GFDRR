@@ -12,6 +12,7 @@ import pytest
 from gbp.consumers.simulator import run_sized_scenario
 from gbp.loaders.dataloader_graph import (
     apply_forecast_demand,
+    apply_saved_forecast,
     get_forecast_periods_df,
     hour_of_week,
     map_od_matrix_by_hour_of_week,
@@ -282,6 +283,64 @@ def test_apply_forecast_demand_rejects_a_different_period_length():
     )
     with pytest.raises(ValueError, match="period length"):
         apply_forecast_demand(resolved, demand, two_hour_grid)
+
+
+def test_apply_saved_forecast_runs_the_scenario_on_the_artifact(tmp_path):
+    """The named-forecast step: a saved artifact in, a scenario running on it out."""
+    resolved = synthetic_history_resolved()
+    forecast.build_seasonal_naive_forecast(
+        resolved.historical_demand_df,
+        resolved.periods_df,
+        forecast_name="naive_w1",
+        horizon_periods=168,
+        inputs=["trips.csv"],
+        root=tmp_path,
+    )
+    saved_demand, _ = forecast.load_forecast("naive_w1", tmp_path)
+
+    out, dropped_share = apply_saved_forecast(resolved, "naive_w1", root=tmp_path)
+
+    # The forecast came from the scenario's own history, so nothing is cut.
+    assert dropped_share == 0.0
+    assert out is not resolved
+    assert out.historical_demand_df["quantity"].sum() == saved_demand["quantity"].sum()
+    assert len(out.periods_df) == 168
+    assert out.t0 == out.periods_df["start_timestamp"].iloc[0]
+    # The horizon starts right where the history ends.
+    assert out.t0 == resolved.periods_df["end_timestamp"].iloc[-1]
+
+
+def test_apply_saved_forecast_cuts_rows_the_scenario_cannot_run(tmp_path):
+    """A demand row at an uncovered station-hour is cut, not a ``ValueError``.
+
+    ``apply_forecast_demand`` refuses demand without OD rows; the
+    named-forecast step cuts those rows first and reports their share, so a
+    forecast built from wider data than the scenario's trip CSV still runs.
+    """
+    resolved = synthetic_history_resolved()
+    demand, horizon = forecast_tables(resolved)
+    # Demand at an hour of week no historical trip ever departed at.
+    orphan = demand_table([(100, "s1", 1)])
+    orphan["quantity"] = orphan["quantity"].astype("int64")
+    total = int(demand["quantity"].sum()) + 1
+    meta = forecast.ForecastMeta(
+        forecast_name="wide",
+        model_name="seasonal_naive",
+        model_version="1",
+        created_at="2026-01-01T00:00:00",
+        t0=pd.Timestamp(horizon["start_timestamp"].iloc[0]).isoformat(),
+        horizon_periods=len(horizon),
+        period_len_hours=1.0,
+        history_start=pd.Timestamp(resolved.periods_df["start_timestamp"].iloc[0]).isoformat(),
+        history_end=pd.Timestamp(resolved.periods_df["end_timestamp"].iloc[-1]).isoformat(),
+        inputs=["trips.csv"],
+    )
+    forecast.save_forecast(pd.concat([demand, orphan], ignore_index=True), meta, tmp_path)
+
+    out, dropped_share = apply_saved_forecast(resolved, "wide", root=tmp_path)
+
+    assert dropped_share == pytest.approx(1 / total)
+    assert out.historical_demand_df["quantity"].sum() == total - 1
 
 
 def test_forecast_run_departs_exactly_the_forecast_demand():

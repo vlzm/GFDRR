@@ -39,12 +39,12 @@ from __future__ import annotations
 import argparse
 import pathlib
 from collections.abc import Callable
+from typing import Literal
 
 import artifacts
 import pandas as pd
-from runner import build_graph_data
+from runner import RunRequest, build_graph_data, run_and_save
 
-from gbp.consumers.simulator import run_sized_scenario
 from gbp.loaders.dataloader_graph import (
     ResolvedModelData,
     apply_forecast_demand,
@@ -118,7 +118,7 @@ def _ensure_run(
     periods_df: pd.DataFrame,
     *,
     run_name: str,
-    demand_source: str,
+    demand_source: Literal["history", "forecast"],
     forecast_name: str | None = None,
     forecast_dropped_share: float | None = None,
     sizing_demand_df: pd.DataFrame | None = None,
@@ -127,12 +127,13 @@ def _ensure_run(
 ) -> None:
     """Run one evaluation run and save its artifact; skip when it already exists.
 
-    The demand goes in through :func:`apply_forecast_demand` — the forecast-run
-    path — and the artifact is saved through the same
-    :func:`artifacts.save_scenario_run` operation the runner uses. With
-    ``sizing_demand_df`` the state is sized on that table instead of the run's
-    own demand; the evaluation passes the actual demand there, so every
-    forecast runs against the replay state.
+    The demand table is put in place with :func:`apply_forecast_demand` (the
+    forecast-run path), and the run goes through the same
+    :func:`runner.run_and_save` the terminal runner uses -- so an evaluation
+    run is a normal run artifact, built the one way. With ``sizing_demand_df``
+    the state is sized on that table instead of the run's own demand; the
+    evaluation passes the actual demand there, so every forecast runs against
+    the replay state (Notations.md §11).
     """
     if run_name in artifacts.list_runs(root):
         log(f"{run_name}: exists, skipping")
@@ -142,25 +143,22 @@ def _ensure_run(
     sizing_data = None
     if sizing_demand_df is not None:
         sizing_data = apply_forecast_demand(graph_data, sizing_demand_df, periods_df)
-    result = run_sized_scenario(
-        data,
-        scenario_id=run_name,
-        number_of_periods=len(periods_df),
-        validate=False,
-        sizing_data=sizing_data,
-    )
-    artifacts.save_scenario_run(
-        result,
-        data,
+    request = RunRequest(
         run_name=run_name,
         number_of_periods=len(periods_df),
         demand_source=demand_source,
         forecast_name=forecast_name,
+    )
+    run_and_save(
+        data,
+        request,
+        sizing_data=sizing_data,
         forecast_dropped_share=forecast_dropped_share,
         root=root,
+        on_progress=log,
     )
     meta = artifacts.load_run_meta(run_name, root)
-    log(f"{run_name}: violations={len(result.violations)} totals={meta.totals}")
+    log(f"{run_name}: violations={len(meta.violations)} totals={meta.totals}")
 
 
 def _panel_departed_mae(panel_df: pd.DataFrame, reference_panel_df: pd.DataFrame) -> float:

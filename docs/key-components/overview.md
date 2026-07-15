@@ -339,8 +339,8 @@ review the design.
 
 | Module               | Interface in one line                                                    | What it hides                                                                                          |
 | -------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `runner.py`          | `build_graph_data(...)`, `run_scenario(graph_data, ...) -> saved folder` | the stage order and the progress reporting                                                             |
-| `artifacts.py`       | `save_scenario_run(result, data, ...)`, `load_run_table`, `load_run_meta` | one build function per saved table, which result field feeds which builder, the artifact's pandera schemas, the `METRICS` registry, run naming |
+| `runner.py`          | `RunRequest`, `build_graph_data(...)`, `run_scenario(graph_data, request) -> saved folder` | the one run recipe (`RunRequest`), the stage order, `run_and_save` (the shared run-then-save step), and the progress reporting                                                             |
+| `artifacts.py`       | `save_scenario_run(result, data, request, ...)`, `load_run_table`, `load_run_meta` | one build function per saved table, which result field feeds which builder, the artifact's pandera schemas, the `METRICS` registry, run naming |
 | `evaluate.py`        | `python app/evaluate.py --month <YYYYMM>`                                 | the reference run, one replay-state forecast run per model, the shared demand cut (`restrict_demand_to_scenario`), `comparison.csv`          |
 | `api.py`             | six HTTP endpoints ([api.md](../reference/api.md))                                    | the single worker thread, the run queue, the disk fallback after a restart                             |
 | `api_client.py`      | `list_runs`, `load_table`, `start_run`, `run_status`                     | URL building, the API-key header, response decoding                                                    |

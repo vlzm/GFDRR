@@ -27,32 +27,11 @@ import artifacts
 import pydantic
 import runner
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Response
+from runner import RunRequest
 
 from gbp.loaders.dataloader_graph import ResolvedModelData
 
 PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
-
-
-class RunRequest(pydantic.BaseModel):
-    """The body of ``POST /runs``: the keyword parameters of ``runner.run_scenario``.
-
-    ``run_name`` is restricted to plain file-name characters, so it always
-    names a folder inside the runs root. There is no trips-path field on
-    purpose: which data the server runs on is a server setting
-    (``TRIPS_PATH``), not a request field.
-    """
-
-    run_name: str = pydantic.Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-    demand_scale_factor: float
-    sizing_scale_factor: float = 1.0
-    number_of_periods: int = runner.DEFAULT_NUMBER_OF_PERIODS
-    demand_source: Literal["history", "forecast"] = "history"
-    #: A saved forecast on the server's disk (``data/ml/forecasts/``);
-    #: required when ``demand_source="forecast"``.
-    forecast_name: str | None = None
-    rebalancing: bool = False
-    truck_homes: list[str] | None = None
-    truck_capacity_bikes: int = runner.DEFAULT_TRUCK_CAPACITY_BIKES
 
 
 class RunState(pydantic.BaseModel):
@@ -110,17 +89,12 @@ def _worker_loop() -> None:
                 state.progress.append(
                     "Loading the server dataset (a few minutes; kept for later runs)"
                 )
+            # The queued request still carries the requested name; the run must
+            # use the free (possibly versioned) name resolved when it was
+            # queued (``start_run``), so a saved artifact is never overwritten.
             runner.run_scenario(
                 _server_graph_data(),
-                run_name=state.run_name,
-                demand_scale_factor=request.demand_scale_factor,
-                sizing_scale_factor=request.sizing_scale_factor,
-                number_of_periods=request.number_of_periods,
-                demand_source=request.demand_source,
-                forecast_name=request.forecast_name,
-                rebalancing=request.rebalancing,
-                truck_homes=request.truck_homes,
-                truck_capacity_bikes=request.truck_capacity_bikes,
+                request.model_copy(update={"run_name": state.run_name}),
                 on_progress=state.progress.append,
             )
             state.status = "done"

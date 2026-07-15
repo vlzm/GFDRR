@@ -60,11 +60,14 @@ run is created. `DATA_DIR` moves the data folder.
 — it loads the CSV into `RawModelData` and resolves `ResolvedModelData`
 ([data-model.md](data-model.md)), takes minutes, and is independent of the
 run parameters, so callers run it once and reuse it. `run_scenario` does one
-run against loaded data: the forecast substitution if asked
-(`--demand-source forecast`), the truck fleet on a shallow copy if
-rebalancing is on, then `run_sized_scenario` and
-`artifacts.save_scenario_run`. It must not modify `graph_data` — the Run
-page shares one cached copy across runs.
+run against loaded data described by one `RunRequest`: the forecast
+substitution if asked (`--demand-source forecast`), then `run_and_save` —
+the shared step that applies the truck fleet on a shallow copy if rebalancing
+is on, sizes and runs the scenario (`run_sized_scenario`), and saves the
+artifact (`artifacts.save_scenario_run`). The two-level evaluation
+(`evaluate.py`) runs through the same `run_and_save`, so a run is built one
+way from either entry. It must not modify `graph_data` — the Run page shares
+one cached copy across runs.
 
 `artifacts.py` computes everything once, at save time. `build_run_tables`
 builds the five tables from one finalized journal; the panel itself is a

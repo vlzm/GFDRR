@@ -157,17 +157,17 @@ if st.button("Run", type="primary"):
     if rebalancing and not truck_homes:
         st.error("Rebalancing is on but the truck fleet is empty. Add at least one truck.")
         st.stop()
-    request = {
-        "run_name": requested_name,
-        "demand_scale_factor": float(demand_scale),
-        "sizing_scale_factor": float(sizing_scale),
-        "number_of_periods": int(periods),
-        "demand_source": demand_source,
-        "forecast_name": forecast_name,
-        "rebalancing": bool(rebalancing),
-        "truck_homes": truck_homes or None,
-        "truck_capacity_bikes": int(truck_capacity),
-    }
+    request = runner.RunRequest(
+        run_name=requested_name,
+        demand_scale_factor=float(demand_scale),
+        sizing_scale_factor=float(sizing_scale),
+        number_of_periods=int(periods),
+        demand_source=demand_source,
+        forecast_name=forecast_name,
+        rebalancing=bool(rebalancing),
+        truck_homes=truck_homes or None,
+        truck_capacity_bikes=int(truck_capacity),
+    )
     with st.status("Running…", expanded=True) as status:
         try:
             run_name = bk.run_and_wait(request, trips_path, on_progress=st.write)

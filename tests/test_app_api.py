@@ -55,13 +55,13 @@ def fake_runner(monkeypatch, runs_root):
     """Replace the heavy pipeline with a fast fake that saves a real artifact."""
     monkeypatch.setattr(runner, "build_graph_data", lambda **kwargs: "graph-data")
 
-    def fake_run_scenario(graph_data, *, run_name, on_progress=None, **kwargs):
+    def fake_run_scenario(graph_data, request, on_progress=None):
         if on_progress is not None:
             on_progress("Sizing the state, running the simulation, checking the invariants I1-I5")
         resolved = scenarios.canonical()
         journal, _ = scenarios.run(resolved)
-        _save_run(run_name, resolved, journal, runs_root)
-        return runs_root / run_name
+        _save_run(request.run_name, resolved, journal, runs_root)
+        return runs_root / request.run_name
 
     monkeypatch.setattr(runner, "run_scenario", fake_run_scenario)
 
@@ -234,7 +234,9 @@ def test_api_backend_forwards_progress_and_returns_the_final_name(monkeypatch):
     monkeypatch.setattr(api_client, "run_status", lambda name: next(states))
 
     lines: list[str] = []
-    name = backend.ApiBackend().run_and_wait({"run_name": "x"}, None, on_progress=lines.append)
+    name = backend.ApiBackend().run_and_wait(
+        runner.RunRequest(run_name="x"), None, on_progress=lines.append
+    )
     assert name == "x_version_2"
     assert lines == ["Queued on the server as x_version_2.", "step 1", "step 2"]
 
@@ -252,6 +254,8 @@ def test_api_backend_raises_run_failed_with_the_server_error(monkeypatch):
         lambda name: {"status": "failed", "progress": [], "error": "ValueError: boom"},
     )
     with pytest.raises(backend.RunFailed) as caught:
-        backend.ApiBackend().run_and_wait({"run_name": "bad"}, None, on_progress=lambda line: None)
+        backend.ApiBackend().run_and_wait(
+            runner.RunRequest(run_name="bad"), None, on_progress=lambda line: None
+        )
     assert caught.value.run_name == "bad"
     assert "boom" in str(caught.value)

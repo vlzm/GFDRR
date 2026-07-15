@@ -18,6 +18,7 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "app"))
 
 import artifacts  # noqa: E402  (needs the app folder on sys.path)
+import runner  # noqa: E402
 
 from gbp.model import flows_to_panel  # noqa: E402
 from tests import scenarios  # noqa: E402
@@ -69,8 +70,10 @@ def _save_run(name, resolved, journal, root):
     artifacts.save_scenario_run(
         result,
         data,
-        run_name=name,
-        number_of_periods=int(resolved.periods_df["period_id"].max()) + 1,
+        runner.RunRequest(
+            run_name=name,
+            number_of_periods=int(resolved.periods_df["period_id"].max()) + 1,
+        ),
         root=root,
     )
     return artifacts.load_run_meta(name, root)

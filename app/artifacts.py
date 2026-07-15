@@ -7,9 +7,10 @@ and ``meta.json``. The UI only reads these files; it never runs a simulation
 and never recomputes what this module can precompute.
 
 :func:`save_scenario_run` is the one operation that turns a finished run
-(a ``ScenarioRun`` plus its scenario data) into a saved artifact. The terminal
-runner, the two-level evaluation and the test fixtures all call it, so which
-result field feeds which builder argument is written once, here.
+(a ``ScenarioRun`` plus its scenario data and its :class:`~runner.RunRequest`)
+into a saved artifact. ``runner.run_and_save`` (the terminal runner and the
+two-level evaluation) and the test fixtures all call it, so which result field
+feeds which builder argument is written once, here.
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ from gbp.model.journal_schema import FLOW_EVENT_SCHEMA, schema_violations
 from gbp.routing import Routes
 
 if TYPE_CHECKING:
+    from runner import RunRequest
+
     from gbp.consumers.simulator import ScenarioRun
 
 #: The parquet tables a run artifact holds, by file stem.
@@ -832,14 +835,8 @@ def save_run(
 def save_scenario_run(
     result: ScenarioRun,
     data: Any,
+    request: RunRequest,
     *,
-    run_name: str,
-    number_of_periods: int,
-    demand_scale_factor: float = 1.0,
-    sizing_scale_factor: float = 1.0,
-    rebalancing: dict[str, Any] | None = None,
-    demand_source: str = "history",
-    forecast_name: str | None = None,
     forecast_dropped_share: float | None = None,
     root: pathlib.Path | None = None,
 ) -> pathlib.Path:
@@ -847,36 +844,29 @@ def save_scenario_run(
 
     This is the one operation that turns a run result and its scenario data
     into a saved artifact. It reads the journal, the sized state tables and
-    the violations off ``result``, and the facility tables, the rates, the
-    period length, the routes, ``routing_mode``, ``t0`` and ``trips_path``
-    off ``data`` — no caller wires those fields by hand.
+    the violations off ``result``; the facility tables, the rates, the period
+    length, the routes, ``routing_mode``, ``t0`` and ``trips_path`` off
+    ``data``; and the run parameters off ``request`` -- no caller wires those
+    fields by hand.
 
     Parameters
     ----------
     result : ScenarioRun
         A finished run from ``run_sized_scenario``.
     data : scenario data
-        The scenario the run actually used. For a forecast run pass the copy
+        The scenario the run actually used. For a forecast run this is the copy
         with the forecast demand applied (its period grid and ``t0`` are the
-        forecast horizon's), not the original. ``ResolvedModelData`` carries
-        every field read here; a synthetic supplier must carry
-        ``facilities_df``, ``facilities_geo_df``,
+        forecast horizon's), not the original -- ``run_and_save`` builds the
+        run and this artifact from the same ``data``, so the two always agree.
+        ``ResolvedModelData`` carries every field read here; a synthetic
+        supplier must carry ``facilities_df``, ``facilities_geo_df``,
         ``commodities_categories_rates_df``, ``period_len``, ``routes``,
         ``routing_mode``, ``t0`` and ``trips_path`` (None when the scenario
         was built from a synthetic journal, not a raw file).
-    run_name : str
-        Folder name of the artifact; also the name the UI shows.
-    number_of_periods : int
-        How many periods the run stepped.
-    demand_scale_factor, sizing_scale_factor : float, optional
-        The run's demand multipliers (see :func:`build_meta`).
-    rebalancing : dict, optional
-        The run's rebalancing settings (see :func:`build_meta`).
-    demand_source : str, optional
-        Where the demand table came from: ``"history"`` (default) or
-        ``"forecast"``.
-    forecast_name : str, optional
-        The forecast artifact a forecast run used.
+    request : RunRequest
+        The run recipe. Supplies the run name, the demand multipliers, the
+        period count, the demand source and forecast name, and the rebalancing
+        block (:meth:`RunRequest.rebalancing_meta`) written to ``meta.json``.
     forecast_dropped_share : float, optional
         Share of the forecast demand total cut before the run
         (``restrict_demand_to_scenario``). None on history runs.
@@ -900,21 +890,21 @@ def save_scenario_run(
     )
     meta = build_meta(
         tables,
-        run_name=run_name,
-        demand_scale_factor=demand_scale_factor,
-        sizing_scale_factor=sizing_scale_factor,
-        number_of_periods=number_of_periods,
+        run_name=request.run_name,
+        demand_scale_factor=request.demand_scale_factor,
+        sizing_scale_factor=request.sizing_scale_factor,
+        number_of_periods=request.number_of_periods,
         period_len_hours=data.period_len / pd.Timedelta(hours=1),
         routing_mode=data.routing_mode,
         t0=data.t0,
         inputs=[pathlib.Path(data.trips_path).name] if data.trips_path else [],
         violations=result.violations,
-        rebalancing=rebalancing,
-        demand_source=demand_source,
-        forecast_name=forecast_name,
+        rebalancing=request.rebalancing_meta(),
+        demand_source=request.demand_source,
+        forecast_name=request.forecast_name,
         forecast_dropped_share=forecast_dropped_share,
     )
-    return save_run(run_name, tables, meta, root)
+    return save_run(request.run_name, tables, meta, root)
 
 
 def load_run_table(run_name: str, table: str, root: pathlib.Path | None = None) -> pd.DataFrame:

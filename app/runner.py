@@ -19,9 +19,11 @@ from __future__ import annotations
 import argparse
 import pathlib
 from collections.abc import Callable
+from typing import Literal
 
 import artifacts
 import pandas as pd
+import pydantic
 
 from gbp.consumers.simulator import (
     RebalancingParams,
@@ -31,13 +33,11 @@ from gbp.consumers.simulator import (
 )
 from gbp.loaders.dataloader_graph import (
     ResolvedModelData,
-    apply_forecast_demand,
+    apply_saved_forecast,
     apply_truck_fleet,
-    restrict_demand_to_scenario,
 )
 from gbp.loaders.dataloader_raw import RawModelData
 from gbp.logging import configure_logging
-from gbp.ml import forecast
 from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
 
 DEFAULT_TRIPS_PATH = str(artifacts.data_dir() / "raw" / "202601-citibike-tripdata_1.csv")
@@ -52,6 +52,60 @@ DEPOT_IDS = [f"depot_{i + 1}" for i in range(DEFAULT_N_DEPOTS)]
 DEFAULT_TRUCK_HOMES = ["depot_1"] * 5
 DEFAULT_TRUCK_CAPACITY_BIKES = 20
 DEFAULT_TRUCK_RATE = 50.0
+
+
+class RunRequest(pydantic.BaseModel):
+    """The full recipe of one run: every parameter that says what to run.
+
+    One definition, shared by every entry point. The API takes it as the
+    ``POST /runs`` body, the Run scenario page and the two-level evaluation
+    build it, and :func:`run_scenario` reads every field from it -- so the run
+    parameters cannot drift entry point by entry point. It carries what to run,
+    not where: the resolved data, the runs root, and the progress callback are
+    passed to :func:`run_scenario` next to it.
+
+    ``run_name`` is restricted to plain file-name characters, so it always
+    names a folder inside the runs root.
+    """
+
+    run_name: str = pydantic.Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    demand_scale_factor: float = 1.0
+    sizing_scale_factor: float = 1.0
+    number_of_periods: int = DEFAULT_NUMBER_OF_PERIODS
+    demand_source: Literal["history", "forecast"] = "history"
+    #: A saved forecast (``data/ml/forecasts/``); required when
+    #: ``demand_source="forecast"``.
+    forecast_name: str | None = None
+    rebalancing: bool = False
+    truck_homes: list[str] | None = None
+    truck_capacity_bikes: int = DEFAULT_TRUCK_CAPACITY_BIKES
+
+    @pydantic.model_validator(mode="after")
+    def _forecast_needs_a_name(self) -> RunRequest:
+        """Require a forecast name when the demand source is a forecast (Notations.md §11)."""
+        if self.demand_source == "forecast" and not self.forecast_name:
+            raise ValueError("demand_source='forecast' needs a forecast_name")
+        return self
+
+    def resolved_truck_homes(self) -> list[str]:
+        """Home depot per truck the run uses: the request's list, or the default fleet."""
+        if self.truck_homes is not None:
+            return list(self.truck_homes)
+        return list(DEFAULT_TRUCK_HOMES)
+
+    def rebalancing_meta(self) -> dict[str, object]:
+        """Build the run's rebalancing block for ``meta.json`` (Notations.md §14).
+
+        ``{"enabled": False}`` for a run without rebalancing; with it on, the
+        resolved truck homes and the per-truck capacity are added, so the meta
+        records the fleet the run actually used (the default fleet when the
+        request left ``truck_homes`` unset).
+        """
+        meta: dict[str, object] = {"enabled": self.rebalancing}
+        if self.rebalancing:
+            meta["truck_homes"] = self.resolved_truck_homes()
+            meta["truck_capacity_bikes"] = self.truck_capacity_bikes
+        return meta
 
 
 def build_graph_data(
@@ -100,67 +154,32 @@ def build_graph_data(
 
 def run_scenario(
     graph_data: ResolvedModelData,
+    request: RunRequest,
     *,
-    run_name: str,
-    demand_scale_factor: float,
-    sizing_scale_factor: float = 1.0,
-    number_of_periods: int = DEFAULT_NUMBER_OF_PERIODS,
-    demand_source: str = "history",
-    forecast_name: str | None = None,
-    rebalancing: bool = False,
-    truck_homes: list[str] | None = None,
-    truck_capacity_bikes: int = DEFAULT_TRUCK_CAPACITY_BIKES,
     root: pathlib.Path | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> pathlib.Path:
-    """Size, run, validate, and save one scenario as a run artifact.
+    """Resolve the run's demand from ``graph_data``, then run and save it.
 
-    The state (initial inventory and dock capacities) is sized against
-    ``sizing_scale_factor``; the run itself faces ``demand_scale_factor``.
-    Equal values give a clean, no-loss run; a larger run scale makes the
-    limits take effect (stockout and dock-full events appear).
+    The entry point the API, the Run scenario page and the terminal runner
+    use. It reads the recipe from ``request`` and turns ``graph_data`` into the
+    data the run faces: the historical replay as it is, or -- with
+    ``request.demand_source="forecast"`` -- a saved forecast loaded from
+    ``data/ml/forecasts/`` and mapped onto the scenario by
+    :func:`apply_saved_forecast` (Notations.md §11). It then hands that data to
+    :func:`run_and_save`, which sizes, runs, validates, and saves the artifact.
 
-    With ``demand_source="forecast"`` the run is a forecast run
-    (Notations.md §11): the named forecast is loaded from
-    ``data/ml/forecasts/`` and put in place of the historical demand with
-    :func:`apply_forecast_demand` — the period grid becomes the forecast
-    horizon and the OD matrix is mapped onto it by hour of week. Everything
-    after that is the same sized-run path.
-
-    :func:`run_sized_scenario` is called with ``validate=False``: a violated
-    invariant is recorded in ``meta.json`` as ``violations`` instead of
-    raising, so the UI can show a failed run next to the good ones.
+    ``graph_data`` is never modified: the forecast step and the truck fleet
+    (in :func:`run_and_save`) both work on shallow copies, so the Run page can
+    share one cached ``graph_data`` across runs.
 
     Parameters
     ----------
     graph_data : ResolvedModelData
-        The resolved scenario data. Not modified: the sized state stays inside
-        :func:`run_sized_scenario`, and the truck fleet is applied to a
-        shallow copy. The Run page shares one cached ``graph_data`` across
-        runs, so this must hold.
-    run_name : str
-        Name of the artifact folder (and of the run in the UI).
-    demand_scale_factor : float
-        Demand multiplier the run faces.
-    sizing_scale_factor : float, optional
-        Demand multiplier the state is sized to survive with no loss.
-    number_of_periods : int, optional
-        How many periods to step.
-    demand_source : {"history", "forecast"}, optional
-        Where the demand table comes from. Default ``"history"``.
-    forecast_name : str, optional
-        Name of the saved forecast to run on. Required when
-        ``demand_source="forecast"``.
-    rebalancing : bool, optional
-        When True, run with the two overnight-rebalancing phases
-        (Notations.md §14) and the truck fleet below. Default False: the
-        canonical three phases only, trucks stay idle.
-    truck_homes : list of str, optional
-        Home depot per truck, one entry per truck (the list length is the
-        fleet size). Only read when ``rebalancing`` is True. Default:
-        ``DEFAULT_TRUCK_HOMES`` (5 trucks at ``depot_1``).
-    truck_capacity_bikes : int, optional
-        Bikes one truck can carry. Only read when ``rebalancing`` is True.
+        The resolved scenario data (the historical replay).
+    request : RunRequest
+        The run recipe: name, scale factors, period count, demand source,
+        forecast name, and the rebalancing fleet.
     root : pathlib.Path, optional
         Runs root override.
     on_progress : callable, optional
@@ -176,67 +195,115 @@ def run_scenario(
         if on_progress is not None:
             on_progress(message)
 
-    if demand_source not in DEMAND_SOURCES:
-        raise ValueError(f"demand_source must be one of {DEMAND_SOURCES}, got {demand_source!r}")
-    if demand_source == "forecast" and not forecast_name:
-        raise ValueError("demand_source='forecast' needs a forecast_name")
-
-    homes = list(truck_homes) if truck_homes is not None else list(DEFAULT_TRUCK_HOMES)
-    data = graph_data
-    phases = None
+    data: ResolvedModelData = graph_data
     forecast_dropped_share: float | None = None
-    if demand_source == "forecast":
-        assert forecast_name is not None
-        progress(f"Loading forecast {forecast_name} and mapping the OD matrix onto its horizon")
-        forecast_demand_df, forecast_meta = forecast.load_forecast(forecast_name)
-        forecast_periods_df = forecast.forecast_periods_from_meta(forecast_meta)
-        # A forecast can name stations or station-hours the scenario's trip
-        # CSV has never seen; those rows have no OD rows to run on, so they
-        # are cut first, like the evaluation does (app/evaluate.py).
-        forecast_demand_df, forecast_dropped_share = restrict_demand_to_scenario(
-            forecast_demand_df, data, forecast_periods_df
+    if request.demand_source == "forecast":
+        assert request.forecast_name is not None  # RunRequest guarantees this
+        progress(
+            f"Loading forecast {request.forecast_name} and mapping the OD matrix onto its horizon"
         )
+        data, forecast_dropped_share = apply_saved_forecast(data, request.forecast_name)
         if forecast_dropped_share > 0:
             progress(
                 f"Cut {forecast_dropped_share:.2%} of the forecast demand: rows the "
                 "scenario has no OD rows for (unknown stations or station-hours)"
             )
-        data = apply_forecast_demand(data, forecast_demand_df, forecast_periods_df)
-    if rebalancing:
+
+    return run_and_save(
+        data,
+        request,
+        forecast_dropped_share=forecast_dropped_share,
+        root=root,
+        on_progress=on_progress,
+    )
+
+
+def run_and_save(
+    data: ResolvedModelData,
+    request: RunRequest,
+    *,
+    sizing_data: ResolvedModelData | None = None,
+    forecast_dropped_share: float | None = None,
+    root: pathlib.Path | None = None,
+    on_progress: Callable[[str], None] | None = None,
+) -> pathlib.Path:
+    """Apply the fleet, size and run the scenario on ``data``, save the artifact.
+
+    The step every run shares, working on the data the run actually faces.
+    :func:`run_scenario` calls it after resolving the demand from a history or
+    a forecast source; the two-level evaluation (``app/evaluate.py``) calls it
+    with data whose demand it applied itself, adding ``sizing_data`` so the
+    state is sized on one demand table while the run faces another -- the
+    replay-state forecast run (Notations.md §11).
+
+    The state (initial inventory and dock capacities) is sized against
+    ``request.sizing_scale_factor``; the run itself faces
+    ``request.demand_scale_factor``. Equal values give a clean, no-loss run; a
+    larger run scale makes the limits take effect (stockout and dock-full
+    events appear).
+
+    Both the run and the saved artifact are built from this one ``data``, so
+    the artifact records the period grid and ``t0`` the run actually used -- a
+    forecast run's ``data`` carries the forecast horizon. There is no
+    ``graph_data`` in scope to pass by mistake.
+
+    :func:`run_sized_scenario` is called with ``validate=False``: a violated
+    invariant is recorded in ``meta.json`` as ``violations`` instead of
+    raising, so the UI can show a failed run next to the good ones.
+
+    Parameters
+    ----------
+    data : ResolvedModelData
+        The scenario data the run faces (its demand already in place). Not
+        modified: the truck fleet is applied to a shallow copy.
+    request : RunRequest
+        The run recipe (see :class:`RunRequest`).
+    sizing_data : ResolvedModelData, optional
+        The data the state is sized on, when it differs from ``data`` (the
+        two-level evaluation's replay state). Default: size on ``data`` itself,
+        which gives a clean run.
+    forecast_dropped_share : float, optional
+        Share of the forecast demand cut before the run, recorded in the meta.
+        None on history runs.
+    root : pathlib.Path, optional
+        Runs root override.
+    on_progress : callable, optional
+        Called with a short message before each stage (for UI status boxes).
+
+    Returns
+    -------
+    pathlib.Path
+        The saved artifact folder.
+    """
+
+    def progress(message: str) -> None:
+        if on_progress is not None:
+            on_progress(message)
+
+    phases = None
+    if request.rebalancing:
+        homes = request.resolved_truck_homes()
         progress(f"Applying the truck fleet: {len(homes)} trucks")
-        data = apply_truck_fleet(data, homes, truck_capacity_bikes, DEFAULT_TRUCK_RATE)
+        data = apply_truck_fleet(data, homes, request.truck_capacity_bikes, DEFAULT_TRUCK_RATE)
         phases = canonical_phases() + rebalancing_phases(RebalancingParams())
 
     progress("Sizing the state, running the simulation, checking the invariants I1-I5")
     result = run_sized_scenario(
         data,
-        scenario_id=run_name,
-        demand_scale_factor=demand_scale_factor,
-        sizing_scale_factor=sizing_scale_factor,
-        number_of_periods=number_of_periods,
+        scenario_id=request.run_name,
+        demand_scale_factor=request.demand_scale_factor,
+        sizing_scale_factor=request.sizing_scale_factor,
+        number_of_periods=request.number_of_periods,
         phases=phases,
-        # The UI records the violation list in meta.json instead of failing
-        # on a raised error.
         validate=False,
+        sizing_data=sizing_data,
     )
 
     progress("Building and saving the run artifact")
-    rebalancing_meta: dict = {"enabled": rebalancing}
-    if rebalancing:
-        rebalancing_meta["truck_homes"] = homes
-        rebalancing_meta["truck_capacity_bikes"] = truck_capacity_bikes
-    # A forecast run's grid and t0 are the forecast horizon's, so the artifact
-    # is built from `data` (the copy the run actually used), not `graph_data`.
     return artifacts.save_scenario_run(
         result,
         data,
-        run_name=run_name,
-        number_of_periods=number_of_periods,
-        demand_scale_factor=demand_scale_factor,
-        sizing_scale_factor=sizing_scale_factor,
-        rebalancing=rebalancing_meta,
-        demand_source=demand_source,
-        forecast_name=forecast_name,
+        request,
         forecast_dropped_share=forecast_dropped_share,
         root=root,
     )
@@ -304,8 +371,7 @@ def main() -> None:
     truck_homes = None
     if args.truck_homes:
         truck_homes = [home.strip() for home in args.truck_homes.split(",") if home.strip()]
-    folder = run_scenario(
-        graph_data,
+    request = RunRequest(
         run_name=args.run_name,
         demand_scale_factor=args.demand_scale,
         sizing_scale_factor=args.sizing_scale,
@@ -315,8 +381,8 @@ def main() -> None:
         rebalancing=args.rebalancing,
         truck_homes=truck_homes,
         truck_capacity_bikes=args.truck_capacity,
-        on_progress=print,
     )
+    folder = run_scenario(graph_data, request, on_progress=print)
     meta = artifacts.load_run_meta(args.run_name)
     print(f"Saved {folder}")
     print(f"Invariant violations: {len(meta.violations)}")

@@ -56,11 +56,12 @@ restart the disk answers instead (a `meta.json` means `done`).
 | `POST /runs` | `202` + the final `run_name` to poll |
 | `GET /runs/{run_name}/status` | `queued` / `running` / `done` / `failed`, plus `progress` lines and `error` |
 
-The `POST /runs` body mirrors the keyword parameters of
-`runner.run_scenario` (`demand_scale_factor`, `number_of_periods`,
-`demand_source`, `forecast_name`, `rebalancing`, `truck_homes`, ...). The
-server resolves the final run name itself through the free-name rule, so two
-quick `POST`s with the same name never write into one folder. Two inputs are
+The `POST /runs` body is a `runner.RunRequest` — the one typed run recipe
+every entry point shares (`demand_scale_factor`, `number_of_periods`,
+`demand_source`, `forecast_name`, `rebalancing`, `truck_homes`, ...), which
+the worker passes straight into `runner.run_scenario`. The server resolves the
+final run name itself through the free-name rule, so two quick `POST`s with the
+same name never write into one folder. Two inputs are
 server settings, not request fields: the trips path (`TRIPS_PATH`) and the
 forecast list (`data/ml/forecasts/` on the server's disk). There is no
 version prefix and no delete endpoint: one client and one server ship from

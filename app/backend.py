@@ -18,11 +18,15 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import api_client
 import artifacts
 import pandas as pd
 import streamlit as st
+
+if TYPE_CHECKING:
+    from runner import RunRequest
 
 #: Seconds between two polls of a run executing on the server.
 _POLL_SECONDS = 2
@@ -84,22 +88,24 @@ class DiskBackend:
         return str(artifacts.run_dir(artifacts.next_free_run_name(requested_name)))
 
     def run_and_wait(
-        self, request: dict, trips_path: str | None, on_progress: Callable[[str], None]
+        self, request: RunRequest, trips_path: str | None, on_progress: Callable[[str], None]
     ) -> str:
         """Run one scenario in this process; return the final run name.
 
-        ``request`` holds the keyword parameters of ``runner.run_scenario`` —
-        the same fields ``POST /runs`` takes. The requested name goes through
-        the free-name rule here, exactly as the server does it, so a saved
-        run is never overwritten.
+        ``request`` is the typed run recipe (:class:`runner.RunRequest`), the
+        same object ``POST /runs`` takes. The requested name goes through the
+        free-name rule here, exactly as the server does it, so a saved run is
+        never overwritten.
         """
         import runner
 
         on_progress("Loading data (a few minutes the first time; cached afterwards)…")
         graph_data = _graph_data_cached(trips_path)
-        final_name = artifacts.next_free_run_name(request["run_name"])
+        final_name = artifacts.next_free_run_name(request.run_name)
         runner.run_scenario(
-            graph_data, **{**request, "run_name": final_name}, on_progress=on_progress
+            graph_data,
+            request.model_copy(update={"run_name": final_name}),
+            on_progress=on_progress,
         )
         return final_name
 
@@ -152,17 +158,18 @@ class ApiBackend:
         return f"{requested_name} on the server"
 
     def run_and_wait(
-        self, request: dict, trips_path: str | None, on_progress: Callable[[str], None]
+        self, request: RunRequest, trips_path: str | None, on_progress: Callable[[str], None]
     ) -> str:
         """Queue one run on the server (``POST /runs``) and poll it to the end.
 
-        The status endpoint carries the same progress lines ``on_progress``
-        prints locally; each new line is passed on. ``trips_path`` is ignored:
-        the server runs on its own dataset. Raises :class:`RunFailed` with
-        the server's error text when the run fails.
+        The typed request travels as its JSON body (``model_dump``). The status
+        endpoint carries the same progress lines ``on_progress`` prints
+        locally; each new line is passed on. ``trips_path`` is ignored: the
+        server runs on its own dataset. Raises :class:`RunFailed` with the
+        server's error text when the run fails.
         """
         del trips_path
-        answer = api_client.start_run(request)
+        answer = api_client.start_run(request.model_dump())
         final_name = answer["run_name"]
         on_progress(f"Queued on the server as {final_name}.")
         shown = 0
