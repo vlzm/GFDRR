@@ -52,7 +52,7 @@ from gbp.loaders.dataloader_graph import (
     get_forecast_periods_df,
 )
 from gbp.loaders.download import month_bounds, normalize_month
-from gbp.ml.data import load_weather_daily, ml_dir, month_period_grid
+from gbp.ml.data import MlPaths, load_weather_daily, ml_dir, month_period_grid
 from gbp.ml.features import HISTORY_WEEKS, build_features, clip_history_window
 from gbp.ml.models import DemandModel, create_model
 from gbp.model.journal_schema import schema_violations
@@ -520,9 +520,7 @@ def build_model_forecast(
     *,
     horizon_periods: int,
     forecast_name: str,
-    root: pathlib.Path | None = None,
-    training_root: pathlib.Path | None = None,
-    raw: pathlib.Path | None = None,
+    paths: MlPaths | None = None,
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
     **model_params: object,
@@ -546,9 +544,10 @@ def build_model_forecast(
         How many one-hour periods the forecast covers.
     forecast_name : str
         Folder name of the forecast artifact.
-    root, training_root, raw : pathlib.Path, optional
-        Folder overrides for the forecast artifacts, the training
-        partitions, and the raw files (``raw`` feeds the horizon weather).
+    paths : MlPaths, optional
+        Folder overrides for the forecast artifacts, the training partitions,
+        and the raw files (the raw folder feeds the horizon weather). Default:
+        the repository folders (:meth:`MlPaths.resolve`).
     weather_df : pandas.DataFrame, optional
         Daily weather for the horizon dates; without it the published
         weather is loaded (and missing dates stay NaN).
@@ -566,15 +565,16 @@ def build_model_forecast(
     # builder, and only this builder needs it.
     from gbp.ml.training import load_training_table
 
+    paths = paths or MlPaths.resolve()
     months = sorted(normalize_month(m) for m in train_months)
     log(f"Training {model_name} on {months[0]}..{months[-1]} ...")
-    train_table = load_training_table(months, training_root)
+    train_table = load_training_table(months, paths.training)
     model = create_model(model_name, **model_params)
     model.fit(train_table)
 
     t0 = month_bounds(months[-1])[1]
     horizon_end = t0 + horizon_periods * DEFAULT_PERIOD_LEN
-    weather_df = _horizon_weather(t0, horizon_end, raw, weather_df, log)
+    weather_df = _horizon_weather(t0, horizon_end, paths.raw, weather_df, log)
     log(f"Predicting {horizon_periods} periods from {t0} ...")
     return _finish_forecast(
         model,
@@ -586,8 +586,8 @@ def build_model_forecast(
         history_start=month_bounds(months[0])[0],
         history_end=t0,
         inputs=[f"{month}.parquet" for month in months],
-        root=root,
-        training_root=training_root,
+        root=paths.forecasts,
+        training_root=paths.training,
         weather_df=weather_df,
     )
 
@@ -597,10 +597,7 @@ def build_champion_forecast(
     horizon_periods: int,
     forecast_name: str,
     t0_month: str | None = None,
-    root: pathlib.Path | None = None,
-    training_root: pathlib.Path | None = None,
-    raw: pathlib.Path | None = None,
-    tracking_dir: pathlib.Path | None = None,
+    paths: MlPaths | None = None,
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
 ) -> pathlib.Path:
@@ -625,9 +622,10 @@ def build_champion_forecast(
         The month the horizon starts at, as ``YYYYMM`` — the forecast then
         starts at that month's first hour. Default: right after the newest
         training partition on disk.
-    root, training_root, raw, tracking_dir : pathlib.Path, optional
-        Folder overrides for the forecast artifacts, the training
-        partitions, the raw files, and the MLflow store.
+    paths : MlPaths, optional
+        Folder overrides for the forecast artifacts, the training partitions,
+        the raw files, and the MLflow store. Default: the repository folders
+        (:meth:`MlPaths.resolve`).
     weather_df : pandas.DataFrame, optional
         Daily weather for the horizon dates; without it the published
         weather is loaded (and missing dates stay NaN).
@@ -642,13 +640,14 @@ def build_champion_forecast(
     # Imported here, not at the top: the registry drags in MLflow and the
     # training module is the partition builder — only this builder needs them.
     from gbp.ml.registry import MlflowStore
-    from gbp.ml.training import history_months, partition_path, training_dir
+    from gbp.ml.training import history_months, partition_path
 
-    model, version = MlflowStore(tracking_dir).resolve_champion()
+    paths = paths or MlPaths.resolve()
+    model, version = MlflowStore(paths.tracking).resolve_champion()
     log(f"Champion: {model.name} version {version.version}")
 
     if t0_month is None:
-        partitions = sorted((training_root or training_dir()).glob("*.parquet"))
+        partitions = sorted(paths.training.glob("*.parquet"))
         if not partitions:
             raise FileNotFoundError(
                 "no training partitions; build them first (python -m gbp.ml.training)"
@@ -660,9 +659,9 @@ def build_champion_forecast(
         t0 = month_bounds(t0_month)[0]
 
     horizon_end = t0 + horizon_periods * DEFAULT_PERIOD_LEN
-    weather_df = _horizon_weather(t0, horizon_end, raw, weather_df, log)
+    weather_df = _horizon_weather(t0, horizon_end, paths.raw, weather_df, log)
     log(f"Predicting {horizon_periods} periods from {t0} ...")
-    window = [m for m in history_months(t0_month) if partition_path(m, training_root).exists()]
+    window = [m for m in history_months(t0_month) if partition_path(m, paths.training).exists()]
     return _finish_forecast(
         model,
         t0=t0,
@@ -673,8 +672,8 @@ def build_champion_forecast(
         history_start=month_bounds(window[0])[0] if window else t0,
         history_end=t0,
         inputs=[f"{month}.parquet" for month in window],
-        root=root,
-        training_root=training_root,
+        root=paths.forecasts,
+        training_root=paths.training,
         weather_df=weather_df,
     )
 

@@ -17,6 +17,7 @@ import pytest
 
 from gbp.loaders.download import month_bounds
 from gbp.ml import monitoring
+from gbp.ml.data import MlPaths
 from gbp.ml.forecast import ForecastMeta, save_forecast
 
 CLASSIC = "classic_bike"
@@ -128,11 +129,9 @@ def test_month_period_map_rejects_periods_that_are_not_the_months_hours():
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def roots(tmp_path):
-    training = tmp_path / "training"
-    training.mkdir()
-    return types.SimpleNamespace(
-        training=training, forecasts=tmp_path / "forecasts", monitoring=tmp_path / "monitoring"
-    )
+    paths = MlPaths.under(tmp_path)
+    paths.training.mkdir()
+    return paths
 
 
 def test_score_month_scores_overlapping_forecasts_and_the_baseline(roots):
@@ -145,9 +144,7 @@ def test_score_month_scores_overlapping_forecasts_and_the_baseline(roots):
 
     rows = monitoring.score_month(
         "202601",
-        forecasts_root=roots.forecasts,
-        training_root=roots.training,
-        root=roots.monitoring,
+        paths=roots,
         log=lambda message: None,
     )
 
@@ -170,9 +167,7 @@ def test_score_month_replaces_rows_instead_of_duplicating_them(roots):
     for _ in range(2):
         monitoring.score_month(
             "202601",
-            forecasts_root=roots.forecasts,
-            training_root=roots.training,
-            root=roots.monitoring,
+            paths=roots,
             log=lambda message: None,
         )
 
@@ -186,9 +181,7 @@ def test_score_month_without_history_leaves_the_baseline_missing(roots):
 
     rows = monitoring.score_month(
         "202601",
-        forecasts_root=roots.forecasts,
-        training_root=roots.training,
-        root=roots.monitoring,
+        paths=roots,
         log=lambda message: None,
     )
 
@@ -256,8 +249,7 @@ def test_drift_report_compares_the_month_against_the_champions_training_data(roo
 
     summary_path = monitoring.drift_report(
         "202601",
-        training_root=roots.training,
-        root=roots.monitoring,
+        paths=roots,
         sample_rows=500,
         log=lambda message: None,
     )
@@ -286,4 +278,4 @@ def test_drift_report_without_a_champion_raises(roots, monkeypatch):
 
     monkeypatch.setattr(registry.MlflowStore, "champion_version", lambda self: None)
     with pytest.raises(LookupError, match="no champion"):
-        monitoring.drift_report("202601", training_root=roots.training, root=roots.monitoring)
+        monitoring.drift_report("202601", paths=roots)

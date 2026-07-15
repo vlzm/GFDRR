@@ -58,7 +58,7 @@ import mlflow
 import pandas as pd
 
 from gbp.loaders.download import month_bounds, normalize_month
-from gbp.ml.data import load_weather_daily, month_period_grid
+from gbp.ml.data import MlPaths, load_weather_daily, month_period_grid
 from gbp.ml.forecast import forecast_input, naive_month_prediction
 from gbp.ml.metrics import forecast_metrics
 from gbp.ml.models import MODEL_FAMILIES, create_model
@@ -134,8 +134,7 @@ def data_version() -> str:
 
 def month_forecast_input(
     test_month: str,
-    training_root: pathlib.Path | None = None,
-    raw: pathlib.Path | None = None,
+    paths: MlPaths | None = None,
     weather_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Build the forecast input for one held-out month.
@@ -145,11 +144,12 @@ def month_forecast_input(
     and the weather defaults to the month's actual weather — in a backtest
     that plays the role of a perfect weather forecast.
     """
+    paths = paths or MlPaths.resolve()
     horizon = month_period_grid(test_month)
-    history = load_history_counts(test_month, training_root)
+    history = load_history_counts(test_month, paths.training)
     if weather_df is None:
         start, end = month_bounds(test_month)
-        weather_df = load_weather_daily(start, end - pd.Timedelta(days=1), raw)
+        weather_df = load_weather_daily(start, end - pd.Timedelta(days=1), paths.raw)
     return forecast_input(history, horizon, weather_df)
 
 
@@ -183,8 +183,7 @@ def run_backtest(
     model_names: Sequence[str] = MODEL_FAMILIES,
     n_splits: int = 3,
     *,
-    training_root: pathlib.Path | None = None,
-    raw: pathlib.Path | None = None,
+    paths: MlPaths | None = None,
     store: MlflowStore | None = None,
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
@@ -198,6 +197,7 @@ def run_backtest(
     unknown = set(model_names) - set(MODEL_FAMILIES)
     if unknown:
         raise ValueError(f"unknown model families: {', '.join(sorted(unknown))}")
+    paths = paths or MlPaths.resolve()
     splits = backtest_splits(months, n_splits)
     version = data_version()
 
@@ -211,10 +211,10 @@ def run_backtest(
             f"split {index}: train {split.train_months[0]}..{split.train_months[-1]} "
             f"-> test {split.test_month}"
         )
-        train_table = load_training_table(list(split.train_months), training_root)
-        features = month_forecast_input(split.test_month, training_root, raw, weather_df)
-        actual = load_actual_month(split.test_month, training_root)
-        naive_df = naive_month_prediction(split.test_month, training_root)
+        train_table = load_training_table(list(split.train_months), paths.training)
+        features = month_forecast_input(split.test_month, paths, weather_df)
+        actual = load_actual_month(split.test_month, paths.training)
+        naive_df = naive_month_prediction(split.test_month, paths.training)
         if naive_df is not None:
             baseline = forecast_metrics(actual, naive_df)
             baseline_records.append({"test_month": split.test_month, **baseline})

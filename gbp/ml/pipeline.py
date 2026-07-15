@@ -52,7 +52,7 @@ from gbp.loaders.download import (
     raw_trip_months,
 )
 from gbp.ml.backtest import data_version, run_backtest
-from gbp.ml.data import ml_dir
+from gbp.ml.data import MlPaths, ml_dir
 from gbp.ml.models import MODEL_FAMILIES, create_model
 from gbp.ml.registry import MlflowStore
 from gbp.ml.station_status import download_status_months, next_month
@@ -181,8 +181,7 @@ def step_download(
 
 def step_build_table(
     months: Sequence[str] | None = None,
-    raw: pathlib.Path | None = None,
-    training_root: pathlib.Path | None = None,
+    paths: MlPaths | None = None,
     log: Callable[[str], None] = print,
 ) -> list[str]:
     """Build the missing training partitions, oldest first. Returns the built months.
@@ -190,15 +189,16 @@ def step_build_table(
     Without ``months``, builds every month whose CSVs are on disk but whose
     partition is not. A partition already on disk is kept as is.
     """
+    paths = paths or MlPaths.resolve()
     if months is None:
-        months = raw_trip_months(raw)
+        months = raw_trip_months(paths.raw)
     built: list[str] = []
     for month in sorted(normalize_month(m) for m in months):
-        path = partition_path(month, training_root)
+        path = partition_path(month, paths.training)
         if path.exists():
             log(f"build-table {month}: partition exists, skipping")
             continue
-        write_month_partition(month, raw, training_root)
+        write_month_partition(month, paths.raw, paths.training)
         log(f"build-table {month}: -> {path}")
         built.append(month)
     if not built:
@@ -250,8 +250,7 @@ def step_backtest(
     months: Sequence[str] | None = None,
     n_splits: int = 3,
     *,
-    training_root: pathlib.Path | None = None,
-    raw: pathlib.Path | None = None,
+    paths: MlPaths | None = None,
     store: MlflowStore | None = None,
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
@@ -265,9 +264,10 @@ def step_backtest(
     the candidate (or there is no champion yet), one set of scores serves
     both sides.
     """
+    paths = paths or MlPaths.resolve()
     store = store or MlflowStore()
     if months is None:
-        months = partition_months(training_root)
+        months = partition_months(paths.training)
     families = [str(candidate.tags["model_family"])]
     champion = store.champion_version()
     if champion is not None and champion.tags["model_family"] not in families:
@@ -276,8 +276,7 @@ def step_backtest(
         list(months),
         families,
         n_splits,
-        training_root=training_root,
-        raw=raw,
+        paths=paths,
         store=store,
         weather_df=weather_df,
         log=log,
@@ -391,9 +390,7 @@ def run_pipeline(
     family: str = "lightgbm",
     months: Sequence[str] | None = None,
     n_splits: int = 3,
-    raw: pathlib.Path | None = None,
-    training_root: pathlib.Path | None = None,
-    tracking_dir: pathlib.Path | None = None,
+    paths: MlPaths | None = None,
     log_path: pathlib.Path | None = None,
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
@@ -404,33 +401,37 @@ def run_pipeline(
     the backtest always read every partition on disk — a new month extends
     the history, it does not replace it. The ``.dvc`` files are refreshed
     when download or build-table changed the default data folders, so the
-    data version in the log names what was actually trained on.
-    ``tracking_dir`` names the MLflow store folder; the store object is
-    created once here and passed to every step that talks to MLflow.
+    data version in the log names what was actually trained on — a run with
+    its own ``paths`` (a test on ``tmp_path``) never touches dvc. ``paths``
+    also names the MLflow store folder (``paths.tracking``); the store object
+    is created once here and passed to every step that talks to MLflow.
     """
     unknown = set(steps) - set(STEPS)
     if unknown:
         raise ValueError(f"unknown steps: {', '.join(sorted(unknown))}; known: {', '.join(STEPS)}")
     ordered = [step for step in STEPS if step in steps]
 
+    on_default_folders = paths is None
+    paths = paths or MlPaths.resolve()
+
     changed = False
     if "download" in ordered:
-        changed |= bool(step_download(months, raw, log))
+        changed |= bool(step_download(months, paths.raw, log))
     if "build-table" in ordered:
-        changed |= bool(step_build_table(months, raw, training_root, log))
-    if changed and raw is None and training_root is None:
+        changed |= bool(step_build_table(months, paths, log))
+    if changed and on_default_folders:
         refresh_dvc(log)
 
     if not ({"train", "backtest", "promote"} & set(ordered)):
         return None
     version = data_version()
-    store = MlflowStore(tracking_dir)
+    store = MlflowStore(paths.tracking)
 
     if "train" in ordered:
         candidate = step_train(
             family,
             data_ver=version,
-            training_root=training_root,
+            training_root=paths.training,
             store=store,
             log=log,
         )
@@ -448,8 +449,7 @@ def run_pipeline(
         comparison = step_backtest(
             candidate,
             n_splits=n_splits,
-            training_root=training_root,
-            raw=raw,
+            paths=paths,
             store=store,
             weather_df=weather_df,
             log=log,

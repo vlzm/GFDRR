@@ -17,6 +17,7 @@ from gbp.ml.backtest import (
     comparison_table,
     run_backtest,
 )
+from gbp.ml.data import MlPaths
 from gbp.ml.metrics import (
     align_forecast,
     busy_facility_ids,
@@ -378,8 +379,8 @@ def flat_weather(start: str, end: str) -> pd.DataFrame:
 
 
 def test_run_backtest_logs_every_split_to_mlflow(tmp_path):
-    training_root = tmp_path / "training"
-    training_root.mkdir()
+    paths = MlPaths.under(tmp_path)
+    paths.training.mkdir()
     for month in ["202502", "202503", "202504"]:
         partition = month_partition(month)
         if month == "202504":
@@ -387,14 +388,14 @@ def test_run_backtest_logs_every_split_to_mlflow(tmp_path):
             # the naive forecast is exact, its MAE is 0, and the ratio
             # against itself would be 0/0.
             partition.loc[0, "quantity"] += 1
-        partition.to_parquet(training_root / f"{month}.parquet", index=False)
+        partition.to_parquet(paths.training / f"{month}.parquet", index=False)
 
     store = MlflowStore(tmp_path / "mlflow")
     table = run_backtest(
         ["202502", "202503", "202504"],
         ["seasonal_naive"],
         n_splits=1,
-        training_root=training_root,
+        paths=paths,
         store=store,
         weather_df=flat_weather("2025-02-01", "2025-04-30"),
         log=lambda message: None,

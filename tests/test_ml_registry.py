@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from gbp.ml import registry
+from gbp.ml.data import MlPaths
 from gbp.ml.forecast import build_champion_forecast, load_forecast
 from gbp.ml.models import create_model
 from gbp.ml.pipeline import (
@@ -226,15 +227,14 @@ def test_published_missing_months_stops_at_the_first_unpublished(monkeypatch):
 # The pipeline end to end on the tiny fixture
 # ---------------------------------------------------------------------------
 def test_pipeline_promotes_the_first_version_and_keeps_it_on_rerun(tmp_path):
-    training_root = tmp_path / "training"
-    write_tiny_partitions(training_root)
     store = registry.MlflowStore(tmp_path / "mlflow")
+    paths = MlPaths.under(tmp_path, tracking=store.root)
+    write_tiny_partitions(paths.training)
     log_path = tmp_path / "pipeline_log.csv"
     settings = {
         "family": "seasonal_naive",
         "n_splits": 1,
-        "training_root": training_root,
-        "tracking_dir": store.root,
+        "paths": paths,
         "log_path": log_path,
         "weather_df": flat_weather("2025-02-01", "2025-04-30"),
         "log": lambda message: None,
@@ -258,23 +258,21 @@ def test_pipeline_promotes_the_first_version_and_keeps_it_on_rerun(tmp_path):
 
 
 def test_champion_forecast_resolves_the_model_by_alias(tmp_path):
-    training_root = tmp_path / "training"
-    months = write_tiny_partitions(training_root)
     store = registry.MlflowStore(tmp_path / "mlflow")
+    paths = MlPaths.under(tmp_path, tracking=store.root)
+    months = write_tiny_partitions(paths.training)
     version = store.register_version(fitted_naive(), train_months=months, data_version="abc123")
     store.promote_to_champion(version)
 
     build_champion_forecast(
         horizon_periods=24,
         forecast_name="champion_test",
-        root=tmp_path / "forecasts",
-        training_root=training_root,
-        tracking_dir=store.root,
+        paths=paths,
         weather_df=flat_weather("2025-05-01", "2025-05-02"),
         log=lambda message: None,
     )
 
-    demand_df, meta = load_forecast("champion_test", tmp_path / "forecasts")
+    demand_df, meta = load_forecast("champion_test", paths.forecasts)
     assert meta.model_name == "seasonal_naive"
     assert meta.model_version == str(version.version)
     # The horizon starts right after the newest partition (April 2025).

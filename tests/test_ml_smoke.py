@@ -15,6 +15,7 @@ import pytest
 from gbp.loaders.dataloader_graph import HISTORICAL_DEMAND_SCHEMA
 from gbp.loaders.download import month_bounds
 from gbp.ml import registry
+from gbp.ml.data import MlPaths
 from gbp.ml.forecast import build_model_forecast, load_forecast
 from gbp.ml.pipeline import STEPS, run_pipeline
 from gbp.model.journal_schema import schema_violations
@@ -34,23 +35,22 @@ from tests.test_ml_training import NEW_HEADER, new_row
     ],
 )
 def test_trained_model_forecast_obeys_the_demand_schema(family, params, tmp_path):
-    training_root = tmp_path / "training"
-    months = write_tiny_partitions(training_root)
+    paths = MlPaths.under(tmp_path)
+    months = write_tiny_partitions(paths.training)
 
     folder = build_model_forecast(
         family,
         months,
         horizon_periods=24,
         forecast_name=f"smoke_{family}",
-        root=tmp_path / "forecasts",
-        training_root=training_root,
+        paths=paths,
         weather_df=flat_weather("2025-05-01", "2025-05-01"),
         log=lambda message: None,
         **params,
     )
-    assert folder == tmp_path / "forecasts" / f"smoke_{family}"
+    assert folder == paths.forecasts / f"smoke_{family}"
 
-    demand_df, meta = load_forecast(f"smoke_{family}", tmp_path / "forecasts")
+    demand_df, meta = load_forecast(f"smoke_{family}", paths.forecasts)
     assert meta.model_name == family
     assert len(demand_df) > 0
     assert schema_violations(HISTORICAL_DEMAND_SCHEMA, demand_df) == []
@@ -86,28 +86,25 @@ def write_weather_year(raw) -> None:
 
 
 def test_pipeline_runs_all_five_steps_on_the_fixture(tmp_path, monkeypatch):
-    raw = tmp_path / "raw"
-    raw.mkdir()
+    store = registry.MlflowStore(tmp_path / "mlflow")
+    paths = MlPaths.under(tmp_path, tracking=store.root)
+    paths.raw.mkdir()
     months = ["202502", "202503", "202504"]
     for month in months:
-        write_month_csv(raw, month)
-    write_weather_year(raw)
+        write_month_csv(paths.raw, month)
+    write_weather_year(paths.raw)
 
     def bucket_has_nothing(month: str) -> list[str]:
         raise ValueError(f"the bucket has no monthly zip for {month}")
 
     monkeypatch.setattr("gbp.ml.pipeline.month_zip_keys", bucket_has_nothing)
 
-    training_root = tmp_path / "training"
-    store = registry.MlflowStore(tmp_path / "mlflow")
     log_path = tmp_path / "pipeline_log.csv"
     notes = []
     settings = {
         "family": "seasonal_naive",
         "n_splits": 1,
-        "raw": raw,
-        "training_root": training_root,
-        "tracking_dir": store.root,
+        "paths": paths,
         "log_path": log_path,
         "log": notes.append,
     }
@@ -117,7 +114,7 @@ def test_pipeline_runs_all_five_steps_on_the_fixture(tmp_path, monkeypatch):
     # The trigger asked the bucket and found nothing new to download.
     assert any("no new months published" in note for note in notes)
     # build-table made one partition per fixture month.
-    assert sorted(p.stem for p in training_root.glob("*.parquet")) == months
+    assert sorted(p.stem for p in paths.training.glob("*.parquet")) == months
     # train + backtest + promote: the first version became champion with a score.
     assert row is not None and row["promoted"] is True
     champion = store.champion_version()
@@ -125,10 +122,10 @@ def test_pipeline_runs_all_five_steps_on_the_fixture(tmp_path, monkeypatch):
     assert row["candidate_mae"] is not None and row["candidate_mae"] > 0
 
     # Rerun with nothing new: every step is idempotent, one more log row says so.
-    partition_bytes = (training_root / "202504.parquet").read_bytes()
+    partition_bytes = (paths.training / "202504.parquet").read_bytes()
     rerun = run_pipeline(STEPS, **settings)
     assert rerun is not None and rerun["promoted"] is False
     assert "already the champion" in str(rerun["reason"])
-    assert (training_root / "202504.parquet").read_bytes() == partition_bytes
+    assert (paths.training / "202504.parquet").read_bytes() == partition_bytes
     table = pd.read_csv(log_path)
     assert table["promoted"].tolist() == [True, False]

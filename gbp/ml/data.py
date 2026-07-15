@@ -18,6 +18,7 @@ keeps what only the forecasting pipeline needs:
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import pathlib
 from collections.abc import Callable
@@ -38,6 +39,59 @@ def ml_dir() -> pathlib.Path:
     without it, this is ``data/ml`` at the repository root.
     """
     return pathlib.Path(os.environ.get("DATA_DIR", _DEFAULT_DATA_DIR)) / "ml"
+
+
+@dataclasses.dataclass(frozen=True)
+class MlPaths:
+    """The data folders the forecasting pipeline reads and writes.
+
+    One object gathers the folder overrides that used to be separate
+    parameters on almost every ``gbp/ml`` orchestrator — the raw files, the
+    training partitions, the saved forecasts, the monitoring outputs — plus
+    the MLflow tracking folder. Production code calls :meth:`resolve` for the
+    repository defaults; a test builds one with :meth:`under`, pointing every
+    folder at one temporary directory, and passes it down as a single
+    argument instead of re-declaring three or four overrides per call. The
+    ``store`` object (:class:`gbp.ml.registry.MlflowStore`) and a supplied
+    ``weather_df`` stay separate arguments — one is already a single object,
+    the other is a table, not a folder.
+
+    ``tracking`` is None for the default MLflow store (``MlflowStore()``
+    resolves it) — only a test sets it.
+    """
+
+    raw: pathlib.Path
+    training: pathlib.Path
+    forecasts: pathlib.Path
+    monitoring: pathlib.Path
+    tracking: pathlib.Path | None = None
+
+    @classmethod
+    def resolve(cls) -> MlPaths:
+        """Return the repository default folders (honoring the ``DATA_DIR`` switch)."""
+        # Imported here, not at the top: training, forecast, and monitoring
+        # each import this module, so importing them at the top would cycle.
+        from gbp.ml.forecast import forecasts_root
+        from gbp.ml.monitoring import monitoring_dir
+        from gbp.ml.training import training_dir
+
+        return cls(
+            raw=raw_dir(),
+            training=training_dir(),
+            forecasts=forecasts_root(),
+            monitoring=monitoring_dir(),
+        )
+
+    @classmethod
+    def under(cls, base: pathlib.Path, *, tracking: pathlib.Path | None = None) -> MlPaths:
+        """Point every folder at a subfolder of ``base`` — the layout a test builds."""
+        return cls(
+            raw=base / "raw",
+            training=base / "training",
+            forecasts=base / "forecasts",
+            monitoring=base / "monitoring",
+            tracking=tracking,
+        )
 
 
 def month_grid(month: str) -> PeriodGrid:

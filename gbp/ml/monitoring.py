@@ -56,7 +56,7 @@ from typing import Any
 import pandas as pd
 
 from gbp.loaders.download import normalize_month
-from gbp.ml.data import ml_dir, month_grid
+from gbp.ml.data import MlPaths, ml_dir, month_grid
 from gbp.ml.features import HISTORY_FEATURES, WEATHER_FEATURES
 from gbp.ml.forecast import (
     ForecastMeta,
@@ -205,23 +205,22 @@ def score_forecast_against_month(
 def score_month(
     month: str,
     *,
-    forecasts_root: pathlib.Path | None = None,
-    training_root: pathlib.Path | None = None,
-    root: pathlib.Path | None = None,
+    paths: MlPaths | None = None,
     log: Callable[[str], None] = print,
 ) -> pd.DataFrame:
     """Score every saved forecast that covers the month; append the rows to the metrics table.
 
     Returns the appended rows (empty when no forecast touches the month).
     """
+    paths = paths or MlPaths.resolve()
     month = normalize_month(month)
-    actual = load_actual_month(month, training_root)
-    naive = naive_month_prediction(month, training_root)
+    actual = load_actual_month(month, paths.training)
+    naive = naive_month_prediction(month, paths.training)
     if naive is None:
         log(f"{month}: no earlier partitions, the naive baseline stays missing")
     rows = []
-    for name in list_forecasts(forecasts_root):
-        row = score_forecast_against_month(name, month, actual, naive, forecasts_root)
+    for name in list_forecasts(paths.forecasts):
+        row = score_forecast_against_month(name, month, actual, naive, paths.forecasts)
         if row is None:
             log(f"{name}: horizon does not touch {month}, skipping")
             continue
@@ -233,7 +232,7 @@ def score_month(
     if not rows:
         return pd.DataFrame(columns=METRICS_COLUMNS)
     table = pd.DataFrame(rows, columns=METRICS_COLUMNS)
-    path = append_metrics(table, root)
+    path = append_metrics(table, paths.monitoring)
     log(f"{month}: {len(table)} rows -> {path}")
     return table
 
@@ -339,9 +338,7 @@ def _drift_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
 def drift_report(
     month: str,
     *,
-    training_root: pathlib.Path | None = None,
-    tracking_dir: pathlib.Path | None = None,
-    root: pathlib.Path | None = None,
+    paths: MlPaths | None = None,
     sample_rows: int = DRIFT_SAMPLE_ROWS,
     seed: int = 0,
     log: Callable[[str], None] = print,
@@ -368,8 +365,9 @@ def drift_report(
 
     from gbp.ml.registry import MlflowStore
 
+    paths = paths or MlPaths.resolve()
     month = normalize_month(month)
-    champion = MlflowStore(tracking_dir).champion_version()
+    champion = MlflowStore(paths.tracking).champion_version()
     if champion is None:
         raise LookupError(
             "the registry has no champion yet; run the retraining pipeline "
@@ -382,12 +380,12 @@ def drift_report(
             f"the champion's training months give no reference besides {month} itself"
         )
 
-    current = pd.read_parquet(partition_path(month, training_root), columns=DRIFT_COLUMNS)
+    current = pd.read_parquet(partition_path(month, paths.training), columns=DRIFT_COLUMNS)
     current = _sample_rows(current, sample_rows, seed)
     per_month = -(-sample_rows // len(reference_months))
     frames = []
     for reference_month in reference_months:
-        path = partition_path(reference_month, training_root)
+        path = partition_path(reference_month, paths.training)
         if not path.exists():
             raise FileNotFoundError(
                 f"the champion trained on {reference_month} but its partition is gone; "
@@ -414,7 +412,7 @@ def drift_report(
     )
     snapshot = report.run(reference_data=reference, current_data=current)
 
-    html_path, summary_path = drift_report_paths(month, root)
+    html_path, summary_path = drift_report_paths(month, paths.monitoring)
     html_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot.save_html(str(html_path))
     summary = {
