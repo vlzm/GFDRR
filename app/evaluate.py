@@ -43,6 +43,7 @@ from typing import Literal
 
 import artifacts
 import pandas as pd
+from eval_comparison import EvalNames, ModelForecast, build_comparison
 from runner import RunRequest, build_graph_data, run_and_save
 
 from gbp.loaders.dataloader_graph import (
@@ -53,7 +54,6 @@ from gbp.loaders.dataloader_graph import (
 from gbp.loaders.download import month_bounds, normalize_month
 from gbp.ml import forecast
 from gbp.ml.data import ml_dir, month_period_grid
-from gbp.ml.metrics import busy_facility_ids, forecast_metrics
 from gbp.ml.training import load_actual_month, training_dir
 
 
@@ -161,33 +161,6 @@ def _ensure_run(
     log(f"{run_name}: violations={len(meta.violations)} totals={meta.totals}")
 
 
-def _panel_departed_mae(panel_df: pd.DataFrame, reference_panel_df: pd.DataFrame) -> float:
-    """Mean |departed difference| per station-hour between two run panels."""
-    keys = ["facility_id", "period_id"]
-    joined = reference_panel_df[keys + ["departed"]].merge(
-        panel_df[keys + ["departed"]], on=keys, how="outer", suffixes=("_reference", "")
-    )
-    joined = joined.fillna({"departed_reference": 0, "departed": 0})
-    return float((joined["departed"] - joined["departed_reference"]).abs().mean())
-
-
-def _run_row(run_name: str, root: pathlib.Path | None = None) -> dict[str, object]:
-    """One comparison row read off a saved run's ``meta.json``: totals plus the sized state.
-
-    The sized state (``initial_inventory_bikes``, ``station_capacity_docks``)
-    is precomputed into ``meta.json`` at save time. A run saved before those
-    fields existed carries None there — delete its folder to rebuild it.
-    """
-    meta = artifacts.load_run_meta(run_name, root)
-    return {
-        "run_name": run_name,
-        "violations": len(meta.violations),
-        **meta.totals,
-        "initial_inventory_bikes": meta.initial_inventory_bikes,
-        "station_capacity_docks": meta.station_capacity_docks,
-    }
-
-
 def evaluate_month(
     month: str,
     model_names: list[str],
@@ -220,9 +193,7 @@ def evaluate_month(
     month_hours = len(month_periods_df)
     horizon_periods = month_hours if n_periods is None else min(n_periods, month_hours)
     periods_df = month_periods_df.iloc[:horizon_periods]
-    prefix = (
-        f"eval_{month}" if horizon_periods == month_hours else f"eval_{month}_{horizon_periods}p"
-    )
+    names = EvalNames(month, horizon_periods, month_hours)
 
     forecast_names = {
         name: ensure_forecast(name, month, horizon_periods, log) for name in model_names
@@ -235,83 +206,57 @@ def evaluate_month(
     actual_month_df = actual_month_df[actual_month_df["period_id"] < horizon_periods]
     actual_df, dropped = restrict_demand_to_scenario(actual_month_df, graph_data, periods_df)
     log(f"actual demand: {actual_df['quantity'].sum():,} bikes ({dropped:.2%} dropped by the cut)")
-    busy = busy_facility_ids(actual_df)
 
-    reference_name = f"{prefix}_reference"
-    _ensure_run(
-        graph_data,
-        actual_df,
-        periods_df,
-        run_name=reference_name,
-        demand_source="history",
-        root=root,
-        log=log,
-    )
-    reference_panel = artifacts.load_run_table(reference_name, "panel", root)
-    rows = [
-        {
-            "month": month,
-            "periods": horizon_periods,
-            "model": "actual",
-            "run_kind": "reference",
-            **_run_row(reference_name, root),
-        }
-    ]
-
+    model_forecasts = []
     for model_name in model_names:
         forecast_demand_df, _ = forecast.load_forecast(forecast_names[model_name])
         forecast_demand_df = forecast_demand_df[forecast_demand_df["period_id"] < horizon_periods]
-        forecast_df, dropped = restrict_demand_to_scenario(
+        forecast_df, forecast_dropped = restrict_demand_to_scenario(
             forecast_demand_df, graph_data, periods_df
         )
-        level_1 = forecast_metrics(actual_df, forecast_df)
-        log(
-            f"{model_name}: forecast {forecast_df['quantity'].sum():,} bikes "
-            f"({dropped:.2%} dropped by the cut), mae={level_1['mae']:.4f}"
+        model_forecasts.append(
+            ModelForecast(model_name, forecast_names[model_name], forecast_df, forecast_dropped)
         )
 
-        # The replay-state forecast run: the state is sized on the actual
-        # demand (the same state the reference run used), only the demand
-        # table is the model's.
-        run_name = f"{prefix}_{model_name}_forecast"
+    def run(
+        *,
+        run_name: str,
+        demand_df: pd.DataFrame,
+        demand_source: Literal["history", "forecast"],
+        forecast_name: str | None = None,
+        forecast_dropped_share: float | None = None,
+        sizing_demand_df: pd.DataFrame | None = None,
+    ) -> None:
         _ensure_run(
             graph_data,
-            forecast_df,
+            demand_df,
             periods_df,
             run_name=run_name,
-            demand_source="forecast",
-            forecast_name=forecast_names[model_name],
-            forecast_dropped_share=dropped,
-            sizing_demand_df=actual_df,
+            demand_source=demand_source,
+            forecast_name=forecast_name,
+            forecast_dropped_share=forecast_dropped_share,
+            sizing_demand_df=sizing_demand_df,
             root=root,
             log=log,
         )
-        panel = artifacts.load_run_table(run_name, "panel", root)
-        lost = panel.groupby("facility_id", observed=True)["lost_demand"].sum()
-        total_lost = float(lost.sum())
-        rows.append(
-            {
-                "month": month,
-                "periods": horizon_periods,
-                "model": model_name,
-                "run_kind": "forecast",
-                **_run_row(run_name, root),
-                **{f"level1_{key}": value for key, value in level_1.items()},
-                "panel_departed_mae": _panel_departed_mae(panel, reference_panel),
-                "lost_demand_busy_share": (
-                    float(lost[lost.index.isin(busy)].sum() / total_lost) if total_lost else 0.0
-                ),
-            }
-        )
 
-    table = pd.DataFrame(rows)
+    def load_table(run_name: str, table_name: str) -> pd.DataFrame:
+        return artifacts.load_run_table(run_name, table_name, root)
+
+    table = build_comparison(
+        names,
+        actual_df,
+        model_forecasts,
+        run=run,
+        load_meta=lambda run_name: artifacts.load_run_meta(run_name, root),
+        load_table=load_table,
+        log=log,
+    )
+
     out = evaluation_dir(month)
     out.mkdir(parents=True, exist_ok=True)
-    csv_name = (
-        "comparison.csv" if horizon_periods == month_hours else f"comparison_{horizon_periods}p.csv"
-    )
-    table.to_csv(out / csv_name, index=False)
-    log(f"Saved {out / csv_name}")
+    table.to_csv(out / names.comparison_csv, index=False)
+    log(f"Saved {out / names.comparison_csv}")
     return table
 
 
