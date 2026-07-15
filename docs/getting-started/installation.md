@@ -30,7 +30,7 @@ are pinned in `uv.lock`.
 Check the install:
 
 ```bash
-python -c "from tests.scenarios import run, single_trip; print('ok')"
+python -c "from gbp.consumers.simulator import Environment; print('ok')"
 ```
 
 The command prints `ok`. If it fails with `ModuleNotFoundError`, the

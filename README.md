@@ -84,45 +84,24 @@ after changing `pyproject.toml`).
 
 ## Quick Start
 
-The engine runs on a synthetic scenario without downloading any data. From
-the repository root:
-
-```bash
-python - <<'PY'
-from gbp.logging import configure_logging
-from tests.scenarios import overflow, run
-
-configure_logging()
-journal, state = run(overflow())  # six bikes aim at a station with two free docks
-
-bounced_id = journal.loc[journal["event_type"] == "redirected", "flow_id"].iloc[0]
-cols = ["flow_id", "event_type", "reason", "source_id", "planned_target_id", "period_id"]
-print(journal[journal["flow_id"] == bounced_id][cols].to_string(index=False))
-print(state.state_inventory_df.to_string(index=False))
-PY
-```
-
-After one log line, the script prints the journal of one redirected bike and
-the final inventory:
+The engine runs on a synthetic scenario without downloading any data:
+[docs/getting-started/quickstart.md](docs/getting-started/quickstart.md) is
+one runnable script that builds the simulator's input tables from three
+hand-written trips and runs the real engine on them. Changing one line of
+the scenario then makes the failure events appear in the flow journal —
+here a bike bounces off a full dock and rides on to the nearest station
+with a free dock:
 
 ```text
-flow_id event_type    reason source_id planned_target_id  period_id
-sim_0_2   departed      <NA>        s1                s3          0
-sim_0_2 redirected dock_full        s1                s3          1
-sim_0_2   departed      <NA>        s3                s2          1
-sim_0_2    arrived      <NA>        s3                s2          1
-facility_id commodity_category  quantity
-         s1       classic_bike      47.0
-         s2       classic_bike      51.0
-         s3       classic_bike       2.0
+flow_id event_type    reason source_id planned_target_id realized_target_id  period_id  step_id
+sim_0_1   departed      <NA>        s1                s3               <NA>          0        0
+sim_0_1 redirected dock_full        s1                s3               <NA>          1        2
+sim_0_1   departed      <NA>        s3                s2               <NA>          1        2
+sim_0_1    arrived      <NA>        s3                s2                 s2          1        2
 ```
 
-Six bikes head for station `s3`, whose docks hold two. The journal shows one
-of the four that did not fit: it departs `s1` toward `s3`, bounces off the
-full dock (`redirected`, reason `dock_full`), and docks at the nearest free
-station `s2`. The inventory confirms it: `s3` holds exactly its capacity
-of 2. The step-by-step walkthrough of this run is
-[docs/getting-started/quickstart.md](docs/getting-started/quickstart.md).
+Every table on that page is replayed against a fresh engine run by
+`tests/test_docs_quickstart.py`.
 
 ## Web interface
 
