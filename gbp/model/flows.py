@@ -21,6 +21,8 @@ functions of the journal and the current inventory, so historical and simulated
 runs share one definition for each of them.
 """
 
+import dataclasses
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -84,16 +86,15 @@ FLOW_EVENT_DTYPES = {
 
 # phase_rank: which inventory phase of a period applied an event's change. It is
 # an open-ended integer (not a fixed set): the phases run in rank order, so a
-# lower rank is applied first (Notations.md, "step / step_id"). The three ranks
-# below are today's user-trip phases; a later phase (such as rebalancing) takes
-# 3, 4, ... An event source that runs as an explicit phase (the simulator) stamps
-# its phase's rank straight onto the events it emits; a source with no phases
-# (the historical loader) stamps it through :func:`stamp_history_ordering`,
+# lower rank is applied first (Notations.md, "step / step_id"). The three
+# user-trip ranks and the timing rule that recognizes them come from one ordered
+# declaration -- :data:`CANONICAL_PHASE_ORDER` below, defined once the shared
+# event masks it reads are in scope. The rank constants (``DOCK_PREVIOUS_RANK``,
+# ``PERIOD_OWN_RANK``, ``DOCK_SAME_RANK``) and ``REBALANCE_RANK`` are derived
+# from it there. An event source that runs as an explicit phase (the simulator)
+# stamps its phase's rank straight onto the events it emits; a source with no
+# phases (the historical loader) stamps it through :func:`stamp_history_ordering`,
 # which applies :func:`phase_rank_by_timing`.
-DOCK_PREVIOUS_RANK = 0  # dock bikes that left in an earlier period
-PERIOD_OWN_RANK = 1  # this period's own departures and stockout losses
-DOCK_SAME_RANK = 2  # dock bikes that left and arrive within this same period
-REBALANCE_RANK = 3  # the period's truck pickups and dropoffs (Notations.md §14)
 
 # Event types that dock a bike (+1 at ``realized_target_id``). Only an
 # ``arrived`` lands a bike -- including the ``arrived`` that ends a redirect's
@@ -143,6 +144,63 @@ def is_docking(flows: pd.DataFrame) -> pd.Series:
     A ``redirected`` bounce and a ``lost`` dock nothing.
     """
     return flows["event_type"].isin(DOCKING_EVENT_TYPES)
+
+
+# ---------------------------------------------------------------------------
+# The canonical phase order (one ordered declaration, Notations.md §0.1)
+# ---------------------------------------------------------------------------
+# The rule "dock-previous (0) < form-departures (1) < dock-same (2)" is stated
+# once, here. Everything that needs the order reads it: the rank constants below,
+# the historical loader's timing rule (:func:`phase_rank_by_timing`), and the
+# simulator's phase list (``canonical_phases`` derives its order from this).
+def _recognizes_period_own(flows: pd.DataFrame) -> pd.Series:
+    """Mask of the period's own activity: a real user departure or a stockout loss."""
+    is_stockout = (flows["event_type"] == "lost") & (flows["reason"] == "stockout")
+    return is_user_departure(flows) | is_stockout
+
+
+def _recognizes_dock_same(flows: pd.DataFrame) -> pd.Series:
+    """Mask of docking-phase events for a flow that opened in this same period."""
+    return ~_recognizes_period_own(flows) & (flows["period_id"] == flows["start_period"])
+
+
+@dataclasses.dataclass(frozen=True)
+class PhaseSpec:
+    """One canonical intra-period phase, in rank order (Notations.md §0.1).
+
+    ``rank`` is the phase's position in a period: phases run in ascending rank,
+    so a lower rank is applied first. ``recognizes`` is the timing rule that
+    finds this phase's events in a journal built without phases (the historical
+    loader): given the journal, it returns a boolean mask of the rows this phase
+    would have emitted. The first phase carries ``None`` -- it is the default any
+    event falls to when no later phase claims it. The simulator does not use
+    ``recognizes``; it stamps its running phase's rank directly.
+    """
+
+    name: str
+    rank: int
+    recognizes: Callable[[pd.DataFrame], pd.Series] | None
+
+
+#: The three user-trip phases, in the order they run inside a period. The rank
+#: is the position, so the order is authored only here. The next phase after
+#: them (rebalancing) takes ``len(CANONICAL_PHASE_ORDER)`` -- ``REBALANCE_RANK``.
+CANONICAL_PHASE_ORDER: tuple[PhaseSpec, ...] = tuple(
+    PhaseSpec(name=name, rank=rank, recognizes=recognizes)
+    for rank, (name, recognizes) in enumerate(
+        [
+            ("dock_previous", None),
+            ("period_own", _recognizes_period_own),
+            ("dock_same", _recognizes_dock_same),
+        ]
+    )
+)
+
+_RANK_BY_NAME = {spec.name: spec.rank for spec in CANONICAL_PHASE_ORDER}
+DOCK_PREVIOUS_RANK = _RANK_BY_NAME["dock_previous"]  # dock bikes that left in an earlier period
+PERIOD_OWN_RANK = _RANK_BY_NAME["period_own"]  # this period's departures and stockout losses
+DOCK_SAME_RANK = _RANK_BY_NAME["dock_same"]  # dock bikes that left and arrive within this period
+REBALANCE_RANK = len(CANONICAL_PHASE_ORDER)  # the period's truck pickups and dropoffs (§14)
 
 
 def _event_deltas(events: pd.DataFrame, extra_cols: tuple[str, ...] = ()) -> pd.DataFrame:
@@ -658,16 +716,18 @@ def phase_rank_by_timing(flows: pd.DataFrame) -> pd.Series:
     from a phase. The simulator, which runs real phases, stamps its phase's rank
     directly and never calls this.
 
-    The rule matches the simulator's phase order (dock-previous -> form departures
-    -> dock-same). ``t`` is the flow's opening period, which is ``start_period`` on
-    every row of a flow (the move-1 continuation included):
+    This is a reader of :data:`CANONICAL_PHASE_ORDER`, not a second author of the
+    order. It starts every event at the first phase's rank (the default) and lets
+    each later phase claim its own events with that phase's ``recognizes`` mask.
+    ``t`` is the flow's opening period, which is ``start_period`` on every row of a
+    flow (the move-1 continuation included):
 
-    - :data:`DOCK_PREVIOUS_RANK` (0) -- a docking-phase event for a flow that
-      opened in an **earlier** period (``period_id > t``).
-    - :data:`PERIOD_OWN_RANK` (1) -- the period's own activity: a real user
+    - ``dock_previous`` (rank 0, the default) -- a docking-phase event for a flow
+      that opened in an **earlier** period (``period_id > t``).
+    - ``period_own`` (rank 1) -- the period's own activity: a real user
       ``departed`` (``move_id == 0``, the ``-1``) and a stockout ``lost`` (touches
       no inventory).
-    - :data:`DOCK_SAME_RANK` (2) -- a docking-phase event for a flow that opened in
+    - ``dock_same`` (rank 2) -- a docking-phase event for a flow that opened in
       **this** period (``period_id == t``).
 
     A docking-phase event is anything emitted while docking arrivals: an
@@ -676,16 +736,15 @@ def phase_rank_by_timing(flows: pd.DataFrame) -> pd.Series:
     its own flow's departure, so ``period_id >= t`` always and the two docking
     cases above are exhaustive.
 
-    The rule and the simulator's stamped constants must agree; the scenario test
+    The rule and the simulator's stamped ranks now share one source
+    (:data:`CANONICAL_PHASE_ORDER`); the scenario test
     ``test_stamped_step_id_matches_tuple_order`` uses this function as the
-    independent oracle that locks that agreement.
+    independent oracle that confirms that agreement.
     """
-    is_departure = is_user_departure(flows)
-    is_stockout = (flows["event_type"] == "lost") & (flows["reason"] == "stockout")
-    is_period_own = is_departure | is_stockout
-    rank = pd.Series(DOCK_PREVIOUS_RANK, index=flows.index, dtype="int64")
-    rank = rank.mask(is_period_own, PERIOD_OWN_RANK)
-    rank = rank.mask(~is_period_own & (flows["period_id"] == flows["start_period"]), DOCK_SAME_RANK)
+    rank = pd.Series(CANONICAL_PHASE_ORDER[0].rank, index=flows.index, dtype="int64")
+    for spec in CANONICAL_PHASE_ORDER:
+        if spec.recognizes is not None:
+            rank = rank.mask(spec.recognizes(flows), spec.rank)
     return rank
 
 

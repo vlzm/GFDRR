@@ -17,6 +17,7 @@ that carries the sized tables, and the sized tables come back on the
 import copy
 import dataclasses
 import time
+from collections.abc import Callable
 
 import pandas as pd
 import structlog
@@ -25,6 +26,7 @@ from gbp.loaders.dataloader_graph import (
     FACILITIES_CAPACITIES_SCHEMA,
     INITIAL_INVENTORY_SCHEMA,
 )
+from gbp.model import CANONICAL_PHASE_ORDER
 from gbp.model.journal_schema import schema_violations
 
 from .config import EnvironmentConfig
@@ -38,9 +40,24 @@ from .validation import RunInvariantError
 log = structlog.get_logger(__name__)
 
 
+# How the simulator builds each phase named in gbp.model.CANONICAL_PHASE_ORDER.
+# The map says which Phase a name is; the order it runs in comes from the
+# declaration, so the phase list and the historical ranks cannot disagree.
+_PHASE_BUILDERS: dict[str, Callable[[], Phase]] = {
+    "dock_previous": lambda: DockArrivals("previous"),
+    "period_own": FormDeparturesPhase,
+    "dock_same": lambda: DockArrivals("same"),
+}
+
+
 def canonical_phases() -> list[Phase]:
-    """Build the canonical three-phase list every run of the scenario uses."""
-    return [DockArrivals("previous"), FormDeparturesPhase(), DockArrivals("same")]
+    """Build the canonical three-phase list every run of the scenario uses.
+
+    The order is the one declared in :data:`gbp.model.CANONICAL_PHASE_ORDER`, so
+    it is authored once. The engine also checks the built list is sorted by
+    ``phase_rank``, which confirms the two agree.
+    """
+    return [_PHASE_BUILDERS[spec.name]() for spec in CANONICAL_PHASE_ORDER]
 
 
 @dataclasses.dataclass(frozen=True)

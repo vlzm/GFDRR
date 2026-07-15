@@ -15,12 +15,14 @@ and the journal-level run invariants (``check_demand_split``, ``check_flow_closu
 """
 
 from .flows import (
+    CANONICAL_PHASE_ORDER,
     DOCK_PREVIOUS_RANK,
     DOCK_SAME_RANK,
     PANEL_KEYS,
     PANEL_VALUES,
     PERIOD_OWN_RANK,
     REBALANCE_RANK,
+    PhaseSpec,
     arrived_events,
     check_demand_split,
     check_flow_closure,
@@ -58,11 +60,13 @@ from .flows import (
 )
 
 __all__ = [
+    "CANONICAL_PHASE_ORDER",
     "DOCK_PREVIOUS_RANK",
     "DOCK_SAME_RANK",
     "PANEL_KEYS",
     "PANEL_VALUES",
     "PERIOD_OWN_RANK",
+    "PhaseSpec",
     "REBALANCE_RANK",
     "arrived_events",
     "check_demand_split",
