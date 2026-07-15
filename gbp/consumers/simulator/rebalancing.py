@@ -47,6 +47,7 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from gbp.model import (
     REBALANCE_RANK,
+    empty_flows_journal,
     haversine_km,
     occupancy_per_facility,
     rebalance_arrived_events,
@@ -664,48 +665,75 @@ class PlanRebalancingPhase(Phase):
         """Compute the imbalance, route the trucks, store the bike-level plan."""
         if period.start_timestamp.hour != self.params.window_start_hour:
             return state
-
-        target = target_inventory(
-            resolved.historical_demand_df,
-            resolved.historical_arrivals_df,
-            resolved.periods_df,
-            period.start_timestamp,
-            self.params,
-            config.demand_scale_factor,
+        plan = plan_rebalance(
+            state, resolved, period, self.params, config.demand_scale_factor, self._solver
         )
-        imbalance = station_imbalance(state.state_inventory_df, target)
-        imbalance = clip_dropoffs_to_free_docks(
-            imbalance, state.state_inventory_df, resolved.facilities_capacities_df
-        )
-        nodes = build_rebalance_nodes(imbalance, self.params.portion_size)
-        sides = set(nodes["node_type"].unique()) if not nodes.empty else set()
-        if sides != {"pickup", "dropoff"}:
-            # Nothing to move: no station is short, or none has bikes to give.
-            return state.with_rebalance_plan(empty_rebalance_plan())
-
-        trucks = resolved.resources_capacities_df.merge(
-            resolved.resources_df[["resource_id", "home_facility_id"]], on="resource_id"
-        )
-        if trucks.empty:
-            raise SimulatorConfigError("rebalancing needs at least one truck")
-        if trucks["home_facility_id"].isna().any():
-            no_home = trucks.loc[trucks["home_facility_id"].isna(), "resource_id"].tolist()
-            raise SimulatorConfigError(f"trucks with no home depot: {no_home}")
-        homes = list(dict.fromkeys(trucks["home_facility_id"]))
-        known = set(resolved.facilities_geo_df["facility_id"])
-        unknown = [home for home in homes if home not in known]
-        if unknown:
-            raise SimulatorConfigError(f"home depots missing from the facility tables: {unknown}")
-
-        facility_ids = [*homes, *nodes["facility_id"].unique()]
-        travel = truck_travel_minutes(
-            resolved.facilities_geo_df, facility_ids, self.params.truck_speed_km_per_hour
-        )
-        stops = self._solver(nodes, travel, trucks, self.params)
-        minutes_per_period = int(resolved.period_len / pd.Timedelta(minutes=1))
-        plan = assign_bikes_to_stops(stops, period.period_id, minutes_per_period)
-        log.debug("rebalancing_planned", plan_rows=len(plan), trucks=len(trucks))
         return state.with_rebalance_plan(plan)
+
+
+def plan_rebalance(
+    state: SimulationState,
+    resolved: ScenarioInputs,
+    period: PeriodRow,
+    params: RebalancingParams,
+    demand_scale_factor: float,
+    solver: SolverFn = solve_rebalance_vrp,
+) -> pd.DataFrame:
+    """Build the bike-level rebalance plan for the window opening at ``period``.
+
+    The ordered core of :class:`PlanRebalancingPhase`, split out so a test can
+    call it with a scripted ``solver`` and assert on the plan without running
+    the engine. The scheduling guard (fire only in the window-opening period)
+    stays in the phase; this function assumes the window is open.
+
+    The sequence: target inventory -> imbalance -> clip dropoffs to free docks
+    -> solver visits. When one side is missing (no station is short, or none has
+    bikes to give) the plan is empty and the solver is never called. A broken
+    truck setup raises :class:`SimulatorConfigError` (see the class docstring).
+
+    Returns the plan (empty when nothing moves).
+    """
+    target = target_inventory(
+        resolved.historical_demand_df,
+        resolved.historical_arrivals_df,
+        resolved.periods_df,
+        period.start_timestamp,
+        params,
+        demand_scale_factor,
+    )
+    imbalance = station_imbalance(state.state_inventory_df, target)
+    imbalance = clip_dropoffs_to_free_docks(
+        imbalance, state.state_inventory_df, resolved.facilities_capacities_df
+    )
+    nodes = build_rebalance_nodes(imbalance, params.portion_size)
+    sides = set(nodes["node_type"].unique()) if not nodes.empty else set()
+    if sides != {"pickup", "dropoff"}:
+        # Nothing to move: no station is short, or none has bikes to give.
+        return empty_rebalance_plan()
+
+    trucks = resolved.resources_capacities_df.merge(
+        resolved.resources_df[["resource_id", "home_facility_id"]], on="resource_id"
+    )
+    if trucks.empty:
+        raise SimulatorConfigError("rebalancing needs at least one truck")
+    if trucks["home_facility_id"].isna().any():
+        no_home = trucks.loc[trucks["home_facility_id"].isna(), "resource_id"].tolist()
+        raise SimulatorConfigError(f"trucks with no home depot: {no_home}")
+    homes = list(dict.fromkeys(trucks["home_facility_id"]))
+    known = set(resolved.facilities_geo_df["facility_id"])
+    unknown = [home for home in homes if home not in known]
+    if unknown:
+        raise SimulatorConfigError(f"home depots missing from the facility tables: {unknown}")
+
+    facility_ids = [*homes, *nodes["facility_id"].unique()]
+    travel = truck_travel_minutes(
+        resolved.facilities_geo_df, facility_ids, params.truck_speed_km_per_hour
+    )
+    stops = solver(nodes, travel, trucks, params)
+    minutes_per_period = int(resolved.period_len / pd.Timedelta(minutes=1))
+    plan = assign_bikes_to_stops(stops, period.period_id, minutes_per_period)
+    log.debug("rebalancing_planned", plan_rows=len(plan), trucks=len(trucks))
+    return plan
 
 
 class ApplyRebalancingPhase(Phase):
@@ -739,66 +767,92 @@ class ApplyRebalancingPhase(Phase):
         config: EnvironmentConfig,
     ) -> SimulationState:
         """Apply this period's pickups and dropoffs; return the next state."""
-        t = period.period_id
-        plan = state.rebalance_plan
-        in_transit = state.in_transit
-        on_truck = in_transit["flow_type"] == "rebalance"
-        if plan.empty and not on_truck.any():
-            return state
-
-        home_by_resource = resolved.resources_df.set_index("resource_id")["home_facility_id"]
-        capacities = resolved.facilities_capacities_df
-        batches: list[pd.DataFrame] = []
-
-        def inventory_now() -> pd.DataFrame:
-            # Each round's docking and pickup decisions must see the docks the
-            # earlier rounds took or freed, so the inventory for the next
-            # decision is read from the state with the rounds built so far
-            # applied. The real write happens once, in apply_step_events below.
-            if not batches:
-                return state.state_inventory_df
-            return state.inventory_after_events(pd.concat(batches, ignore_index=True))
-
-        # Round 0 -- dropoffs due now for bikes picked up in an earlier period.
-        due_previous = in_transit[on_truck & (in_transit["planned_end_period"] == t)]
-        if not due_previous.empty:
-            arrived = _dock_dropoffs(due_previous, inventory_now(), capacities, home_by_resource, t)
-            batches.append(arrived.assign(phase_round=0))
-
-        # Round 1 -- this period's pickups, cut to the bikes actually on hand.
-        due_same = None
-        if not plan.empty:
-            due_pickups = plan[plan["pickup_period"] == t]
-            plan = plan[plan["pickup_period"] > t]
-            executed = _pickups_up_to_inventory(due_pickups, inventory_now())
-            if not executed.empty:
-                departed = rebalance_departed_events(
-                    pd.DataFrame(
-                        {
-                            "flow_id": executed["flow_id"],
-                            "source_id": executed["source_id"],
-                            "planned_target_id": executed["planned_target_id"],
-                            "commodity_category": executed["commodity_category"],
-                            "resource_id": executed["resource_id"],
-                            "start_period": t,
-                            "planned_end_period": executed["dropoff_period"],
-                        }
-                    )
-                )
-                batches.append(departed.assign(phase_round=1))
-                due_same = departed[departed["planned_end_period"] == t]
-
-        # Round 2 -- dock the dropoffs of bikes picked up within this period.
-        if due_same is not None and not due_same.empty:
-            arrived = _dock_dropoffs(due_same, inventory_now(), capacities, home_by_resource, t)
-            batches.append(arrived.assign(phase_round=2))
-
+        events, remaining_plan = apply_rebalance(state, resolved, period.period_id)
         new_state = state
-        if batches:
-            new_flows = pd.concat(batches, ignore_index=True)
-            log.debug("rebalancing_applied", events=len(new_flows), rounds=len(batches))
-            new_state = new_state.apply_step_events(new_flows, self.phase_rank)
-        return new_state.with_rebalance_plan(plan)
+        if not events.empty:
+            log.debug("rebalancing_applied", events=len(events))
+            new_state = new_state.apply_step_events(events, self.phase_rank)
+        return new_state.with_rebalance_plan(remaining_plan)
+
+
+def apply_rebalance(
+    state: SimulationState,
+    resolved: ScenarioInputs,
+    t: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build this period's rebalance events and the plan still left to run.
+
+    The ordered core of :class:`ApplyRebalancingPhase`, split out so a test can
+    call it on a hand-built state and assert on the ordering without the engine.
+    The three rounds run in order, each seeing the docks the earlier rounds took
+    or freed (``inventory_now`` reads the state with the rounds built so far
+    applied):
+
+    - round 0 -- dock the dropoffs due now for bikes picked up earlier;
+    - round 1 -- this period's pickups, cut to the bikes actually on hand;
+    - round 2 -- dock the dropoffs of bikes picked up within this period.
+
+    Returns ``(events, remaining_plan)``: the event batch to write, carrying a
+    ``phase_round`` per round (empty when nothing happens), and the plan rows
+    whose pickup period is still ahead. The caller writes the batch once through
+    ``apply_step_events``, which turns each round into its own inventory step.
+    """
+    plan = state.rebalance_plan
+    in_transit = state.in_transit
+    on_truck = in_transit["flow_type"] == "rebalance"
+    if plan.empty and not on_truck.any():
+        return empty_flows_journal(), plan
+
+    home_by_resource = resolved.resources_df.set_index("resource_id")["home_facility_id"]
+    capacities = resolved.facilities_capacities_df
+    batches: list[pd.DataFrame] = []
+
+    def inventory_now() -> pd.DataFrame:
+        # Each round's docking and pickup decisions must see the docks the
+        # earlier rounds took or freed, so the inventory for the next decision
+        # is read from the state with the rounds built so far applied. The real
+        # write happens once, in the caller's apply_step_events.
+        if not batches:
+            return state.state_inventory_df
+        return state.inventory_after_events(pd.concat(batches, ignore_index=True))
+
+    # Round 0 -- dropoffs due now for bikes picked up in an earlier period.
+    due_previous = in_transit[on_truck & (in_transit["planned_end_period"] == t)]
+    if not due_previous.empty:
+        arrived = _dock_dropoffs(due_previous, inventory_now(), capacities, home_by_resource, t)
+        batches.append(arrived.assign(phase_round=0))
+
+    # Round 1 -- this period's pickups, cut to the bikes actually on hand.
+    due_same = None
+    if not plan.empty:
+        due_pickups = plan[plan["pickup_period"] == t]
+        plan = plan[plan["pickup_period"] > t]
+        executed = _pickups_up_to_inventory(due_pickups, inventory_now())
+        if not executed.empty:
+            departed = rebalance_departed_events(
+                pd.DataFrame(
+                    {
+                        "flow_id": executed["flow_id"],
+                        "source_id": executed["source_id"],
+                        "planned_target_id": executed["planned_target_id"],
+                        "commodity_category": executed["commodity_category"],
+                        "resource_id": executed["resource_id"],
+                        "start_period": t,
+                        "planned_end_period": executed["dropoff_period"],
+                    }
+                )
+            )
+            batches.append(departed.assign(phase_round=1))
+            due_same = departed[departed["planned_end_period"] == t]
+
+    # Round 2 -- dock the dropoffs of bikes picked up within this period.
+    if due_same is not None and not due_same.empty:
+        arrived = _dock_dropoffs(due_same, inventory_now(), capacities, home_by_resource, t)
+        batches.append(arrived.assign(phase_round=2))
+
+    if not batches:
+        return empty_flows_journal(), plan
+    return pd.concat(batches, ignore_index=True), plan
 
 
 def _dock_dropoffs(

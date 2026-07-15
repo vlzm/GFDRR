@@ -61,6 +61,10 @@ Target (code, then narration — write like this):
 
 - **Vertical, not horizontal.** No "domain-agnostic" abstractions. If the canonical scenario doesn't use it, it doesn't belong in the codebase. The flow-graph sentence at the top of this file describes the data model, not a promise of a domain-independent layer — do not build abstractions to match it.
 - **Minimalism.** Code must be hackable. No factories, heavy DI containers, or hidden magic.
+- **Deep modules.** A module's interface is everything a caller must know to use it — types, call order, invariants, error modes, required config — not just the signature. Aim for a lot of behaviour behind a small interface. Before adding a parameter, a helper, or a wrapper, apply the deletion test: if deleting it would only move the same complexity onto the callers, it is shallow — don't add it.
+- **No repeated recipes.** If the same set of run parameters, the same name-to-class mapping, or the same path is written out in two places, it belongs in one typed object or one function. Two hand-written copies can drift; make them one.
+- **Narrow signatures.** A function takes only the fields it reads, not a whole config object it forwards untouched. Do not thread a parameter through hops that never read it — bind it once at the boundary instead.
+- **State a rule once.** When one rule (phase order, period numbering, a storage layout) is encoded in more than one place, derive the copies from one declaration. Do not keep two authors in sync with a test.
 - **Vectorization first.** All math via pandas/NumPy. No `for` loops over data in hot paths.
 - **Strict typing.** Pydantic for all contracts. Type hints on all public functions.
 - **UI.** The Streamlit app lives in `app/`. It is a reader of run artifacts (`data/runs/<run_name>/`, see Notations.md §12): it loads saved tables and draws them. It must not add abstractions to `gbp/` and must not compute anything the artifact builder (`app/artifacts.py`) can precompute. **All UI text (labels, captions, tooltips, page titles) is English only** — same as the code; Russian is for chat with the user, never for the app.

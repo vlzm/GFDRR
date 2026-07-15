@@ -143,51 +143,72 @@ class DockArrivals(Phase):
         config: EnvironmentConfig,
     ) -> pd.DataFrame:
         """Dock this period's due arrivals, redirect the overflow, lose what fits nowhere."""
-        t = period.period_id
-        due = self._due_arrivals(state.in_transit, t)
-        if due.empty:
-            return empty_flows_journal()
+        due = self._due_arrivals(state.in_transit, period.period_id)
+        return dock_due_arrivals(due, state, resolved, period.period_id)
 
-        # Dock at the planned station while free docks last.
-        docked, overflow = dock_up_to_capacity(
-            due, free_docks(state.state_inventory_df, resolved.facilities_capacities_df)
-        )
-        arrivals_docked = arrived_events(docked, t)
 
-        # Resolve every bike that did not fit: docked at a redirect target,
-        # riding a new leg, or lost. The redirect must see the docks the
-        # planned dockings just took, so it reads the inventory as it will
-        # stand once those events are written (a decision input; the real
-        # write happens in apply_step_events).
-        after_docked = state.inventory_after_events(arrivals_docked)
-        outcomes = plan_overflow_redirect(
-            after_docked,
-            resolved.facilities_capacities_df,
-            resolved.facilities_geo_df,
-            resolved.historical_od_matrix_df,
-            resolved.routes,
-            overflow,
-            t,
-        )
-        # Check -- each due bike docked, left on a new leg, or was lost, exactly once.
-        assert len(docked) + len(outcomes) == len(due), "due flows not conserved"
+def dock_due_arrivals(
+    due: pd.DataFrame,
+    state: SimulationState,
+    resolved: ScenarioInputs,
+    t: int,
+) -> pd.DataFrame:
+    """Dock the due arrivals, redirect the overflow, lose what fits nowhere.
 
-        # Turn the outcomes into events. A redirected bike always bounces and
-        # opens a new leg; an outcome "docked" also arrives within this period.
-        redirects = outcomes[outcomes["outcome"] != "lost"]
-        lost = outcomes[outcomes["outcome"] == "lost"]
-        bounces = redirected_events(redirects, t).assign(phase_round=redirects["phase_round"])
-        legs = redirect_leg_events(redirects, t).assign(phase_round=redirects["phase_round"])
-        legs_now = legs[redirects["outcome"] == "docked"]
-        arrivals_now = arrived_events(legs_now, t).assign(phase_round=legs_now["phase_round"])
+    The ordered core of :class:`DockArrivals`, split out so a test can call it
+    on a hand-built state without the engine. ``due`` is the arrivals this step
+    handles, already picked by ``when`` (:meth:`DockArrivals._due_arrivals`).
+    The order is the whole point: dock at the planned station while free docks
+    last, then read the inventory as it will stand once those dockings are
+    written, then plan the redirects against that reduced inventory -- a
+    redirect must not reuse a dock the planned dockings already took.
 
-        lost_dock_full = lost_events(lost, t, "dock_full")
-        # One inventory step per phase_round, in apply order: the planned
-        # dockings (round 0), then each redirect round (Notations.md §0.1).
-        return pd.concat(
-            [arrivals_docked, lost_dock_full, bounces, legs, arrivals_now],
-            ignore_index=True,
-        )
+    Returns the event batch (empty when nothing is due). The batch carries a
+    ``phase_round`` per redirect round; the caller's ``apply_step_events`` turns
+    each round into its own inventory step (Notations.md §0.1).
+    """
+    if due.empty:
+        return empty_flows_journal()
+
+    # Dock at the planned station while free docks last.
+    docked, overflow = dock_up_to_capacity(
+        due, free_docks(state.state_inventory_df, resolved.facilities_capacities_df)
+    )
+    arrivals_docked = arrived_events(docked, t)
+
+    # Resolve every bike that did not fit: docked at a redirect target, riding a
+    # new leg, or lost. The redirect must see the docks the planned dockings
+    # just took, so it reads the inventory as it will stand once those events
+    # are written (a decision input; the real write happens in apply_step_events).
+    after_docked = state.inventory_after_events(arrivals_docked)
+    outcomes = plan_overflow_redirect(
+        after_docked,
+        resolved.facilities_capacities_df,
+        resolved.facilities_geo_df,
+        resolved.historical_od_matrix_df,
+        resolved.routes,
+        overflow,
+        t,
+    )
+    # Check -- each due bike docked, left on a new leg, or was lost, exactly once.
+    assert len(docked) + len(outcomes) == len(due), "due flows not conserved"
+
+    # Turn the outcomes into events. A redirected bike always bounces and opens
+    # a new leg; an outcome "docked" also arrives within this period.
+    redirects = outcomes[outcomes["outcome"] != "lost"]
+    lost = outcomes[outcomes["outcome"] == "lost"]
+    bounces = redirected_events(redirects, t).assign(phase_round=redirects["phase_round"])
+    legs = redirect_leg_events(redirects, t).assign(phase_round=redirects["phase_round"])
+    legs_now = legs[redirects["outcome"] == "docked"]
+    arrivals_now = arrived_events(legs_now, t).assign(phase_round=legs_now["phase_round"])
+
+    lost_dock_full = lost_events(lost, t, "dock_full")
+    # One inventory step per phase_round, in apply order: the planned dockings
+    # (round 0), then each redirect round (Notations.md §0.1).
+    return pd.concat(
+        [arrivals_docked, lost_dock_full, bounces, legs, arrivals_now],
+        ignore_index=True,
+    )
 
 
 class FormDeparturesPhase(Phase):

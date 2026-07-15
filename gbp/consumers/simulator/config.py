@@ -16,6 +16,11 @@ class EnvironmentConfig:
     The ordered phases to run, the scenario id, whether to check the run-level
     invariants at the end (on by default, so every plain run is checked), the
     demand scale, and how many periods to step.
+
+    ``validate`` on means the engine computes invariants I1-I5 at end of run and
+    stores them on ``Environment.violations``; it does not raise, so a caller can
+    record a failed run or fail on it. Off skips the check (the sizing run uses
+    this, since its own no-loss assert already guards it).
     """
 
     phases: list[Phase]

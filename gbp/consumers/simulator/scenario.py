@@ -33,7 +33,7 @@ from .inputs import ScenarioInputs
 from .phases import DockArrivals, FormDeparturesPhase, Phase
 from .sizing import size_state_for_demand
 from .state import SimulationState
-from .validation import RunInvariantError, validate_run
+from .validation import RunInvariantError
 
 log = structlog.get_logger(__name__)
 
@@ -153,13 +153,13 @@ def run_sized_scenario(
     sized.initial_inventory_df = initial_inventory_df
     sized.facilities_capacities_df = facilities_capacities_df
 
-    # validate_run is called by hand below, so the caller gets the violation
-    # list either way; the engine's own end-of-run check is off to avoid
-    # computing the invariants twice.
+    # The engine checks the invariants once and stores the result on
+    # ``env.violations`` without raising, so the caller gets the violation list
+    # either way and decides below whether a violation stops the run.
     run_config = EnvironmentConfig(
         phases=list(phases) if phases is not None else canonical_phases(),
         scenario_id=scenario_id,
-        validate=False,
+        validate=True,
         demand_scale_factor=demand_scale_factor,
         number_of_periods=number_of_periods,
     )
@@ -173,7 +173,7 @@ def run_sized_scenario(
     run_started = time.monotonic()
     env = Environment(sized, run_config)
     state = env.run()
-    violations = validate_run(state, sized, demand_scale_factor, number_of_periods)
+    violations = env.violations
     simulated_flows_df = env.simulated_flows_df
     log.info(
         "run_finished",

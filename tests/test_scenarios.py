@@ -52,6 +52,46 @@ def test_run_invariants_hold(name, run_scenario):
 
 
 # ---------------------------------------------------------------------------
+# validate_run reads the run's config, not loose scalars
+# ---------------------------------------------------------------------------
+def test_validate_run_honours_the_config_demand_scale():
+    # A 2x run's journal is valid only against 2x demand. Passing the run's own
+    # config makes the demand-split check I1 face the demand the run faced; a
+    # config at the wrong scale makes I1 compare against a demand the run never
+    # saw and report a violation.
+    resolved = scenarios.canonical()
+    _flows, state = scenarios.run(resolved, demand_scale_factor=2.0)
+    matched = EnvironmentConfig(
+        phases=[],
+        scenario_id="t",
+        demand_scale_factor=2.0,
+        number_of_periods=len(resolved.periods_df),
+    )
+    mismatched = EnvironmentConfig(
+        phases=[],
+        scenario_id="t",
+        demand_scale_factor=1.0,
+        number_of_periods=len(resolved.periods_df),
+    )
+    assert validate_run(state, resolved, matched) == []
+    assert any(v.startswith("I1") for v in validate_run(state, resolved, mismatched))
+
+
+def test_validate_run_honours_the_config_horizon():
+    # A full-grid run's journal has departures in every period; a config that
+    # claims fewer periods cuts the demand short, so I1 misses the departures of
+    # the later periods and reports a violation. This pins the number_of_periods
+    # filter the validator used to redo from a loose scalar.
+    resolved = scenarios.canonical()
+    _flows, state = scenarios.run(resolved)
+    n = len(resolved.periods_df)
+    full = EnvironmentConfig(phases=[], scenario_id="t", number_of_periods=n)
+    short = EnvironmentConfig(phases=[], scenario_id="t", number_of_periods=1)
+    assert validate_run(state, resolved, full) == []
+    assert any(v.startswith("I1") for v in validate_run(state, resolved, short))
+
+
+# ---------------------------------------------------------------------------
 # Per-scenario properties
 # ---------------------------------------------------------------------------
 def test_canonical_has_no_constraints_and_reproduces_demand(run_scenario):

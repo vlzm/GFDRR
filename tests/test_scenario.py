@@ -8,8 +8,10 @@ sizing scale makes the limits take effect while the run invariants still hold.
 """
 
 import pandas as pd
+import pytest
 
 from gbp.consumers.simulator import run_sized_scenario
+from gbp.consumers.simulator.validation import RunInvariantError
 from gbp.model import flows_to_departures
 from tests import scenarios
 
@@ -67,3 +69,18 @@ def test_run_scale_above_sizing_scale_hits_the_limits():
     result = _run(resolved, demand_scale_factor=2.0, sizing_scale_factor=1.0)
     assert (result.simulated_flows_df["event_type"] == "lost").any()
     assert result.violations == []
+
+
+def test_a_violated_invariant_raises_only_when_validate_is_on(monkeypatch):
+    # The engine now computes the invariants and stores them on
+    # ``env.violations`` without raising; ``run_sized_scenario`` reads that list
+    # and decides. Stub a violation to reach the failure branch without a broken
+    # run: validate=True raises, validate=False records it on the result.
+    monkeypatch.setattr(
+        "gbp.consumers.simulator.engine.validate_run", lambda *a, **k: ["I0 stubbed"]
+    )
+    resolved = scenarios.canonical()
+    with pytest.raises(RunInvariantError):
+        _run(resolved, validate=True)
+    result = _run(resolved, validate=False)
+    assert result.violations == ["I0 stubbed"]

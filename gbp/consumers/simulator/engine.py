@@ -18,7 +18,7 @@ from gbp.model import empty_flows_journal, empty_in_transit, finalize_flows
 from .config import EnvironmentConfig
 from .inputs import ScenarioInputs
 from .state import PeriodRow, SimulationState, SimulatorConfigError
-from .validation import RunInvariantError, validate_run
+from .validation import validate_run
 
 log = structlog.get_logger(__name__)
 
@@ -78,11 +78,23 @@ class Environment:
             raise SimulatorConfigError(f"phases must be ordered by phase_rank, got {ranks}")
         self._period_cursor: int = 0
         self._state = init_state(resolved, self._periods[0])
+        self._violations: list[str] = []
 
     @property
     def state(self) -> SimulationState:
         """The current simulation state."""
         return self._state
+
+    @property
+    def violations(self) -> list[str]:
+        """Run invariants the finished run broke (empty == valid).
+
+        Filled by :meth:`run` when ``EnvironmentConfig.validate`` is on;
+        empty before the run finishes or when the check is off. The engine
+        computes them but does not raise -- ``run_sized_scenario`` reads this
+        list and decides whether to raise :class:`RunInvariantError`.
+        """
+        return self._violations
 
     @property
     def simulated_flows_df(self) -> pd.DataFrame:
@@ -97,9 +109,11 @@ class Environment:
     def run(self) -> SimulationState:
         """Step every period to the end, check the run invariants, return the state.
 
-        The invariant check (I1-I5) runs by default (``EnvironmentConfig.validate``);
-        it costs one extra ``finalize_flows`` plus one ``inventory_at_moments``
-        pass over the finished journal.
+        The invariant check (I1-I5) runs by default (``EnvironmentConfig.validate``)
+        and its result lands on :attr:`violations`; the engine does not raise, so
+        a caller can record a failed run as easily as fail on it. The check costs
+        one extra ``finalize_flows`` plus one ``inventory_at_moments`` pass over
+        the finished journal.
         """
         run_started = time.monotonic()
         with structlog.contextvars.bound_contextvars(scenario_id=self._config.scenario_id):
@@ -114,14 +128,7 @@ class Environment:
                         elapsed_s=round(time.monotonic() - run_started, 1),
                     )
             if self._config.validate:
-                violations = validate_run(
-                    self._state,
-                    self._resolved,
-                    self._config.demand_scale_factor,
-                    self._config.number_of_periods,
-                )
-                if violations:
-                    raise RunInvariantError("run invariants violated:\n" + "\n".join(violations))
+                self._violations = validate_run(self._state, self._resolved, self._config)
         return self._state
 
     def step(self) -> SimulationState:
