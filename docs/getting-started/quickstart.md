@@ -22,8 +22,9 @@ geography. `run()` then runs the real `Environment` on it with the canonical
 phases — the same engine the full runs use; only the input tables are
 synthetic. Each scenario finishes in well under a second.
 
-Prerequisite: the install from the root [README.md](../../README.md); the base
-package (`uv pip install -e .`) is enough. Run everything from the repository root.
+Prerequisite: step 1 of [installation.md](installation.md); the base
+package (`uv pip install -e .`) is enough — no data download. Run everything
+from the repository root.
 
 ## Run 1: one bike, one trip
 
@@ -114,6 +115,9 @@ bikes raised `s2` from 50 − 3 departed to 51.
 
 ## Where to go next
 
+- [ui.md](ui.md) — run the simulator on a month of real trips and browse
+  the saved run in the web interface (needs the data download from
+  [installation.md](installation.md), step 2).
 - [Scenario catalog](../key-components/worked-examples.md) — the same kind of story for
   every mechanic: stockout, delayed redirect, redirect chain, truck
   rebalancing. Each table there is checked against a fresh engine run by
@@ -122,28 +126,3 @@ bikes raised `s2` from 50 − 3 departed to 51.
   axis (§0.1), the four outcomes (§1).
 - The other builders in `tests/scenarios.py` (`stockout`, `network_full`,
   ...) run the same way: pass them to `run()`.
-
-## Run on real data
-
-The full runs replay a month of Citi Bike trips. Those CSVs are not stored
-in git: Citi Bike publishes monthly zip files at
-`https://s3.amazonaws.com/tripdata`. One month unpacks to 0.3–0.9 GB of
-CSVs; a year of months is about 9 GB on disk.
-
-Download one month into `data/raw/` (the data folders are Notations.md §15):
-
-```bash
-python -m gbp.loaders.download --months 202601
-```
-
-Then run one scenario on it from the terminal:
-
-```bash
-python app/runner.py --run-name first_real --periods 50
-```
-
-By default the runner reads `data/raw/202601-citibike-tripdata_1.csv`
-(`--trips-path` picks another file); loading and preparing take minutes, not
-seconds. The finished run is saved under `data/runs/first_real/` — a run
-artifact (Notations.md §12) — and the web interface
-(`streamlit run app/main.py`, needs the `[ui]` extra) lists it.

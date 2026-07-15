@@ -13,10 +13,13 @@ bike-sharing system in New York City. This page is the map of `docs/`:
 
 Tutorials: follow the steps and compare with the expected output.
 
+- [installation.md](getting-started/installation.md) — install the package
+  and download a month of real trips; Docker and OSRM by links.
 - [quickstart.md](getting-started/quickstart.md) — from a clean clone to a
   first flow journal in a few minutes, on a synthetic scenario with no data
-  download; ends with the real-data variant (where the trip CSVs come from,
-  which command downloads a month).
+  download.
+- [ui.md](getting-started/ui.md) — create a first saved run and browse it
+  in the web interface, page by page.
 
 ## Key Components
 
