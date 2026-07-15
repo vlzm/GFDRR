@@ -51,6 +51,9 @@ assumes them.
 The first scenario is the Citi Bike system in New York City. Its canonical
 form is two runs, one notebook each:
 
+- [citibike.md](scenarios/citibike.md) — the scenario end to end: the
+  problem, the entity mapping, the data, a runnable minimal example, the
+  runs, and how to read the results.
 - [test_pipeline.ipynb](../notebooks/test_pipeline.ipynb) — the base replay
   of one month of history.
 - [forecast_pipeline.ipynb](../notebooks/forecast_pipeline.ipynb) — the same

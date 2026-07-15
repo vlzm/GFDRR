@@ -54,6 +54,9 @@
 Первый сценарий — система Citi Bike в Нью-Йорке. Его каноническая форма —
 два запуска, каждый в своём ноутбуке:
 
+- [citibike.md](scenarios/citibike.md) — сценарий от начала до конца:
+  задача, соответствие сущностям, данные, запускаемый минимальный пример,
+  запуски и как читать результаты.
 - [test_pipeline.ipynb](../notebooks/test_pipeline.ipynb) — базовое
   воспроизведение одного месяца истории.
 - [forecast_pipeline.ipynb](../notebooks/forecast_pipeline.ipynb) — тот же
