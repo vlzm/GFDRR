@@ -77,6 +77,8 @@ uv pip install -e ".[ui]"          # simulator + web interface
 uv pip install -e ".[dev,ui,api]"  # plus lint, type check, tests, and the run-artifact API
 ```
 
+Activate the environment before running anything below
+(`source .venv/bin/activate`), or call `.venv/bin/python` directly.
 Exact dependency versions are pinned in `uv.lock` (refresh with `uv lock`
 after changing `pyproject.toml`).
 
