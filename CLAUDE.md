@@ -33,22 +33,6 @@ dvc status                        # data/raw and data/ml/training vs their .dvc 
 - **Canonical vocabulary.** `Notations.md` is the project's dictionary — one concept, one word. Before naming anything in code, docstrings, or chat, use the word in `Notations.md`. If a concept is missing, add it there first (anchored to the flow journal), then use it.
 ## Answer Style (chat)
 
-The pattern for every explanation: real code first, plain narration after, in execution order.
-
-- Start with the answer: one-two sentences that answer the question. No document title, no "overview in one sentence" section, no roadmap of what you are about to say.
-- If the walkthrough relies on a few key tables or variables, define them in one short block up front. Then walk the code top to bottom, in execution order.
-- Headers carry the structure ("## Шаг 1: …"). Bold does not: at most 1–2 bold terms in the whole answer, never for emphasis inside a sentence.
-- Code first, words after. Quote the real fragment with file and line numbers, then explain it below in 2–5 short sentences. Never paraphrase code in prose with bolded function names instead of showing it.
-- One thought per sentence. At most one subordinate clause. If a sentence needs an em-dash insert plus parentheses, split it into two sentences.
-- A subtlety is its own short paragraph opening with "Важно:" or "Обрати внимание:". Do not stack qualifiers inside an explanation paragraph.
-- Branching or multiple outcomes: one small ASCII chain (`departed` → `redirected` → `arrived`), not a nested list.
-- Clear beats complete. Skip edge cases the user did not ask about. No closing summary section, no "хочешь, я ещё…" endings.
-- Do not grade the material: no "ключевая модель", "самое тонкое место", "важная тонкость".
-
-Anti-example (paraphrase with bold — do not write like this):
-
-> **`dock_up_to_capacity(due, free)`** → делит прибывающих на `(docked, overflow)`. Реализовано без цикла на Python: через `groupby(...).cumcount()` считается позиция велосипеда в очереди к своей станции, и если позиция меньше числа свободных слотов — велосипед влез.
-
 Target (code, then narration — write like this):
 
 > ```python
