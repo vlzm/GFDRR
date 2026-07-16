@@ -1,48 +1,4 @@
-"""Watch model quality after the forecasts are made (plan, phase 7).
-
-Every saved forecast names its model version (``meta.json``, phase 1) — that
-log is the base of all monitoring. When a new actual month arrives (its
-training partition is on disk), :func:`score_month` joins the month against
-every saved forecast whose horizon touches it and appends one row per
-forecast to the metrics table ``data/ml/monitoring/metrics.parquet``:
-
-- ``mae`` and ``poisson_deviance`` — the level-1 error measures
-  (``gbp/ml/metrics.py``), computed over the aligned rows of the overlap;
-- ``bias`` — the mean of ``predicted - actual``: positive means the model
-  predicts too much, negative too little;
-- ``naive_mae`` — the seasonal naive baseline for the same rows: the shared
-  naive month forecast (``naive_month_prediction`` in ``gbp/ml/forecast.py``),
-  the same forecast the backtest's over-naive columns divide by.
-
-Unlike the backtest, which scores fractional demand, monitoring scores the
-saved forecast demand table — whole bikes, the numbers the simulator
-actually consumed. Scoring the same (forecast, month) pair again replaces
-its row, so the step is idempotent.
-
-The alert threshold is simple (plan, item 5): a month is marked degraded
-when the model version's rolling MAE — the mean of its MAE over the last
-``ROLLING_MONTHS`` scored months — is worse than the seasonal naive baseline
-of that month. :func:`metric_history` computes the mark; the "Model
-monitoring" page only reads it.
-
-The drift report (:func:`drift_report`) answers a different question: does
-the new month still look like the data the champion was trained on? Drift
-means the feature distributions moved. The report compares the new month's
-weather and demand-history columns (``DRIFT_COLUMNS``) against the
-champion's training months (the monitored month itself is left out of the
-reference) with Evidently, on a row sample from both sides. The calendar
-columns are not checked: their distributions are set by the calendar, not
-by the riders — one monitored month holds exactly one ``month`` value, so
-that column would be flagged every time and the flag would mean nothing.
-Two files go to ``data/ml/monitoring/``: the full HTML report and a small
-JSON summary the monitoring page lists. Per column the drift measure is the
-Wasserstein distance in units of the reference standard deviation — the
-column has drifted when the distance is at or above ``DRIFT_NUM_THRESHOLD``.
-
-Terminal use (score the month, then build its drift report)::
-
-    python -m gbp.ml.monitoring --month 202602
-"""
+"""Score saved forecasts against actual months and build the drift report."""
 
 from __future__ import annotations
 
@@ -120,12 +76,7 @@ def load_metrics(root: pathlib.Path | None = None) -> pd.DataFrame:
 
 
 def append_metrics(rows: pd.DataFrame, root: pathlib.Path | None = None) -> pathlib.Path:
-    """Append rows to the metrics table, replacing rows with the same keys.
-
-    The key is ``(forecast_name, month)`` — scoring a pair again overwrites
-    its old row instead of duplicating it, so :func:`score_month` is
-    idempotent.
-    """
+    """Append rows to the metrics table, replacing rows with the same keys."""
     path = metrics_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     table = load_metrics(root)
@@ -142,17 +93,7 @@ def append_metrics(rows: pd.DataFrame, root: pathlib.Path | None = None) -> path
 
 
 def month_period_map(meta: ForecastMeta, month: str) -> pd.DataFrame:
-    """Map a forecast's period ids onto the month's hourly period ids.
-
-    A forecast numbers its periods 0, 1, 2, … from its own ``t0``; a month's
-    training partition numbers its hours 0, 1, 2, … from the month's first
-    hour. The two grids are lined up by wall-clock time
-    (:meth:`PeriodGrid.align_to`). Returns one row per forecast period that
-    falls inside the month: ``period_id`` (the forecast's) and
-    ``month_period_id``. Empty when the horizon does not touch the month, or
-    when the forecast's periods are not the month's hours (a different period
-    length, or a start between hours).
-    """
+    """Map a forecast's period ids onto the month's hourly period ids."""
     mapping = meta.grid.align_to(month_grid(month))
     return mapping.rename(columns={"other_period_id": "month_period_id"})
 
@@ -164,13 +105,7 @@ def score_forecast_against_month(
     naive_df: pd.DataFrame | None = None,
     forecasts_root: pathlib.Path | None = None,
 ) -> dict[str, object] | None:
-    """Score one saved forecast against one actual month; None when they do not overlap.
-
-    Only the overlap is scored: the actual counts are cut to the month hours
-    the forecast covers, so a one-week forecast is not punished with zeros
-    for the rest of the month. The baseline ``naive_mae`` is computed over
-    the same rows from ``naive_df`` (the month's seasonal naive prediction).
-    """
+    """Score one saved forecast against one actual month; None when they do not overlap."""
     demand_df, meta = load_forecast(forecast_name, forecasts_root)
     mapping = month_period_map(meta, month)
     if mapping.empty:
@@ -208,10 +143,7 @@ def score_month(
     paths: MlPaths | None = None,
     log: Callable[[str], None] = print,
 ) -> pd.DataFrame:
-    """Score every saved forecast that covers the month; append the rows to the metrics table.
-
-    Returns the appended rows (empty when no forecast touches the month).
-    """
+    """Score every saved forecast that covers the month; append the rows to the metrics table."""
     paths = paths or MlPaths.resolve()
     month = normalize_month(month)
     actual = load_actual_month(month, paths.training)
@@ -238,15 +170,7 @@ def score_month(
 
 
 def metric_history(metrics_df: pd.DataFrame, rolling_months: int = ROLLING_MONTHS) -> pd.DataFrame:
-    """Aggregate the metrics table per model version and month, with the degraded mark.
-
-    One row per ``(model_name, model_version, month)``: the mean of each
-    metric over that version's forecasts scored for the month, plus
-    ``rolling_mae`` — the mean of ``mae`` over the version's last
-    ``rolling_months`` scored months, this one included — and ``degraded``:
-    True when ``rolling_mae`` is worse than the month's ``naive_mae``. A
-    month with no baseline (``naive_mae`` missing) is never marked.
-    """
+    """Aggregate the metrics table per model version and month, with the degraded mark."""
     columns = [
         "model_name",
         "model_version",
@@ -305,12 +229,7 @@ def _sample_rows(frame: pd.DataFrame, n: int, seed: int) -> pd.DataFrame:
 
 
 def _drift_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Pull the headline numbers and the per-column table out of an Evidently snapshot.
-
-    Per column the value is a distance (the methods are fixed in
-    :func:`drift_report`), so the column has drifted when the value is at or
-    above its threshold.
-    """
+    """Pull the headline numbers and the per-column table out of an Evidently snapshot."""
     drifted_count = 0
     drifted_share = float("nan")
     columns: list[dict[str, Any]] = []
@@ -343,20 +262,7 @@ def drift_report(
     seed: int = 0,
     log: Callable[[str], None] = print,
 ) -> pathlib.Path:
-    """Compare the month's feature distributions against the champion's training data.
-
-    The reference side is the drift columns (``DRIFT_COLUMNS``: weather and
-    demand history) of the champion's training months (read off their
-    partitions, the monitored month itself left out); the current side is
-    the month's own partition. Both sides are sampled down to
-    ``sample_rows`` rows. The Evidently report goes to
-    ``drift_<month>.html`` and its summary to ``drift_<month>.json``
-    (:func:`_drift_summary` plus the report's context: month, champion,
-    reference months, row counts). Returns the JSON summary path.
-
-    Raises ``LookupError`` when the registry has no champion, and
-    ``FileNotFoundError`` when a needed partition is missing.
-    """
+    """Compare the month's feature distributions against the champion's training data."""
     # Imported here, not at the top: the registry drags in MLflow and
     # Evidently is heavy — the monitoring page imports this module without
     # ever building a report.

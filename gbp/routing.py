@@ -1,26 +1,4 @@
-"""Distance and travel time between facilities.
-
-One object, :class:`Routes`, answers the two queries every consumer needs:
-``distance_km(source, target)`` and ``duration_periods(source, target)``.
-How the answer is measured is the ``routing_mode`` of the scenario:
-
-- ``"haversine"`` — the formula mode. Distance is the straight (great-circle)
-  line between the two facilities; travel time is that distance divided by
-  ``trip_speed_km_per_period``.
-- ``"osrm"`` — road-network mode. Distance and riding time come from a local
-  OSRM server (see ``docs/how-to/set-up-osrm.md``). The full facility-to-facility
-  table is fetched once, in one ``/table`` request, when the object is built;
-  queries after that are matrix lookups with no network calls.
-
-In ``osrm`` mode a pair the server cannot route (a facility that fails to
-snap to a road) gets the haversine answer instead, so a query never returns
-NA for a routable-looking pair. A row whose source or target id is NA (for
-example ``realized_target_id`` on a ``departed`` event) is NA in both modes.
-
-The module sits beside the model layer: it imports ``haversine_km`` from
-:mod:`gbp.model` and is imported by the loaders, the simulator mechanics,
-and the artifact builder.
-"""
+"""Distance and travel time between facilities, by the scenario's haversine or OSRM routing mode."""
 
 from __future__ import annotations
 
@@ -46,16 +24,7 @@ _OSRM_TIMEOUT_SECONDS = 300
 
 
 def _osrm_table(facilities_geo_df: pd.DataFrame, osrm_url: str) -> tuple[np.ndarray, np.ndarray]:
-    """Fetch the full facility-to-facility table from an OSRM server.
-
-    One ``/table`` request with every facility as both source and target.
-    Returns two square matrices aligned to the row order of
-    ``facilities_geo_df``: distance in kilometres and riding time in seconds.
-    A pair the server cannot route is NaN.
-
-    The server must allow a table this large: ``scripts/osrm/serve.sh`` starts
-    it with ``--max-table-size 10000``, enough for every Citi Bike facility.
-    """
+    """Fetch the full facility-to-facility table (distance km, duration seconds) from OSRM."""
     path = ";".join(
         f"{lng:.6f},{lat:.6f}" for lat, lng in facilities_geo_df[["lat", "lng"]].to_numpy()
     )
@@ -75,27 +44,7 @@ def _osrm_table(facilities_geo_df: pd.DataFrame, osrm_url: str) -> tuple[np.ndar
 
 
 class Routes:
-    """Distance and travel time for facility pairs, by the scenario's routing mode.
-
-    Built once per scenario (``ResolvedModelData.routes``). Both queries take
-    two id columns aligned on the same index and return a float Series on that
-    index.
-
-    Parameters
-    ----------
-    facilities_geo_df : pandas.DataFrame
-        Facility geography: ``facility_id``, ``lat``, ``lng``.
-    mode : {"haversine", "osrm"}, optional
-        How to measure (see the module docstring). Defaults to ``"haversine"``.
-    trip_speed_km_per_period : float
-        Mean riding speed in km per period. Turns a haversine distance into a
-        travel time; in ``osrm`` mode it only prices the fallback pairs the
-        server cannot route.
-    period_len : pandas.Timedelta
-        Wall-clock length of one period. Turns OSRM seconds into periods.
-    osrm_url : str, optional
-        Base URL of the OSRM server. Only read in ``osrm`` mode.
-    """
+    """Distance and travel time for facility pairs, by the scenario's routing mode."""
 
     def __init__(
         self,

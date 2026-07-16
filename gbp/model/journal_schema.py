@@ -1,20 +1,4 @@
-"""Pandera schema of the flow journal: its shape checked as data, not by hand.
-
-:data:`FLOW_EVENT_SCHEMA` describes a finalized flow journal (Notations.md §0):
-the column list and dtypes come from :data:`gbp.model.flows.FLOW_EVENT_DTYPES`,
-so the layout is written once; the value checks are the journal's field
-domains (``quantity >= 1``, the legal ``event_type`` / ``flow_type`` /
-``reason`` sets) and the two cross-column rules (``move_id == event_id // 2``,
-``realized_target_id`` set exactly on ``arrived`` rows).
-
-The schema is checked at boundaries, once per journal: ``validate_run`` checks
-a finished run's journal and ``get_historical_flows_df`` checks the historical
-journal at load time. It is never run inside the per-period phase loop.
-
-This module is deliberately not exported from ``gbp.model.__init__``: pandera
-is a heavy import, so the two call sites import this module directly and
-``import gbp.model`` stays cheap.
-"""
+"""Pandera schema of the flow journal: its shape checked as data, not by hand."""
 
 import pandas as pd
 import pandera.pandas as pa
@@ -94,14 +78,7 @@ FLOW_EVENT_SCHEMA = pa.DataFrameSchema(
 
 
 def schema_violations(schema: pa.DataFrameSchema, frame: pd.DataFrame) -> list[str]:
-    """Run ``schema`` on ``frame`` with ``lazy=True``; return all violations as text.
-
-    The shared bridge from pandera to the project's violation style: one check
-    run reports every violation, as a list of human-readable strings, empty
-    when the frame is valid (the same contract as the run invariants). Each
-    failed check becomes one line with the failing column, the check, the row
-    count, and up to three example values.
-    """
+    """Run ``schema`` on ``frame`` with ``lazy=True``; return all violations as text."""
     try:
         schema.validate(frame, lazy=True)
     except pa.errors.SchemaErrors as err:
@@ -120,16 +97,5 @@ def schema_violations(schema: pa.DataFrameSchema, frame: pd.DataFrame) -> list[s
 
 
 def check_journal_schema(flows: pd.DataFrame) -> list[str]:
-    """Return every way ``flows`` breaks the journal schema; empty when it holds.
-
-    Parameters
-    ----------
-    flows : pandas.DataFrame
-        A finalized flow journal (columns :data:`FLOW_EVENT_COLUMNS`).
-
-    Returns
-    -------
-    list of str
-        Human-readable violations; empty when the journal fits the schema.
-    """
+    """Return every way ``flows`` breaks the journal schema; empty when it holds."""
     return schema_violations(FLOW_EVENT_SCHEMA, flows)

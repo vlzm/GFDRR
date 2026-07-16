@@ -1,24 +1,4 @@
-"""Comparison bookkeeping for the two-level evaluation (``app/evaluate.py``).
-
-Three things live here, apart from the heavy scenario resolution and the
-744-period simulator run:
-
-- the run and file names of one month's evaluation
-  (:class:`EvalNames`): ``eval_<month>_reference``,
-  ``eval_<month>_<model>_forecast``, ``comparison.csv`` -- with the ``_<N>p``
-  window suffix when only the first ``N`` hours are compared;
-- the rule that says which demand each run faces: the reference run runs the
-  actual demand sized on itself; each model's replay-state forecast run runs
-  the forecast demand against the state sized on that same actual demand
-  (Notations.md: reference run, replay-state forecast run);
-- the layout of the comparison table -- one row per run, read off the saved
-  ``meta.json`` and ``panel`` (:func:`build_comparison`).
-
-The simulator run and the two artifact readers are passed in as functions, so
-this logic runs its unit tests in milliseconds without a simulator run: a test
-gives a fake ``run`` that writes canned tables and fake ``load_meta`` /
-``load_table`` that return them, then checks the names and the rows.
-"""
+"""Comparison bookkeeping for the two-level evaluation."""
 
 from __future__ import annotations
 
@@ -50,12 +30,7 @@ LoadTableFn = Callable[[str, str], pd.DataFrame]
 
 @dataclass(frozen=True)
 class EvalNames:
-    """The run and file names of one month's evaluation over one window.
-
-    ``horizon_periods`` is the compared window; ``month_hours`` is the whole
-    month. A full-month window drops the ``_<N>p`` suffix, so a full-month run
-    and a shortened-window run never share a name or a comparison file.
-    """
+    """The run and file names of one month's evaluation over one window."""
 
     month: str
     horizon_periods: int
@@ -92,12 +67,7 @@ class EvalNames:
 
 @dataclass(frozen=True)
 class ModelForecast:
-    """One model's forecast, already cut to the scenario, ready to run.
-
-    ``forecast_df`` is the restricted demand table the run faces;
-    ``dropped_share`` is the share of the raw forecast cut by that restriction,
-    recorded in the run's ``meta.json``.
-    """
+    """One model's forecast, already cut to the scenario, ready to run."""
 
     model_name: str
     forecast_name: str
@@ -106,12 +76,7 @@ class ModelForecast:
 
 
 def run_row(run_name: str, load_meta: LoadMetaFn) -> dict[str, object]:
-    """One comparison row read off a saved run's ``meta.json``: totals plus the sized state.
-
-    The sized state (``initial_inventory_bikes``, ``station_capacity_docks``)
-    is precomputed into ``meta.json`` at save time. A run saved before those
-    fields existed carries None there -- delete its folder to rebuild it.
-    """
+    """One comparison row read off a saved run's ``meta.json``: totals plus the sized state."""
     meta = load_meta(run_name)
     return {
         "run_name": run_name,
@@ -142,21 +107,7 @@ def build_comparison(
     load_table: LoadTableFn,
     log: Callable[[str], None] = print,
 ) -> pd.DataFrame:
-    """Run the reference and every forecast run, then read one row off each.
-
-    The steps, in order: run the reference run (the actual demand sized on
-    itself), read its panel and its row; then per model run the replay-state
-    forecast run (the forecast demand against the state sized on the actual
-    demand) and read its row -- the level-1 metrics, the sized-state totals,
-    the panel departed MAE against the reference, and the share of lost demand
-    that fell on the busy stations.
-
-    The ``run`` function and the two readers are injected: :mod:`evaluate`
-    passes the simulator run and the artifact readers; a test passes fakes and
-    checks the rows without a simulator run.
-
-    Returns the comparison table -- one row per run, the reference first.
-    """
+    """Run the reference and every forecast run, then read one row off each."""
     busy = busy_facility_ids(actual_df)
 
     reference_source: Literal["history"] = "history"

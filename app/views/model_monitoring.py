@@ -1,10 +1,4 @@
-"""Model monitoring: metric history per model version, degraded months, drift reports.
-
-A reader page (plan, phase 7): everything shown here was saved by
-``python -m gbp.ml.monitoring`` into ``data/ml/monitoring/`` — the metrics
-table and the drift reports. The page computes nothing beyond the degraded
-mark, which is a fixed rule over the saved table.
-"""
+"""Model monitoring: metric history per model version, degraded months, drift reports."""
 
 import pandas as pd
 import plotly.express as px

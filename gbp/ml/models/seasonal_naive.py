@@ -1,19 +1,4 @@
-"""Seasonal naive (Notations.md §17) behind the model interface.
-
-The forecast for a station at a given hour is the mean demand at the same
-hour of week over the history window. That number is already a feature
-column: ``facility_hour_of_week_mean``, built by the one feature module
-(``gbp/ml/features.py``) from the departure counts of the ``HISTORY_WEEKS``
-weeks before the horizon, zero weeks counted in. So the model reads that
-column instead of computing its own copy — the definition cannot drift from
-the feature the other models see.
-
-``fit`` therefore stores nothing. A pair ``(facility, commodity)`` absent
-from the history window has a NaN mean; the model predicts 0 for it — no
-history means no forecast demand, exactly as in phase 1.
-
-This is the baseline every other model family must beat (plan, phase 4).
-"""
+"""Seasonal naive behind the model interface."""
 
 from __future__ import annotations
 

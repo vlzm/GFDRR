@@ -1,18 +1,4 @@
-"""The one place the app chooses its backend: local files, or HTTP when API_URL is set.
-
-Every path from the app to a run goes through the object :func:`current`
-returns — reading saved runs (the ``ui_shared`` loaders call it) and starting
-new ones (the Run scenario page calls it). Pages never import ``api_client``
-and never check ``API_URL`` themselves, so the two backends cannot drift
-page by page: the choice is made here, once.
-
-``DiskBackend`` reads ``data/runs/`` and executes runs in this process.
-``ApiBackend`` talks to the run-artifact API (docs/reference/api.md)
-through ``api_client``. The two classes answer the same calls, so a caller
-never asks which one it holds — except the Run page, which asks
-:meth:`list_forecasts` and :meth:`default_trips_path` and reads ``None`` as
-"the server owns this, the page cannot pick".
-"""
+"""The one place the app chooses its backend: local files, or HTTP when API_URL is set."""
 
 from __future__ import annotations
 
@@ -68,7 +54,7 @@ class DiskBackend:
         return artifacts.load_run_meta(run_name)
 
     def meta_cache_key(self, run_name: str) -> float:
-        """Return the file's mtime, for the same reason as :meth:`table_cache_key`."""
+        """Return the file's mtime, for the same reason as table_cache_key."""
         return artifacts.meta_path(run_name).stat().st_mtime
 
     def list_forecasts(self) -> list[str]:
@@ -90,13 +76,7 @@ class DiskBackend:
     def run_and_wait(
         self, request: RunRequest, trips_path: str | None, on_progress: Callable[[str], None]
     ) -> str:
-        """Run one scenario in this process; return the final run name.
-
-        ``request`` is the typed run recipe (:class:`runner.RunRequest`), the
-        same object ``POST /runs`` takes. The requested name goes through the
-        free-name rule here, exactly as the server does it, so a saved run is
-        never overwritten.
-        """
+        """Run one scenario in this process; return the final run name."""
         import runner
 
         on_progress("Loading data (a few minutes the first time; cached afterwards)…")
@@ -122,12 +102,7 @@ class ApiBackend:
         return api_client.load_table(run_name, table)
 
     def table_cache_key(self, run_name: str, table: str) -> float:
-        """Return a constant cache key.
-
-        A served artifact never changes (the API is the only writer on the
-        server and never overwrites a saved run — docs/reference/api.md),
-        so ``(run_name, table)`` alone identifies the content.
-        """
+        """Return a constant cache key (a served artifact never changes)."""
         return 0.0
 
     def load_meta(self, run_name: str) -> artifacts.RunMeta:
@@ -135,22 +110,15 @@ class ApiBackend:
         return api_client.load_meta(run_name)
 
     def meta_cache_key(self, run_name: str) -> float:
-        """Return a constant, for the same reason as :meth:`table_cache_key`."""
+        """Return a constant, for the same reason as table_cache_key."""
         return 0.0
 
     def list_forecasts(self) -> None:
-        """Return ``None``: the page cannot list the server's forecasts.
-
-        The forecasts live on the server's disk; the server rejects an
-        unknown name when the run starts.
-        """
+        """Return ``None``: the page cannot list the server's forecasts."""
         return None
 
     def default_trips_path(self) -> None:
-        """Return ``None``: which data the server runs on is a server setting.
-
-        ``TRIPS_PATH`` on the server names the dataset; the page cannot pick.
-        """
+        """Return ``None``: which data the server runs on is a server setting."""
         return None
 
     def save_location(self, requested_name: str) -> str:
@@ -160,14 +128,7 @@ class ApiBackend:
     def run_and_wait(
         self, request: RunRequest, trips_path: str | None, on_progress: Callable[[str], None]
     ) -> str:
-        """Queue one run on the server (``POST /runs``) and poll it to the end.
-
-        The typed request travels as its JSON body (``model_dump``). The status
-        endpoint carries the same progress lines ``on_progress`` prints
-        locally; each new line is passed on. ``trips_path`` is ignored: the
-        server runs on its own dataset. Raises :class:`RunFailed` with the
-        server's error text when the run fails.
-        """
+        """Queue one run on the server and poll it to the end (raises RunFailed on failure)."""
         del trips_path
         answer = api_client.start_run(request.model_dump())
         final_name = answer["run_name"]
@@ -186,8 +147,5 @@ class ApiBackend:
 
 
 def current() -> DiskBackend | ApiBackend:
-    """Return the chosen backend: HTTP when ``API_URL`` is set, else the disk.
-
-    This is the one place that choice is made.
-    """
+    """Return the chosen backend: HTTP when ``API_URL`` is set, else the disk."""
     return ApiBackend() if api_client.api_url() else DiskBackend()

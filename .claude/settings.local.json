@@ -49,7 +49,11 @@
       "Bash(git -C /mnt/outer/Documents/vlzm/GFDRR_ubuntu/GFDRR diff --stat)",
       "Bash(jupyter nbconvert *)",
       "Bash(grep -vE \"^#|^$\")",
-      "Bash(python /tmp/claude-1000/-mnt-outer-Documents-vlzm-GFDRR-ubuntu-GFDRR/83af7072-46cc-4630-a828-9e6fc16f18f6/scratchpad/smoke_time_axis.py)"
+      "Bash(python /tmp/claude-1000/-mnt-outer-Documents-vlzm-GFDRR-ubuntu-GFDRR/83af7072-46cc-4630-a828-9e6fc16f18f6/scratchpad/smoke_time_axis.py)",
+      "Bash(sort -t: -k2 -rn)",
+      "Bash(grep -v \" total$\")",
+      "Bash(echo \"exit:$?\")",
+      "Bash(python -m compileall -q gbp app)"
     ]
   }
 }

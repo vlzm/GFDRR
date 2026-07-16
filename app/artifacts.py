@@ -1,17 +1,4 @@
-"""Build, save, and load run artifacts (Notations.md §12).
-
-A run artifact is one folder under the runs root (``data/runs/<run_name>/``)
-holding everything the UI needs to draw a finished run: the priced journal,
-the facility period panel, the arcs, the flow totals, the facility attributes,
-and ``meta.json``. The UI only reads these files; it never runs a simulation
-and never recomputes what this module can precompute.
-
-:func:`save_scenario_run` is the one operation that turns a finished run
-(a ``ScenarioRun`` plus its scenario data and its :class:`~runner.RunRequest`)
-into a saved artifact. ``runner.run_and_save`` (the terminal runner and the
-two-level evaluation) and the test fixtures all call it, so which result field
-feeds which builder argument is written once, here.
-"""
+"""Build, save, and load run artifacts."""
 
 from __future__ import annotations
 
@@ -169,18 +156,7 @@ RUN_TABLE_SCHEMAS = {
 
 @dataclasses.dataclass(frozen=True)
 class Metric:
-    """One value the UI can show, described once (Notations.md §12).
-
-    ``PANEL_VALUES``, the UI label dictionaries, the KPI row and the whole of
-    ``build_totals`` are all built from the ``METRICS`` list below. Adding a
-    metric there is the only step: it cannot appear in a picker without a
-    label, or miss the KPI row and the totals.
-
-    A metric's whole-run total comes from one of two sources: a panel metric
-    sums its panel column (``panel_total=True``), a flow metric aggregates a
-    ``flow_totals`` column (``flow_value`` names the column, ``flow_agg`` says
-    how).
-    """
+    """One value the UI can show, described once."""
 
     name: str
     title: str  # display words alone, no column name (the KPI tile label)
@@ -279,12 +255,7 @@ _DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[1] / "data"
 
 
 def data_dir() -> pathlib.Path:
-    """Root of the data folder (raw CSV, OSRM graph, run artifacts).
-
-    Set the ``DATA_DIR`` environment variable to point somewhere else
-    (in a container the data is mounted as ``/data``); without it, this is
-    ``data/`` at the repository root.
-    """
+    """Root of the data folder (the ``DATA_DIR`` env var, else ``data/`` at the repo root)."""
     return pathlib.Path(os.environ.get("DATA_DIR", _DEFAULT_DATA_DIR))
 
 
@@ -299,12 +270,7 @@ def run_dir(run_name: str, root: pathlib.Path | None = None) -> pathlib.Path:
 
 
 def table_path(run_name: str, table: str, root: pathlib.Path | None = None) -> pathlib.Path:
-    """File of one saved table: ``<run folder>/<table>.parquet``.
-
-    The one place that file name is spelled: the saver, the local loader, the
-    cache keys and the API all take the path from here. ``table`` must be a
-    ``RUN_TABLES`` stem.
-    """
+    """File of one saved table: ``<run folder>/<table>.parquet`` (``table`` a RUN_TABLES stem)."""
     if table not in RUN_TABLES:
         raise ValueError(f"unknown run table {table!r}; expected one of {RUN_TABLES}")
     return run_dir(run_name, root) / f"{table}.parquet"
@@ -324,12 +290,7 @@ def list_runs(root: pathlib.Path | None = None) -> list[str]:
 
 
 def next_free_run_name(base: str, root: pathlib.Path | None = None) -> str:
-    """Return ``base`` if no saved run has that name, else ``base_version_{i}``.
-
-    ``i`` counts up from 2, so re-running the same parameters gives
-    ``name``, ``name_version_2``, ``name_version_3``, ... and a saved run is
-    never overwritten.
-    """
+    """Return ``base`` if free, else ``base_version_{i}`` counting from 2 (never overwrites)."""
     taken = set(list_runs(root))
     if base not in taken:
         return base
@@ -343,37 +304,7 @@ def next_free_run_name(base: str, root: pathlib.Path | None = None) -> str:
 # Builders: journal -> the tables the UI reads
 # ---------------------------------------------------------------------------
 def build_arcs(flows: pd.DataFrame, routes: Routes, facilities_geo: pd.DataFrame) -> pd.DataFrame:
-    """One row per arc: a ``(flow_id, move_id)`` physical edge of a trip.
-
-    Pairs each arc's opening ``departed`` with the event that closed the arc
-    (``arrived``, ``redirected`` or ``lost``). A stockout ``lost`` has no
-    ``departed`` row, so it produces no arc. ``target_id`` is where the arc
-    actually ended: the realized target when it docked, the planned target
-    when it bounced or was lost there. ``distance_km`` is the length of the
-    edge, measured by the run's routing mode (straight line or OSRM road
-    network). The endpoint coordinates are saved on each row, so the trips
-    map draws arcs without joining another table. ``flow_type`` tells a user
-    ride (``user_trip``) from a bike carried by a truck (``rebalance``);
-    ``resource_id`` is the truck on a rebalance arc, NA otherwise.
-
-    Parameters
-    ----------
-    flows : pandas.DataFrame
-        A finalized flow-event log.
-    routes : gbp.routing.Routes
-        The scenario's distance / travel-time answerer.
-    facilities_geo : pandas.DataFrame
-        Facility coordinates: ``facility_id``, ``lat``, ``lng``.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Columns ``flow_id``, ``move_id``, ``flow_type``, ``resource_id``,
-        ``commodity_category``, ``source_id``, ``target_id``,
-        ``start_period``, ``end_period``, ``event_type`` (the closing
-        outcome), ``reason``, ``quantity``, ``distance_km``, ``source_lat``,
-        ``source_lng``, ``target_lat``, ``target_lng``.
-    """
+    """One row per arc: a ``(flow_id, move_id)`` physical edge of a trip."""
     opened = flows.loc[
         flows["event_type"] == "departed",
         [
@@ -432,36 +363,7 @@ def build_arcs(flows: pd.DataFrame, routes: Routes, facilities_geo: pd.DataFrame
 
 
 def build_flow_totals(priced_flows: pd.DataFrame, arcs: pd.DataFrame) -> pd.DataFrame:
-    """One row per flow with its whole-trip values.
-
-    The row joins three sources: the flow's opening event (origin ``source_id``,
-    original ``planned_target_id``, ``start_period``), its terminal event (the
-    docking ``arrived`` or a dock-full ``lost``: outcome, ``reason``,
-    ``end_period``, ``duration_periods``, ``cost``), and the sum of its arcs'
-    ``distance_km``. A flow with two terminal events raises: that would be a
-    double close (invariant I2).
-
-    Two kinds of rows are not here. A stockout loss has no flow at all
-    (``flow_id`` is NA — the trip never departed); it lives in the panel as
-    ``lost_demand`` only. A flow still riding when the run ends has no
-    terminal event yet, so it has no whole-trip values to report.
-
-    Parameters
-    ----------
-    priced_flows : pandas.DataFrame
-        The journal widened by :func:`gbp.model.flows_with_measures`.
-    arcs : pandas.DataFrame
-        The arcs table from :func:`build_arcs`.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Columns ``flow_id``, ``flow_type`` (``user_trip`` or ``rebalance``),
-        ``commodity_category``, ``source_id``, ``planned_target_id``,
-        ``realized_target_id``, ``start_period``, ``end_period``,
-        ``event_type``, ``reason``, ``duration_periods``, ``distance_km``,
-        ``cost``.
-    """
+    """One row per flow with its whole-trip values (two terminal events raise: a double close)."""
     # A stockout loss has flow_id NA (no flow ever existed) -- drop those rows
     # here; the panel's lost_demand column is their home.
     flows = priced_flows[priced_flows["flow_id"].notna()]
@@ -522,12 +424,7 @@ def build_facilities(
 
 
 def build_totals(panel: pd.DataFrame, flow_totals: pd.DataFrame) -> dict[str, float]:
-    """Whole-run values for ``meta.json``, one per ``METRICS`` entry that has a total.
-
-    A panel metric (``panel_total=True``) sums its panel column; a flow metric
-    (``flow_value`` set) aggregates its ``flow_totals`` column with
-    ``flow_agg``. No metric total is computed anywhere else.
-    """
+    """Whole-run values for ``meta.json``, one per ``METRICS`` entry that has a total."""
     totals: dict[str, float] = {
         metric.name: int(panel[metric.name].sum()) for metric in METRICS if metric.panel_total
     }
@@ -542,11 +439,7 @@ def build_totals(panel: pd.DataFrame, flow_totals: pd.DataFrame) -> dict[str, fl
 
 
 class RebalancingMeta(pydantic.BaseModel):
-    """The ``rebalancing`` block of ``meta.json`` (Notations.md §12, §14).
-
-    ``truck_homes`` and ``truck_capacity_bikes`` are written only when
-    rebalancing is on; a run without it carries ``enabled=False`` alone.
-    """
+    """The ``rebalancing`` block of ``meta.json``."""
 
     enabled: bool
     truck_homes: list[str] | None = None
@@ -554,15 +447,7 @@ class RebalancingMeta(pydantic.BaseModel):
 
 
 class RunMeta(pydantic.BaseModel):
-    """The ``meta.json`` contract of a run artifact (Notations.md §12).
-
-    The runner writes it and the Streamlit app reads it later, possibly with a
-    different code version -- so the fields are an explicit model, not a plain
-    dict. :func:`build_meta` is the only builder; :func:`load_run_meta` is the
-    only reader. An artifact missing a field fails at load with a pydantic
-    error naming the field, instead of a ``KeyError`` in the middle of
-    rendering a page.
-    """
+    """The ``meta.json`` contract of a run artifact."""
 
     run_name: str
     scenario_id: str
@@ -603,12 +488,7 @@ class RunMeta(pydantic.BaseModel):
 
 
 def code_version() -> str:
-    """Short git commit of the codebase, for the ``code_version`` of ``meta.json``.
-
-    ``-dirty`` is appended when the working tree has uncommitted changes, so
-    a run saved mid-edit is never mistaken for the committed code. Returns
-    ``"unknown"`` when git is unavailable or the code is not a git checkout.
-    """
+    """Short git commit of the codebase (``-dirty`` if uncommitted, ``"unknown"`` outside git)."""
     repo = pathlib.Path(__file__).resolve().parent
     try:
         commit = subprocess.run(
@@ -649,61 +529,7 @@ def build_meta(
     forecast_name: str | None = None,
     forecast_dropped_share: float | None = None,
 ) -> RunMeta:
-    """Build the ``meta.json`` model for one run: parameters, violations, totals.
-
-    This is the one place that defines the ``meta.json`` contract;
-    :func:`save_scenario_run` is its production caller, so a saved artifact
-    always carries the same fields (``t0`` and ``routing_mode`` included).
-    The sized state the run started from (``initial_inventory_bikes``,
-    ``station_capacity_docks``) is computed here, so readers take it from
-    ``meta.json`` instead of summing the panel.
-
-    Parameters
-    ----------
-    tables : dict of str to pandas.DataFrame
-        The run tables from :func:`build_run_tables` (reads ``panel``,
-        ``flow_totals`` and ``facilities`` for the totals and the sized
-        state).
-    run_name : str
-        Folder name of the artifact; also written as ``scenario_id``.
-    demand_scale_factor, sizing_scale_factor : float
-        The run's demand multipliers.
-    number_of_periods : int
-        How many periods the run stepped.
-    period_len_hours : float
-        Wall-clock length of one period, in hours.
-    routing_mode : str
-        How distances were measured (``"haversine"`` or ``"osrm"``).
-    t0 : timestamp-like
-        Wall-clock start of period 0; the UI turns period ids into times with
-        it. Anything ``pandas.Timestamp`` accepts.
-    inputs : list of str
-        File names of the raw source files the run was built from. Pass an
-        empty list for runs built from a synthetic journal (the test
-        fixtures). The code version is not a parameter: :func:`code_version`
-        reads it from git here, so every artifact records it the same way.
-    violations : list of str
-        Run-invariant violations (empty = valid).
-    rebalancing : dict, optional
-        The run's rebalancing settings: ``enabled`` (bool) and, when on,
-        ``truck_homes`` (home depot per truck) and ``truck_capacity_bikes``.
-        Defaults to ``{"enabled": False}``.
-    demand_source : str, optional
-        Where the demand table came from: ``"history"`` (default) or
-        ``"forecast"``.
-    forecast_name : str, optional
-        The forecast artifact a forecast run used; pass it whenever
-        ``demand_source="forecast"``, so the run names its forecast.
-    forecast_dropped_share : float, optional
-        Share of the forecast demand total cut before the run
-        (``restrict_demand_to_scenario``); pass it whenever
-        ``demand_source="forecast"``. None on history runs.
-
-    Returns
-    -------
-    RunMeta
-        The validated ``meta.json`` payload for :func:`save_run`.
-    """
+    """Build the ``meta.json`` model for one run: parameters, violations, totals."""
     panel = tables["panel"]
     facilities = tables["facilities"]
     stations = facilities[facilities["facility_category"] == "station"]
@@ -743,34 +569,7 @@ def build_run_tables(
     period_len: pd.Timedelta,
     routes: Routes,
 ) -> dict[str, pd.DataFrame]:
-    """Build every run-artifact table from one finalized journal.
-
-    One builder per table: ``flows`` is the journal widened by
-    :func:`gbp.model.flows_with_measures`; ``panel`` comes from
-    :func:`gbp.model.flows_to_panel`, cut to ``PANEL_KEYS + PANEL_VALUES``;
-    ``arcs`` from :func:`build_arcs`; ``flow_totals`` from
-    :func:`build_flow_totals`; ``facilities`` from :func:`build_facilities`.
-
-    Parameters
-    ----------
-    journal : pandas.DataFrame
-        The finalized flow journal of the run.
-    initial_inventory : pandas.DataFrame
-        The initial inventory the run started from.
-    facilities, facilities_geo, facilities_capacities : pandas.DataFrame
-        The facility attribute tables of the scenario.
-    rates : pandas.DataFrame
-        Per-commodity price: ``commodity_category``, ``rate``.
-    period_len : pandas.Timedelta
-        Wall-clock length of one period (prices periods into dollars).
-    routes : gbp.routing.Routes
-        The scenario's distance / travel-time answerer (the arc distances).
-
-    Returns
-    -------
-    dict of str to pandas.DataFrame
-        The five tables of ``RUN_TABLES``, keyed by file stem.
-    """
+    """Build every run-artifact table from one finalized journal."""
     priced = flows_with_measures(journal, routes=routes, rates=rates, period_len=period_len)
     arcs = build_arcs(journal, routes, facilities_geo)
     # The panel is the model's read-model; selecting PANEL_VALUES (built from
@@ -794,29 +593,7 @@ def save_run(
     meta: RunMeta,
     root: pathlib.Path | None = None,
 ) -> pathlib.Path:
-    """Write one run artifact to ``<runs root>/<run_name>/``.
-
-    Each table is checked against its schema (``RUN_TABLE_SCHEMAS``) before
-    anything is written, so a wrong table fails here, not when a page draws
-    it. ``meta.json`` is written last, so a folder with a ``meta.json`` is
-    always a complete artifact (``list_runs`` keys on that file).
-
-    Parameters
-    ----------
-    run_name : str
-        Folder name of the artifact; also the name the UI shows.
-    tables : dict of str to pandas.DataFrame
-        The tables to save; keys must match ``RUN_TABLES``.
-    meta : RunMeta
-        Run parameters, invariant violations, and totals.
-    root : pathlib.Path, optional
-        Runs root override (defaults to :func:`runs_root`).
-
-    Returns
-    -------
-    pathlib.Path
-        The artifact folder.
-    """
+    """Write one run artifact (each table schema-checked first, ``meta.json`` written last)."""
     missing = set(RUN_TABLES) - set(tables)
     if missing:
         raise ValueError(f"missing run tables: {sorted(missing)}")
@@ -841,44 +618,7 @@ def save_scenario_run(
     forecast_dropped_share: float | None = None,
     root: pathlib.Path | None = None,
 ) -> pathlib.Path:
-    """Save one finished sized run as a run artifact: build the tables, the meta, write.
-
-    This is the one operation that turns a run result and its scenario data
-    into a saved artifact. It reads the journal, the sized state tables and
-    the violations off ``result``; the facility tables, the rates, the period
-    length, the routes, ``routing_mode``, ``t0`` and ``trips_path`` off
-    ``data``; and the run parameters off ``request`` -- no caller wires those
-    fields by hand.
-
-    Parameters
-    ----------
-    result : ScenarioRun
-        A finished run from ``run_sized_scenario``.
-    data : scenario data
-        The scenario the run actually used. For a forecast run this is the copy
-        with the forecast demand applied (its period grid and ``t0`` are the
-        forecast horizon's), not the original -- ``run_and_save`` builds the
-        run and this artifact from the same ``data``, so the two always agree.
-        ``ResolvedModelData`` carries every field read here; a synthetic
-        supplier must carry ``facilities_df``, ``facilities_geo_df``,
-        ``commodities_categories_rates_df``, ``period_len``, ``routes``,
-        ``routing_mode``, ``t0`` and ``trips_path`` (None when the scenario
-        was built from a synthetic journal, not a raw file).
-    request : RunRequest
-        The run recipe. Supplies the run name, the demand multipliers, the
-        period count, the demand source and forecast name, and the rebalancing
-        block (:meth:`RunRequest.rebalancing_meta`) written to ``meta.json``.
-    forecast_dropped_share : float, optional
-        Share of the forecast demand total cut before the run
-        (``restrict_demand_to_scenario``). None on history runs.
-    root : pathlib.Path, optional
-        Runs root override (defaults to :func:`runs_root`).
-
-    Returns
-    -------
-    pathlib.Path
-        The saved artifact folder.
-    """
+    """Save one finished sized run as a run artifact: build the tables, the meta, write."""
     tables = build_run_tables(
         result.simulated_flows_df,
         initial_inventory=result.initial_inventory_df,
@@ -918,9 +658,5 @@ def load_run_table(run_name: str, table: str, root: pathlib.Path | None = None) 
 
 
 def load_run_meta(run_name: str, root: pathlib.Path | None = None) -> RunMeta:
-    """Read a saved run's ``meta.json``, validated against :class:`RunMeta`.
-
-    An artifact missing a field fails here, at load, with a pydantic error
-    naming the field -- not later, while a page renders.
-    """
+    """Read a saved run's ``meta.json``, validated against ``RunMeta``."""
     return RunMeta.model_validate_json(meta_path(run_name, root).read_text())

@@ -1,27 +1,4 @@
-"""LightGBM trained on all stations at once — the expected main model (plan, phase 4).
-
-One gradient-boosting model learns from every ``(period, facility,
-commodity)`` row of the training table. Its inputs are the feature columns
-(``gbp/ml/features.py``) plus the station and the bike type themselves as
-categorical features — the design decision "one global model, with the
-station as a feature" from the plan. LightGBM handles the NaN values the
-history features carry (a lag past the end of the history stays missing).
-
-The objective is Poisson: the target is a count of departures, and the
-Poisson deviance is one of the backtest metrics. Predictions are therefore
-already positive.
-
-Censored demand: rows where the station stood without bikes record fewer
-departures than people wanted (Notations.md §17). Each training row's weight
-is ``1 - stockout_share`` — an hour the station was empty half the time
-counts half as much, an hour with no snapshot (NaN mark) counts fully.
-
-The categorical columns are encoded once at ``fit``: the category list is
-stored on the model, and ``predict`` re-encodes its input with the same
-list, so the codes LightGBM sees never depend on which stations appear in
-the forecast input. A station unseen in training becomes NaN (missing) —
-the model falls back to its non-categorical features for it.
-"""
+"""LightGBM trained on all stations at once — the expected main model."""
 
 from __future__ import annotations
 
@@ -120,7 +97,7 @@ class LightGbmModel(DemandModel):
 
     @classmethod
     def load(cls, folder: pathlib.Path) -> Self:
-        """Read a model saved by :meth:`save`."""
+        """Read a model saved by ``save``."""
         saved = json.loads((folder / "model.json").read_text())
         model = cls(num_boost_round=saved["num_boost_round"], **saved["lgb_params"])
         model._booster = lgb.Booster(model_file=str(folder / "booster.txt"))

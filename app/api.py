@@ -1,20 +1,4 @@
-"""HTTP service over the run artifacts (docs/reference/api.md).
-
-The API is a reader and a saver of run artifacts (Notations.md §12): it
-serves the saved files as they are, and it starts runs through the same
-``runner.run_scenario`` the Run scenario page calls. It computes nothing
-``artifacts.build_run_tables`` can precompute, and it adds nothing to
-``gbp/``.
-
-Serve with::
-
-    uvicorn api:app --app-dir app
-
-Server settings (environment variables): ``DATA_DIR`` (the data folder),
-``TRIPS_PATH`` and ``ROUTING_MODE`` (the one dataset runs are built from),
-``API_KEY`` (the shared access key; unset = the check is off, for local
-development).
-"""
+"""HTTP service over the run artifacts."""
 
 from __future__ import annotations
 
@@ -35,12 +19,7 @@ PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
 
 
 class RunState(pydantic.BaseModel):
-    """The state of one started run: the ``GET /runs/{run_name}/status`` payload.
-
-    ``progress`` collects the ``on_progress`` messages ``run_scenario`` emits
-    -- the same lines the Run scenario page prints locally. ``error`` carries
-    the exception text when the run failed.
-    """
+    """The state of one started run: the ``GET /runs/{run_name}/status`` payload."""
 
     run_name: str
     status: Literal["queued", "running", "done", "failed"]
@@ -63,13 +42,7 @@ _graph_data: ResolvedModelData | None = None
 
 
 def _server_graph_data() -> ResolvedModelData:
-    """Return the server's one ``ResolvedModelData``, built on first use and kept.
-
-    ``build_graph_data`` takes minutes, so the first run pays it once and
-    every later run reuses the tables -- the same reuse the Run scenario page
-    gets from ``st.cache_resource``. Only the worker thread calls this, so no
-    lock is needed.
-    """
+    """Return the server's one ``ResolvedModelData``, built on first use and kept."""
     global _graph_data
     if _graph_data is None:
         _graph_data = runner.build_graph_data(
@@ -113,13 +86,7 @@ def _ensure_worker() -> None:
 
 
 def _free_run_name(base: str) -> str:
-    """Pick the final name of a started run: ``base``, or ``base_version_{i}``.
-
-    ``next_free_run_name`` only sees saved folders. A queued or running run
-    has no folder yet, so its name must be skipped here as well -- otherwise
-    two quick POSTs with the same name would write into one folder. Call
-    with ``_states_lock`` held.
-    """
+    """Pick the final name of a started run: ``base``, or ``base_version_{i}``."""
     name = artifacts.next_free_run_name(base)
     if name not in _run_states:
         return name
@@ -131,12 +98,7 @@ def _free_run_name(base: str) -> str:
 
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    """Check the shared key on every endpoint except ``/health``.
-
-    The server reads ``API_KEY`` from the environment and compares it with
-    the ``X-API-Key`` header. With ``API_KEY`` unset (local development) the
-    check is off.
-    """
+    """Check the shared key on every endpoint except ``/health``."""
     expected = os.environ.get("API_KEY")
     if expected and x_api_key != expected:
         raise HTTPException(status_code=401, detail="missing or wrong X-API-Key header")
@@ -154,11 +116,7 @@ def health() -> dict[str, str]:
 
 @protected.get("/runs")
 def get_runs() -> list[artifacts.RunMeta]:
-    """Return the ``meta.json`` of every complete run artifact.
-
-    A folder counts as a run only when its ``meta.json`` exists -- the same
-    rule ``list_runs`` uses -- so a run being written is not listed.
-    """
+    """Return the ``meta.json`` of every complete run artifact."""
     return [artifacts.load_run_meta(name) for name in artifacts.list_runs()]
 
 
@@ -172,11 +130,7 @@ def get_run_meta(run_name: str) -> artifacts.RunMeta:
 
 @protected.get("/runs/{run_name}/tables/{table}")
 def get_run_table(run_name: str, table: str) -> Response:
-    """One parquet table of a saved run, as the saved bytes.
-
-    ``table`` is one of the ``RUN_TABLES`` stems. The client reads the body
-    with ``pd.read_parquet(io.BytesIO(response.content))``.
-    """
+    """One parquet table of a saved run, as the saved bytes."""
     if table not in artifacts.RUN_TABLES or run_name not in artifacts.list_runs():
         raise HTTPException(status_code=404, detail=f"unknown run or table {run_name!r}/{table!r}")
     path = artifacts.table_path(run_name, table)
@@ -185,12 +139,7 @@ def get_run_table(run_name: str, table: str) -> Response:
 
 @protected.post("/runs", status_code=202)
 def start_run(request: RunRequest) -> dict[str, str]:
-    """Queue one run; answer with the final run name to poll.
-
-    Every started run goes through the free-name rule, so a saved artifact
-    is never overwritten. The client polls ``GET /runs/{run_name}/status``
-    with the returned name.
-    """
+    """Queue one run; answer with the final run name to poll."""
     with _states_lock:
         name = _free_run_name(request.run_name)
         state = RunState(run_name=name, status="queued")
@@ -202,13 +151,7 @@ def start_run(request: RunRequest) -> dict[str, str]:
 
 @protected.get("/runs/{run_name}/status")
 def get_run_status(run_name: str) -> RunState:
-    """Return the state of a started run, from memory; from the disk after a restart.
-
-    A restart loses the in-memory run states. The disk then answers: an
-    existing ``meta.json`` means the run completed (``done``); anything else
-    is unknown (``404``). A run that was executing during the restart has no
-    ``meta.json``, so it is lost -- and never listed by ``GET /runs``.
-    """
+    """Return the state of a started run, from memory; from the disk after a restart."""
     state = _run_states.get(run_name)
     if state is not None:
         return state

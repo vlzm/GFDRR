@@ -1,27 +1,4 @@
-"""The one model interface every model family implements (plan, phase 4).
-
-A model family is one way to forecast demand (seasonal naive, SARIMAX,
-LightGBM, GraphSage) behind the same two calls:
-
-- ``fit(training_table)`` learns from the training table (Notations.md §17);
-- ``predict(feature_table)`` takes a forecast input and returns the
-  fractional demand: one row per ``(period_id, facility_id,
-  commodity_category)`` with a non-negative float ``quantity``.
-
-The forecast builder (``gbp/ml/forecast.py``) and the backtest
-(``gbp/ml/backtest.py``) see only this interface — model internals never
-leak past it.
-
-``predict`` returns fractional values on purpose. The forecast demand table
-the simulator reads holds whole bikes, and the rounding happens once, in the
-forecast builder (``round_forecast_demand``) — a model never rounds its own
-output. The backtest metrics also read the fractional values: rounding is a
-simulator constraint, not a model property.
-
-``save`` and ``load`` write and read a fitted model as files in a folder, so
-a backtest run can log the model file to MLflow and a later phase can load
-it back without refitting.
-"""
+"""The one model interface every model family implements."""
 
 from __future__ import annotations
 
@@ -58,7 +35,7 @@ class DemandModel(abc.ABC):
     @classmethod
     @abc.abstractmethod
     def load(cls, folder: pathlib.Path) -> Self:
-        """Read a model saved by :meth:`save`."""
+        """Read a model saved by ``save``."""
 
     def params(self) -> dict[str, object]:
         """Return the settings that define this model instance, for experiment logs."""
@@ -68,12 +45,7 @@ class DemandModel(abc.ABC):
 def fractional_demand(
     feature_table: pd.DataFrame, quantity: pd.Series | np.ndarray
 ) -> pd.DataFrame:
-    """Wrap predicted quantities into the fractional demand shape.
-
-    Takes the key columns from ``feature_table`` (same row order as
-    ``quantity``), clips negatives to zero, and sorts by the keys — every
-    model returns exactly this shape from ``predict``.
-    """
+    """Wrap predicted quantities into the fractional demand shape."""
     out = feature_table[DEMAND_KEYS].copy()
     for column in ["facility_id", "commodity_category"]:
         if isinstance(out[column].dtype, pd.CategoricalDtype):

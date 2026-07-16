@@ -1,38 +1,4 @@
-"""Two-level evaluation of the demand models through the simulator (plan, phase 5).
-
-Level 1 scores a forecast against the held-out month's actual counts — the
-backtest metrics (``gbp/ml/metrics.py``). Level 2 holds the physical state
-fixed and swaps only the demand: the state (initial inventory and dock
-capacities) is always the one sized on the month's actual demand, and each
-model's forecast runs against it. Any difference in run totals then comes
-from the forecast alone, not from a different physical state. For one
-held-out month this module saves, over the same period grid, the same OD
-matrix, and the same demand universe (Notations.md §11):
-
-- one reference run — the actual demand against the state sized on itself
-  (this state is the replay state every other run reuses);
-- per model, one replay-state forecast run — the forecast demand against
-  that same state (``run_sized_scenario`` with ``sizing_data`` = the actual
-  scenario data). The state has no slack beyond what the actual demand
-  needed, so overprediction shows up as ``lost_demand`` and ``redirected``,
-  and underprediction as departures below the reference.
-
-The scenario (stations, OD matrix, capacities) comes from the canonical trip
-CSV, so a demand table can name stations or station-hours the scenario has
-never seen. Every demand table is first cut to what the scenario can run
-(:func:`restrict_demand_to_scenario`) — the same cut for the actual and every
-forecast, so all runs face the same universe and their totals compare.
-
-Every run is a normal run artifact under ``data/runs/`` (the web interface
-can show it), named ``eval_<month>_...``. A run that already exists is not
-rerun — delete its folder to redo it. The comparison lands in
-``data/ml/evaluation/<month>/comparison.csv``, one row per run.
-
-Terminal use::
-
-    python app/evaluate.py --month 202601
-    python app/evaluate.py --month 202601 --models seasonal_naive lightgbm
-"""
+"""Two-level evaluation of the demand models through the simulator."""
 
 from __future__ import annotations
 
@@ -63,13 +29,7 @@ def evaluation_dir(month: str) -> pathlib.Path:
 
 
 def actual_demand_table(month: str) -> pd.DataFrame:
-    """Read the held-out month's actual demand from its training partition.
-
-    The partition already counts departures per ``(period, facility,
-    commodity)`` on the month period grid (period ids 0, 1, 2, … from the
-    month's first hour — ``month_period_grid``). Like the historical demand
-    marginal, only positive rows are kept.
-    """
+    """Read the held-out month's actual demand from its training partition."""
     counts = load_actual_month(month)
     return counts[counts["quantity"] > 0].reset_index(drop=True)
 
@@ -80,15 +40,7 @@ def ensure_forecast(
     horizon_periods: int,
     log: Callable[[str], None] = print,
 ) -> str:
-    """Return the name of the model's forecast for ``month``, building it if missing.
-
-    The forecast is named ``<model>_<month>`` and trains on every training
-    partition before the month — the same window as the backtest split that
-    tests this month. A missing artifact is built for the whole month, so
-    one artifact serves any evaluation window. An existing artifact is
-    checked, not rebuilt: its horizon must start at the month's first hour
-    and cover ``horizon_periods``.
-    """
+    """Return the name of the model's forecast for ``month``, building it if missing."""
     month = normalize_month(month)
     name = f"{model_name}_{month}"
     start = month_bounds(month)[0]
@@ -125,16 +77,7 @@ def _ensure_run(
     root: pathlib.Path | None = None,
     log: Callable[[str], None] = print,
 ) -> None:
-    """Run one evaluation run and save its artifact; skip when it already exists.
-
-    The demand table is put in place with :func:`apply_forecast_demand` (the
-    forecast-run path), and the run goes through the same
-    :func:`runner.run_and_save` the terminal runner uses -- so an evaluation
-    run is a normal run artifact, built the one way. With ``sizing_demand_df``
-    the state is sized on that table instead of the run's own demand; the
-    evaluation passes the actual demand there, so every forecast runs against
-    the replay state (Notations.md §11).
-    """
+    """Run one evaluation run and save its artifact; skip when it already exists."""
     if run_name in artifacts.list_runs(root):
         log(f"{run_name}: exists, skipping")
         return
@@ -169,25 +112,7 @@ def evaluate_month(
     n_periods: int | None = None,
     log: Callable[[str], None] = print,
 ) -> pd.DataFrame:
-    """Build every evaluation run for one held-out month and compare them.
-
-    The steps, in order: resolve the scenario from the canonical trip CSV,
-    cut the actual demand and every model's forecast to the scenario
-    (:func:`restrict_demand_to_scenario`), save the reference run, then per
-    model one replay-state forecast run — the forecast demand against the
-    state sized on the actual demand — and read one comparison row off
-    every saved run. Level-1 metrics are computed on the restricted
-    whole-bike tables — the exact tables the runs consumed.
-
-    ``n_periods`` shortens the window: only the first ``n_periods`` hours of
-    the month are compared (default: the whole month). A shortened window
-    runs proportionally faster; its runs and its comparison file carry the
-    window in their names (``eval_<month>_<N>p_...``,
-    ``comparison_<N>p.csv``), so they never mix with the full-month ones.
-
-    Returns the comparison table and writes it to
-    ``data/ml/evaluation/<month>/``.
-    """
+    """Build every evaluation run for one held-out month and compare them."""
     month = normalize_month(month)
     month_periods_df = month_period_grid(month)
     month_hours = len(month_periods_df)
@@ -263,7 +188,7 @@ def evaluate_month(
 def main() -> None:
     """Terminal entry point: one held-out month in, the comparison table out."""
     parser = argparse.ArgumentParser(
-        description="Evaluate the demand models through the simulator (plan, phase 5)."
+        description="Evaluate the demand models through the simulator."
     )
     parser.add_argument("--month", required=True, help="held-out month, as YYYYMM or YYYY-MM")
     parser.add_argument(

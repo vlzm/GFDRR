@@ -1,25 +1,4 @@
-"""The model families of the forecasting phase, behind one interface.
-
-One file per family, every family implements ``DemandModel``
-(``gbp/ml/models/base.py``): ``fit(training_table)`` and
-``predict(feature_table)`` returning fractional demand. The forecast
-builder and the backtest create models only through :func:`create_model`,
-so they never see a family's internals.
-
-The families, in the plan's order of effort:
-
-- ``seasonal_naive`` — the hour-of-week mean; the baseline every other
-  family must beat.
-- ``sarimax`` — SARIMAX on the daily city total, split by the hour-of-week
-  means; the classical baseline.
-- ``lightgbm`` — one gradient-boosting model over all stations; the
-  expected main model.
-- ``graphsage`` — GraphSage on the station graph; the research model.
-
-Imports are inside :func:`create_model` on purpose: importing this package
-stays cheap, and a family's library (torch, lightgbm) loads only when that
-family is used.
-"""
+"""The model families of the forecasting phase, behind one interface."""
 
 from __future__ import annotations
 
@@ -31,12 +10,7 @@ MODEL_FAMILIES = ("seasonal_naive", "sarimax", "lightgbm", "graphsage")
 
 
 def create_model(name: str, **params: object) -> DemandModel:
-    """Build one unfitted model of the given family.
-
-    ``params`` go to the family's constructor unchanged. Every family builds
-    itself from its training table alone — ``graphsage`` counts its graph
-    edges inside ``fit`` when no ``edges_df`` is passed in.
-    """
+    """Build one unfitted model of the given family."""
     if name == "seasonal_naive":
         from gbp.ml.models.seasonal_naive import SeasonalNaiveModel
 
@@ -57,13 +31,7 @@ def create_model(name: str, **params: object) -> DemandModel:
 
 
 def load_model(name: str, folder: pathlib.Path) -> DemandModel:
-    """Read a fitted model of the given family from a folder ``save`` wrote.
-
-    The counterpart of :func:`create_model` for models that are already
-    trained — the model registry (``gbp/ml/registry.py``) loads a registered
-    version through this function, naming the family by its ``model_family``
-    tag. Imports are lazy for the same reason as in :func:`create_model`.
-    """
+    """Read a fitted model of the given family from a folder ``save`` wrote."""
     if name == "seasonal_naive":
         from gbp.ml.models.seasonal_naive import SeasonalNaiveModel
 

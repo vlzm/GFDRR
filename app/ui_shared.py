@@ -1,9 +1,4 @@
-"""Shared helpers for the Streamlit pages: cached loaders, pickers, colors, charts.
-
-Colors are the validated defaults of the data-viz method: scenario A is blue,
-scenario B is orange (a colorblind-safe pair), sequential magnitude is the blue
-ramp, and the difference view uses the blue-gray-red diverging pair.
-"""
+"""Shared helpers for the Streamlit pages: cached loaders, pickers, colors, charts."""
 
 from __future__ import annotations
 
@@ -78,16 +73,12 @@ def list_runs() -> list[str]:
 
 @st.cache_data(show_spinner=False)
 def _table_cached(run_name: str, table: str, cache_key: float) -> pd.DataFrame:
-    """Cache one parquet table; ``cache_key`` comes from :func:`table_cache_key`."""
+    """Cache one parquet table; ``cache_key`` comes from ``table_cache_key``."""
     return backend.current().load_table(run_name, table)
 
 
 def table_cache_key(run_name: str, table: str) -> float:
-    """Cache key of one saved table: the file mtime locally, a constant over HTTP.
-
-    The backend owns the rule (a local file can be rewritten; a served
-    artifact never changes — docs/reference/api.md).
-    """
+    """Cache key of one saved table: the file mtime locally, a constant over HTTP."""
     return backend.current().table_cache_key(run_name, table)
 
 
@@ -112,14 +103,7 @@ def load_facilities(run_name: str) -> pd.DataFrame:
 
 
 def load_arcs(run_name: str, flow_type: str | None = None) -> pd.DataFrame | None:
-    """Load the arcs of a run, optionally only one ``flow_type``.
-
-    ``flow_type`` is ``"user_trip"`` (bike rides) or ``"rebalance"`` (truck
-    moves); ``None`` returns the whole table. The old-artifact fallback lives
-    here: arcs saved before the ``flow_type`` column existed hold user trips
-    only, so asking such a run for user trips returns the whole table, and
-    asking it for truck moves returns ``None`` (they cannot be told apart).
-    """
+    """Load the arcs of a run, optionally only one ``flow_type`` (``None`` returns all)."""
     arcs = _load_table(run_name, "arcs")
     if flow_type is None:
         return arcs
@@ -130,7 +114,7 @@ def load_arcs(run_name: str, flow_type: str | None = None) -> pd.DataFrame | Non
 
 @st.cache_data(show_spinner=False)
 def _meta_cached(run_name: str, cache_key: float) -> artifacts.RunMeta:
-    """Cache one meta.json; ``cache_key`` mirrors :func:`table_cache_key`."""
+    """Cache one meta.json; ``cache_key`` mirrors ``table_cache_key``."""
     return backend.current().load_meta(run_name)
 
 
@@ -147,22 +131,14 @@ class RebalancingSettings(NamedTuple):
 
 
 def rebalancing_settings(meta: artifacts.RunMeta) -> RebalancingSettings:
-    """Read the rebalancing block of ``meta.json`` (one place for the empty-list rule).
-
-    ``truck_homes`` is written only when rebalancing is on; when it is off the
-    block reads as no trucks (an empty list), so pages can take ``len(...)``.
-    """
+    """Read the rebalancing block of ``meta.json`` (``truck_homes`` empty when off)."""
     block = meta.rebalancing
     return RebalancingSettings(block.enabled, block.truck_homes or [])
 
 
 # --- Scenario picking -------------------------------------------------------
 def pick_scenario_pair() -> tuple[str | None, str | None]:
-    """Sidebar pickers for scenario A and the optional comparison scenario B.
-
-    The chosen names are kept in ``st.session_state`` so every page shows the
-    same pair. Returns ``(None, None)`` when no run is saved yet.
-    """
+    """Sidebar pickers for scenario A and the optional comparison scenario B."""
     runs = list_runs()
     if not runs:
         st.info("No saved runs yet. Open the “Run scenario” page and start the first one.")
@@ -206,10 +182,7 @@ def slider_max_period(meta_a: artifacts.RunMeta, meta_b: artifacts.RunMeta | Non
 
 # --- Period ids to wall-clock time -------------------------------------------
 def period_start_time(meta: artifacts.RunMeta, periods):
-    """Wall-clock start of a period (or a Series of periods): ``t0 + period * period_len``.
-
-    Every ``meta.json`` carries ``t0`` (see ``artifacts.build_meta``).
-    """
+    """Wall-clock start of a period (or a Series of periods): ``t0 + period * period_len``."""
     return pd.Timestamp(meta.t0) + periods * pd.Timedelta(hours=meta.period_len_hours)
 
 
@@ -247,22 +220,13 @@ _KPI_FORMATS = {
 
 
 def delta_b_minus_a(value_a: float, value_b: float, fmt: Callable[[float], str] = fmt_int) -> str:
-    """Format the one comparison convention: the difference is always B − A.
-
-    Returns the signed text for ``st.metric``: an ASCII leading ``-`` is what
-    ``st.metric`` reads as "went down", so the sign is put on by hand and the
-    unit format is applied to the absolute value.
-    """
+    """Format the one comparison convention: the difference is always B − A."""
     diff = value_b - value_a
     return f"{'+' if diff >= 0 else '-'}{fmt(abs(diff))}"
 
 
 def kpi_row(meta_a: artifacts.RunMeta, meta_b: artifacts.RunMeta | None = None) -> None:
-    """Whole-run totals as metric tiles; with B chosen, the delta is B − A.
-
-    The tiles come from the one METRICS table (``kpi=True`` entries); the tile
-    label is the metric's ``title``.
-    """
+    """Whole-run totals as metric tiles; with B chosen, the delta is B − A."""
     totals_a = meta_a.totals
     totals_b = meta_b.totals if meta_b else None
     items = [metric for metric in METRICS if metric.kpi]
@@ -297,13 +261,7 @@ def validation_badge(meta: artifacts.RunMeta, label: str) -> None:
 def panel_commodity_slice(
     rows: pd.DataFrame, commodity: str | None, keys: list[str]
 ) -> pd.DataFrame:
-    """Panel rows for one bike type, or the "All types" sum, per ``keys``.
-
-    This is the one place that defines the "All types" pick: ``commodity=None``
-    sums the panel value columns over the bike types within each ``keys``
-    group; a chosen commodity keeps only its rows. With ``commodity_category``
-    in ``keys`` the rows stay as they are (the raw per-type view).
-    """
+    """Panel rows for one bike type, or the "All types" sum (``commodity=None``), per ``keys``."""
     if commodity is not None:
         rows = rows[rows["commodity_category"] == commodity]
     return rows.groupby(keys, as_index=False)[PANEL_VALUES].sum()
@@ -333,14 +291,7 @@ PANEL_VALUES_DIFF = [value_diff(name) for name in PANEL_VALUES]
 def panel_slice_pair(
     panel_a: pd.DataFrame, panel_b: pd.DataFrame, period: int, commodity: str | None
 ) -> pd.DataFrame:
-    """One row per facility at one period, with both runs' values and their difference.
-
-    The comparison convention of two panels lives here: run A's values keep
-    their column names, run B's copies are named by :func:`value_b`, and the
-    differences (always B − A, like every comparison in the app) by
-    :func:`value_diff`. A facility only one run touched reads as zeros in the
-    other run.
-    """
+    """One row per facility at one period, with both runs' values and their difference."""
     slice_a = panel_slice(panel_a, period, commodity)
     slice_b = panel_slice(panel_b, period, commodity).rename(
         columns={name: value_b(name) for name in PANEL_VALUES}
@@ -419,31 +370,7 @@ def aggregate_flow_totals(
     level: str,
     facilities: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Aggregate ``flow_totals`` per scenario at one detail level.
-
-    A flow's value belongs to its origin facility (``source_id``) and its
-    ``start_period`` — the place and period the demand occurred.
-
-    Parameters
-    ----------
-    frames : dict of str to pandas.DataFrame
-        ``run_name -> flow_totals`` for one or two scenarios.
-    value : str
-        Column to aggregate: ``cost``, ``distance_km`` or ``duration_periods``.
-    agg : str
-        ``"sum"`` or ``"mean"``.
-    level : str
-        One of ``LEVELS``.
-    facilities : list of str, optional
-        Keep only these origin facilities (required at ``LEVEL_FACILITY``).
-
-    Returns
-    -------
-    pandas.DataFrame
-        Tidy rows: ``scenario``, the level's keys, and ``value``. Per-period
-        rows also get ``start_time`` — the wall-clock start of
-        ``start_period``.
-    """
+    """Aggregate ``flow_totals`` per scenario at one detail level."""
     keys: list[str] = []
     if level != LEVEL_GLOBAL:
         keys.append("start_period")
@@ -477,12 +404,7 @@ def level_line_chart(
     y_title: str,
     color_map: dict[str, str],
 ):
-    """Line chart over periods for an :func:`aggregate_flow_totals` frame.
-
-    Scenario carries the color; commodity (when present) carries the line
-    dash; facilities (when present) become small multiples. The x axis is the
-    period's wall-clock start (``start_time``).
-    """
+    """Line chart over periods for an ``aggregate_flow_totals`` frame."""
     x = "start_time"
     x_title = "Period start time"
     kwargs: dict = {"hover_data": ["start_period"]}
@@ -525,14 +447,7 @@ def top_facilities(flow_totals: pd.DataFrame, value: str, n: int = 6) -> list[st
 
 # --- Arc maps -------------------------------------------------------------------
 def arc_map_rows(arcs: pd.DataFrame, group_keys: list[str], count_name: str) -> pd.DataFrame:
-    """Group arc rows into one map row per ``group_keys``: the count and the endpoints.
-
-    Owns the arc-row schema knowledge: every arc row carries its endpoint
-    coordinates (``source_lat`` .. ``target_lng``), so grouping keeps them with
-    ``"first"`` and the map needs no join. ``count_name`` names the summed
-    ``quantity`` column ("trips" on the trips map, "bikes" on the truck map);
-    ``distance_km`` comes back as the group mean (constant within a real group).
-    """
+    """Group arc rows into one map row per ``group_keys``: the count and the endpoints."""
     return arcs.groupby(group_keys, as_index=False).agg(
         **{count_name: ("quantity", "sum")},
         distance_km=("distance_km", "mean"),
@@ -551,12 +466,7 @@ def arc_deck(
     width_min_pixels: float = 1.5,
     width_max_pixels: float = 10,
 ) -> pdk.Deck:
-    """Build an arc map over the city: one pydeck ``ArcLayer`` with the house tooltip.
-
-    Owns pydeck's ``[lng, lat]`` coordinate order and the tooltip style. The
-    rows come from :func:`arc_map_rows` plus a per-row ``color`` (an RGBA
-    list) the page chose; ``width_col`` scales the arc width.
-    """
+    """Build an arc map over the city: one pydeck ``ArcLayer`` with the house tooltip."""
     layer = pdk.Layer(
         "ArcLayer",
         data=rows,
@@ -589,13 +499,7 @@ def arc_deck(
 # --- The flow_totals metric page ----------------------------------------------
 @dataclasses.dataclass(frozen=True)
 class FlowTotalsView:
-    """One ``flow_totals`` chart page, described once.
-
-    The Costs and Distance & duration pages are the same four-block page over
-    a different measure; this config names the differences and
-    :func:`flow_totals_page` renders the shared body. A new metric page is a
-    new ``FlowTotalsView``, not a copied page.
-    """
+    """One ``flow_totals`` chart page, described once."""
 
     value: str  # flow_totals column to aggregate
     agg: str  # "sum" or "mean"
@@ -609,13 +513,7 @@ class FlowTotalsView:
 
 
 def flow_totals_page(run_a: str, run_b: str | None, view: FlowTotalsView, level: str) -> None:
-    """Render the shared body of a ``flow_totals`` metric page at one detail level.
-
-    The whole-run level shows one tile per scenario (the precomputed total
-    from ``meta.totals``) and the B − A difference; every other level
-    aggregates with :func:`aggregate_flow_totals` and draws
-    :func:`level_line_chart` plus the data table.
-    """
+    """Render the shared body of a ``flow_totals`` metric page at one detail level."""
     frames = {run_a: load_flow_totals(run_a)}
     if run_b:
         frames[run_b] = load_flow_totals(run_b)

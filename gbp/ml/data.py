@@ -1,20 +1,4 @@
-"""Forecasting-specific data helpers: the weather download and the month grid.
-
-Downloading and loading the trip CSVs themselves is not here — that serves
-both canonical runs and lives in ``gbp/loaders/download.py``. This module
-keeps what only the forecasting pipeline needs:
-
-- ``ml_dir`` — the root of the forecasting data, ``data/ml/``;
-- ``month_period_grid`` — the hourly period grid of one calendar month
-  (Notations.md §17), the one grid every month-shaped task counts on;
-- ``load_weather_daily`` — the daily weather the feature builder joins in
-  (plan, phase 3): maximum and minimum temperature and precipitation for the
-  Central Park station of NOAA's GHCN-Daily dataset, served as CSV by the
-  NCEI data service (no token needed). Weather is cached as one CSV per
-  calendar year in ``data/raw/``; a past year's file never changes, and the
-  current year's file is downloaded again when it does not yet reach the
-  asked dates (NOAA publishes with a few days' delay).
-"""
+"""Forecasting-specific data helpers: the weather download and the month grid."""
 
 from __future__ import annotations
 
@@ -33,32 +17,13 @@ _DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[2] / "data"
 
 
 def ml_dir() -> pathlib.Path:
-    """Root of the forecasting data (Notations.md §15): ``<data dir>/ml``.
-
-    Honors the same ``DATA_DIR`` environment switch as ``app/artifacts.py``;
-    without it, this is ``data/ml`` at the repository root.
-    """
+    """Root of the forecasting data: ``<data dir>/ml`` (honors the ``DATA_DIR`` switch)."""
     return pathlib.Path(os.environ.get("DATA_DIR", _DEFAULT_DATA_DIR)) / "ml"
 
 
 @dataclasses.dataclass(frozen=True)
 class MlPaths:
-    """The data folders the forecasting pipeline reads and writes.
-
-    One object gathers the folder overrides that used to be separate
-    parameters on almost every ``gbp/ml`` orchestrator — the raw files, the
-    training partitions, the saved forecasts, the monitoring outputs — plus
-    the MLflow tracking folder. Production code calls :meth:`resolve` for the
-    repository defaults; a test builds one with :meth:`under`, pointing every
-    folder at one temporary directory, and passes it down as a single
-    argument instead of re-declaring three or four overrides per call. The
-    ``store`` object (:class:`gbp.ml.registry.MlflowStore`) and a supplied
-    ``weather_df`` stay separate arguments — one is already a single object,
-    the other is a table, not a folder.
-
-    ``tracking`` is None for the default MLflow store (``MlflowStore()``
-    resolves it) — only a test sets it.
-    """
+    """The data folders the forecasting pipeline reads and writes."""
 
     raw: pathlib.Path
     training: pathlib.Path
@@ -95,25 +60,13 @@ class MlPaths:
 
 
 def month_grid(month: str) -> PeriodGrid:
-    """Build the hourly period grid of one calendar month, as a :class:`PeriodGrid`.
-
-    ``period_id`` is 0 at the month's first hour. Callers that need the rows
-    use :func:`month_period_grid`; monitoring keeps the grid object to line a
-    forecast horizon up with the month (:meth:`PeriodGrid.align_to`).
-    """
+    """Build the hourly period grid of one calendar month, as a PeriodGrid."""
     start, end = month_bounds(month)
     return PeriodGrid(start, int((end - start) / DEFAULT_PERIOD_LEN), DEFAULT_PERIOD_LEN)
 
 
 def month_period_grid(month: str) -> pd.DataFrame:
-    """Build the hourly period grid of one calendar month (Notations.md §17).
-
-    One row per hour of the month: ``period_id`` — 0 at the month's first
-    hour — plus the hour's ``start_timestamp`` and ``end_timestamp``. Every
-    month-shaped task counts on this one grid: a training partition numbers
-    its hours on it, and a forecast of a held-out month uses it as the
-    forecast horizon (the backtest and the monitoring baseline).
-    """
+    """Build the hourly period grid of one calendar month."""
     return month_grid(month).frame()
 
 
@@ -180,17 +133,7 @@ def load_weather_daily(
     raw: pathlib.Path | None = None,
     log: Callable[[str], None] | None = None,
 ) -> pd.DataFrame:
-    """Return the daily Central Park weather over ``[start_date, end_date]``, both ends included.
-
-    One row per date: ``date``, ``temperature_max_c``, ``temperature_min_c``,
-    ``precipitation_mm``. A date the station has not reported yet is simply
-    absent — the weather join (``add_weather_features``) then leaves NaN.
-
-    Year files already on disk are used as they are; a year file that does
-    not reach the asked dates yet is downloaded again. Asking for dates NOAA
-    has not published (for example, today) therefore re-downloads the current
-    year's file on every call — pass only dates that can exist.
-    """
+    """Return the daily Central Park weather over ``[start_date, end_date]``, both ends included."""
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
     if start > end:

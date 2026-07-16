@@ -1,32 +1,4 @@
-"""The model registry and the champion alias (plan, phase 6; Notations.md §17).
-
-The MLflow store is one folder (default ``data/ml/mlflow/``): the runs and
-the registry in ``mlflow.db`` (SQLite), the logged files under
-``artifacts/``. In code the store is one object, :class:`MlflowStore`. An
-entry point (the pipeline, the backtest, the forecast builder, the
-monitoring) creates it once and passes it on; every registry operation is
-a method on it. MLflow keeps its target as process-wide state, so each
-method first points that state at the store's folder — no caller has to
-remember a "configure first" rule.
-
-The registry is the list of trained model versions the store keeps. One
-registered model, ``demand-model``, holds every version regardless of
-family. A model version is a fitted model plus what defines it — three
-tags: ``model_family``, ``train_months``, and ``data_version``. Its files
-are the folder the model's ``save`` wrote, logged to a training run in the
-``demand-training`` experiment.
-
-The alias ``champion`` marks the version the platform currently uses. The
-forecast builder (``gbp/ml/forecast.py``) resolves the model through
-:meth:`MlflowStore.resolve_champion` — never by a file path. Promotion
-moves the alias (:meth:`MlflowStore.promote_to_champion`); the version it
-left keeps the tag ``role: challenger``.
-
-The retraining pipeline (``gbp/ml/pipeline.py``) is the only writer: it
-registers a candidate version (:meth:`MlflowStore.register_version`,
-reusing an existing twin through :meth:`MlflowStore.find_version`) and
-promotes or keeps the champion by the backtest comparison.
-"""
+"""The model registry and the champion alias, backed by a local MLflow store."""
 
 from __future__ import annotations
 
@@ -85,33 +57,18 @@ def version_tags(family: str, train_months: list[str], data_version: str) -> dic
 
 
 class MlflowStore:
-    """The local MLflow store, created once at an entry point and passed on.
-
-    ``root`` is the store folder. Creating the object costs nothing; the
-    folder and the SQLite file appear on the first operation. Every method
-    starts by pointing MLflow's process-wide state at ``root``
-    (:meth:`activate`), so the order rule lives here and nowhere else.
-    """
+    """The local MLflow store, created once at an entry point and passed on."""
 
     def __init__(self, tracking_dir: pathlib.Path | None = None) -> None:
         self.root = (tracking_dir or (ml_dir() / "mlflow")).resolve()
 
     def activate(self) -> None:
-        """Point MLflow's process-wide state at this store.
-
-        For code that calls the ``mlflow`` module directly (the backtest
-        logs its runs that way); the methods here call it themselves.
-        """
+        """Point MLflow's process-wide state at this store."""
         self.root.mkdir(parents=True, exist_ok=True)
         mlflow.set_tracking_uri(f"sqlite:///{self.root / 'mlflow.db'}")
 
     def set_experiment(self, name: str) -> None:
-        """Create the experiment with its files inside the store, then select it.
-
-        MLflow 3 no longer accepts a plain directory as a store, so the
-        experiment's artifact location is set explicitly to
-        ``<store>/artifacts``.
-        """
+        """Create the experiment with its files inside the store, then select it."""
         self.activate()
         if mlflow.get_experiment_by_name(name) is None:
             mlflow.create_experiment(name, artifact_location=(self.root / "artifacts").as_uri())
@@ -124,12 +81,7 @@ class MlflowStore:
     def find_version(
         self, family: str, train_months: list[str], data_version: str
     ) -> ModelVersion | None:
-        """Return the registered version with the same identity tags, or None.
-
-        This is the idempotency check of the pipeline's train step: the same
-        family trained on the same months of the same data version is the
-        same model, so it is reused instead of registered twice.
-        """
+        """Return the registered version with the same identity tags, or None."""
         client = self._client()
         wanted = version_tags(family, train_months, data_version)
         versions = client.search_model_versions(f"name = '{REGISTERED_MODEL_NAME}'")
@@ -143,14 +95,7 @@ class MlflowStore:
         train_months: list[str],
         data_version: str,
     ) -> ModelVersion:
-        """Save a fitted model as a new version of ``demand-model``.
-
-        Logs one training run (parameters: family, months, data version, the
-        model's own settings; files: the folder ``save`` wrote, under
-        ``model/``) and registers that run's files as a new version with the
-        identity tags. The new version carries no alias — promotion is the
-        pipeline's decision, not the trainer's.
-        """
+        """Save a fitted model as a new version of ``demand-model``."""
         self.set_experiment(TRAINING_EXPERIMENT)
         months = sorted(normalize_month(m) for m in train_months)
         span = f"{months[0]}..{months[-1]}"
@@ -188,11 +133,7 @@ class MlflowStore:
         )
 
     def latest_registered_version(self) -> ModelVersion | None:
-        """Return the newest registered version, or None while the registry is empty.
-
-        The pipeline's promote step uses this as the candidate when it runs
-        without a train step in the same command.
-        """
+        """Return the newest registered version, or None while the registry is empty."""
         versions = self._client().search_model_versions(f"name = '{REGISTERED_MODEL_NAME}'")
         return max(versions, key=lambda v: int(v.version), default=None)
 
@@ -226,11 +167,7 @@ class MlflowStore:
         )
 
     def load_version_model(self, version: ModelVersion) -> DemandModel:
-        """Download a version's files and load the fitted model behind the interface.
-
-        The family comes from the version's ``model_family`` tag; the files
-        go to a temporary folder that is deleted once the model is in memory.
-        """
+        """Download a version's files and load the fitted model behind the interface."""
         self.activate()
         family = version.tags.get("model_family")
         if not family:
@@ -245,11 +182,7 @@ class MlflowStore:
             return load_model(family, pathlib.Path(local))
 
     def resolve_champion(self) -> tuple[DemandModel, ModelVersion]:
-        """Return the champion, loaded and ready to predict, with its version.
-
-        Raises ``LookupError`` when the registry has no champion yet — the
-        retraining pipeline promotes the first one.
-        """
+        """Return the champion, loaded and ready to predict, with its version."""
         version = self.champion_version()
         if version is None:
             raise LookupError(
@@ -259,13 +192,7 @@ class MlflowStore:
         return self.load_version_model(version), version
 
     def log_comparison(self, table: pd.DataFrame, *, params: dict[str, object]) -> None:
-        """Write the backtest comparison: its parameters and the table as one CSV.
-
-        The read half is :meth:`latest_comparison`; together they are the
-        only code that knows how a comparison is stored. ``params`` are the
-        backtest settings the writer wants kept next to the table (the month
-        span, the split count, the model families, the data version).
-        """
+        """Write the backtest comparison: its parameters and the table as one CSV."""
         self.set_experiment(BACKTEST_EXPERIMENT)
         with mlflow.start_run(run_name=_COMPARISON_RUN_NAME):
             mlflow.log_params(params)
@@ -275,12 +202,7 @@ class MlflowStore:
                 mlflow.log_artifact(str(path))
 
     def latest_comparison(self) -> BacktestComparison | None:
-        """Read the newest saved comparison back, or None if there is none.
-
-        This is how a standalone promote step finds the scores when the
-        backtest ran in an earlier command — backtest state lives in MLflow,
-        not in the process.
-        """
+        """Read the newest saved comparison back, or None if there is none."""
         self.activate()
         experiment = mlflow.get_experiment_by_name(BACKTEST_EXPERIMENT)
         if experiment is None:

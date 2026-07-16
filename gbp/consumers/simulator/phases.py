@@ -1,19 +1,4 @@
-"""Simulation phases.
-
-Each phase reads the state, builds this period's events, and writes them
-through :meth:`SimulationState.apply_step_events` -- the one call that appends
-the events to the journal and moves the projections (inventory, ``in_transit``)
-by exactly what the events imply. The three phases split one period into these
-steps: dock earlier arrivals -> form departures (and build the trips) -> dock
-arrivals from this same period.
-
-:class:`DockArrivals` parks the bikes that arrive this period. It fills the free
-dock slots first, then sends any extra bikes on a new leg to the nearest station
-that still has a free dock; a leg that takes time docks in a later period. When
-we replay the real history the docks are never full, so the capacity limit and
-the redirect do nothing. They only start to matter when traffic goes above the
-historical level.
-"""
+"""The per-period simulation phases: dock earlier arrivals, form departures, dock same-period."""
 
 from typing import Literal
 
@@ -47,19 +32,7 @@ log = structlog.get_logger(__name__)
 
 
 class Phase:
-    """Base class for one phase: a single step of a period, run every period.
-
-    A phase declares where its events sort inside a period once
-    (:attr:`phase_rank`) and builds this period's events
-    (:meth:`build_events`). :meth:`execute` writes them through
-    :meth:`SimulationState.apply_step_events`, which stamps the ordering
-    columns and moves the projections -- so a normal phase implements only
-    ``build_events``. The engine checks at construction time that the phase
-    list is ordered by ``phase_rank``, so the list position and the stamped
-    rank cannot disagree. A phase that also replaces a named state field (the
-    rebalancing plan) overrides ``execute`` and writes its events through the
-    same call.
-    """
+    """Base class for one phase: a single step of a period, run every period."""
 
     #: Where this phase's events sort inside a period (Notations.md §0.1).
     phase_rank: int
@@ -81,37 +54,12 @@ class Phase:
         resolved: ScenarioInputs,
         period: PeriodRow,
     ) -> pd.DataFrame:
-        """Build this period's events; an empty frame means nothing happened.
-
-        Required for a phase that uses the default :meth:`execute`. A phase
-        that overrides ``execute`` (the two rebalancing phases) never calls
-        it, so this cannot be an ``abc`` abstract method: that would forbid
-        instantiating those phases.
-        """
+        """Build this period's events; an empty frame means nothing happened."""
         raise NotImplementedError
 
 
 class DockArrivals(Phase):
-    """Dock the bikes that arrive this period; redirect what does not fit.
-
-    Arrivals dock at their planned station while it has free docks. Each bike
-    that does not fit bounces and gets a new leg to the nearest station with a
-    free dock. A zero-duration leg docks within this same phase; a leg that
-    takes time (the pair's travel time from the OD matrix) re-enters
-    ``in_transit`` and docks -- or bounces again -- when it arrives. A bike is
-    lost only when no station in the network has a free dock. In an exact
-    replay of history the docks are never full, so none of this fires.
-
-    ``when`` picks which arrivals this phase handles, because the two run at
-    different moments of the period: ``"previous"`` docks bikes that departed
-    in an earlier period (before this period's departures are formed), and
-    ``"same"`` docks bikes that departed within this period (after them).
-    ``phase_rank`` follows ``when``: 0 for ``"previous"``, 2 for ``"same"``.
-
-    The planned dockings are ``phase_round`` 0; each redirect round is its own
-    ordered batch, ``phase_round`` 1, 2, ... After the phase, every due bike
-    has docked, left on a new leg, or been lost, exactly once.
-    """
+    """Dock the bikes that arrive this period; redirect what does not fit."""
 
     def __init__(self, when: Literal["previous", "same"]) -> None:
         if when not in ("previous", "same"):
@@ -120,12 +68,7 @@ class DockArrivals(Phase):
         self.phase_rank = DOCK_PREVIOUS_RANK if when == "previous" else DOCK_SAME_RANK
 
     def _due_arrivals(self, in_transit: pd.DataFrame, t: int) -> pd.DataFrame:
-        """Select the in-transit flows this phase docks at period ``t`` (picked by ``when``).
-
-        User trips only: bikes riding on a truck (``flow_type == "rebalance"``)
-        are also in transit, but their dropoff is applied by
-        ``ApplyRebalancingPhase``, not here.
-        """
+        """Select the in-transit user trips this phase docks at period ``t`` (by ``when``)."""
         due_now = (in_transit["planned_end_period"] == t) & (in_transit["flow_type"] == "user_trip")
         if self.when == "previous":
             return in_transit[due_now & (in_transit["start_period"] < t)]
@@ -148,20 +91,7 @@ def dock_due_arrivals(
     resolved: ScenarioInputs,
     t: int,
 ) -> pd.DataFrame:
-    """Dock the due arrivals, redirect the overflow, lose what fits nowhere.
-
-    The ordered core of :class:`DockArrivals`, split out so a test can call it
-    on a hand-built state without the engine. ``due`` is the arrivals this step
-    handles, already picked by ``when`` (:meth:`DockArrivals._due_arrivals`).
-    The order is the whole point: dock at the planned station while free docks
-    last, then read the inventory as it will stand once those dockings are
-    written, then plan the redirects against that reduced inventory -- a
-    redirect must not reuse a dock the planned dockings already took.
-
-    Returns the event batch (empty when nothing is due). The batch carries a
-    ``phase_round`` per redirect round; the caller's ``apply_step_events`` turns
-    each round into its own inventory step (Notations.md §0.1).
-    """
+    """Dock the due arrivals, redirect the overflow, lose what fits nowhere (empty if none due)."""
     if due.empty:
         return empty_flows_journal()
 
@@ -207,30 +137,7 @@ def dock_due_arrivals(
 
 
 class FormDeparturesPhase(Phase):
-    """Form this period's departures: the demand split and the trips, in one phase.
-
-    The period's own activity (:data:`PERIOD_OWN_RANK`), start to finish:
-
-    1. Take the period's demand (``resolved.historical_demand_df``, already
-       scaled by the run's factor at the run boundary via
-       ``scaled_demand_inputs``). Decide how many bikes leave each
-       ``(source, commodity)`` -- ``min(demand, inventory)`` -- and take them
-       out of the inventory.
-    2. Book the demand that did *not* fit as ``lost`` events
-       (``reason="stockout"``), so the journal keeps the full split
-       ``demand = departed + lost`` instead of quietly dropping the lost demand.
-    3. Spread the departures over the targets with the OD probabilities
-       ``P(target | source, commodity)``, rounded to whole bikes by the
-       largest-remainder method so each source's total is preserved exactly
-       (:func:`~gbp.consumers.simulator.mechanics.form_potential_trips`).
-       Set each trip's arrival period from the mean historical duration of its
-       pair, and emit one ``departed`` flow per bike. In the simple case the
-       OD matrix is the historical one, so a base run repeats the historical
-       demand pattern.
-
-    All of it is one inventory step: the ``departed`` flows and the stockout
-    ``lost`` events share one ``step_id`` (Notations.md §0.1).
-    """
+    """Form this period's departures: the demand split and the trips, in one phase."""
 
     phase_rank = PERIOD_OWN_RANK
 

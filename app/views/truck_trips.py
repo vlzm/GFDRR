@@ -19,11 +19,7 @@ facilities = ui_shared.load_facilities(run_a)
 
 
 def _truck_moves(run_name: str) -> pd.DataFrame | None:
-    """Truck moves of a run: one row per (truck, source, target, periods) group.
-
-    Returns None when the artifact predates the ``flow_type`` column on arcs
-    (the loader cannot tell truck moves from user trips there).
-    """
+    """Truck moves, one row per (truck, source, target, periods); None if arcs lack flow_type."""
     moves = ui_shared.load_arcs(run_name, flow_type="rebalance")
     if moves is None:
         return None

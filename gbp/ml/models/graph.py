@@ -1,40 +1,4 @@
-"""GraphSage on the station graph — the research model (plan, phase 4).
-
-The question this model answers: does spatial structure add accuracy over
-boosting? A negative answer is a valid result.
-
-Nodes are stations. Edges come from OD flows: :func:`station_graph_edges`
-counts the trips between every pair of stations in the raw trip files of the
-given months. The graph is part of what ``fit`` learns: when no ``edges_df``
-was passed to the constructor, ``fit`` counts the edges from the raw trip
-files of its last training month. The counts become edge weights, made symmetric (a trip
-connects both of its endpoints) and cut to the ``max_neighbors`` strongest
-neighbors per station; the aggregation step divides by each station's total
-weight, so a neighbor's influence is its share of the station's traffic.
-
-The model is written in plain torch, without a graph library: with a mean
-aggregator, one GraphSage layer is ``relu(W_self·x + W_neigh·(A·x))`` where
-``A`` is the weighted, row-normalized adjacency — a single sparse matrix
-multiplication. Two such layers let information travel two hops, then a
-linear head reads out the log of the expected departure count (Poisson
-loss, so predictions are positive).
-
-One training sample is one ``(period, commodity)`` pair: the node feature
-matrix holds every station's feature values at that hour, and the graph
-carries values between stations. This works because the training table and
-the forecast input are full grids — every facility × commodity × period row
-exists. Features are z-scored with the training mean and deviation; a NaN
-becomes 0 after z-scoring (the mean), and each nullable column gets a 0/1
-missing flag so the model can tell a real value from an imputed one. The
-bike type enters as a one-hot column. Rows are weighted by
-``1 - stockout_share``, like the LightGBM model.
-
-Training reads only the last ``train_window_months`` months of the training
-table (default 3): the history features already carry the longer memory,
-and the per-hour samples repeat weekly patterns many times over, so more
-months add cost much faster than signal. The window is a model parameter
-and is logged with every backtest run.
-"""
+"""GraphSage on the station graph — the research model."""
 
 from __future__ import annotations
 
@@ -65,12 +29,7 @@ _NULLABLE = WEATHER_FEATURES + HISTORY_FEATURES
 
 
 def station_graph_edges(months: list[str], raw: pathlib.Path | None = None) -> pd.DataFrame:
-    """Count trips between station pairs in the raw files of ``months``.
-
-    Returns one row per ordered pair: ``source_id``, ``target_id``,
-    ``trips``. Trips that start and end at the same station are dropped —
-    a station is not its own neighbor.
-    """
+    """Count trips between station pairs in the raw files of ``months`` (self-loops dropped)."""
     counts: list[pd.DataFrame] = []
     for month in months:
         csvs = month_csvs(normalize_month(month), raw)
@@ -157,12 +116,7 @@ class GraphSageModel(DemandModel):
         seed: int = 0,
         raw: pathlib.Path | None = None,
     ) -> None:
-        """Store the training settings and, when given, the graph edges.
-
-        Without ``edges_df``, ``fit`` counts the edges from the raw trip
-        files of its last training month; ``raw`` overrides the folder those
-        files are read from.
-        """
+        """Store the training settings and, when given, the graph edges."""
         self.hidden_size = hidden_size
         self.epochs = epochs
         self.batch_size = batch_size
@@ -260,11 +214,7 @@ class GraphSageModel(DemandModel):
         return _GridBlock(table, facilities, features, target, weight)
 
     def fit(self, training_table: pd.DataFrame) -> None:
-        """Train on the last ``train_window_months`` months, one month per graph.
-
-        When the constructor got no ``edges_df``, the graph edges are
-        counted here, from the raw trip files of the last training month.
-        """
+        """Train on the last ``train_window_months`` months, one month per graph."""
         torch.manual_seed(self.seed)
         months = training_table["start_timestamp"].dt.to_period("M")
         keep = sorted(months.unique())[-self.train_window_months :]
@@ -357,7 +307,7 @@ class GraphSageModel(DemandModel):
 
     @classmethod
     def load(cls, folder: pathlib.Path) -> Self:
-        """Read a model saved by :meth:`save`."""
+        """Read a model saved by ``save``."""
         saved = json.loads((folder / "model.json").read_text())
         model = cls(
             pd.read_parquet(folder / "edges.parquet"),

@@ -1,18 +1,4 @@
-"""Mechanics: the rules a phase applies to the network state.
-
-What actually happens to bikes and docks in a period -- capacity-aware docking
-and overflow redirect (the dock side) and demand realization plus OD expansion
-(the departure side). The phases decide *when* to apply these rules; this module
-holds the rules themselves.
-
-Mechanics never touch :class:`SimulationState` or the event journal: they take
-plain frames and return *decisions* (what fits, what overflows, how each
-overflow flow resolves). Turning those decisions into events is the phase's
-job; writing the events applies them to the state. So this module depends only
-on :mod:`state` for the inventory arithmetic, :mod:`gbp.routing` for travel
-times, and on nothing above it:
-``journal <- state <- mechanics <- phases <- engine``.
-"""
+"""The rules a phase applies: docking, overflow redirect, demand realization."""
 
 import numpy as np
 import pandas as pd
@@ -30,24 +16,7 @@ from .state import adjust_inventory
 # full, arriving bikes overflow and are redirected to the nearest station with a
 # free dock. Never triggers in an exact replay, where capacity is never the limit.
 def free_docks(inventory: pd.DataFrame, capacities: pd.DataFrame) -> pd.Series:
-    """Free dock slots per facility: capacity minus the facility's occupancy.
-
-    Occupancy is the total inventory across commodities, because classic and
-    electric bikes share the same physical docks
-    (:func:`gbp.model.occupancy_per_facility`).
-
-    Parameters
-    ----------
-    inventory : pandas.DataFrame
-        Current inventory: ``facility_id``, ``commodity_category``, ``quantity``.
-    capacities : pandas.DataFrame
-        Dock capacities: ``facility_id``, ``capacity``.
-
-    Returns
-    -------
-    pandas.Series
-        ``facility_id -> free slots`` (clipped at zero).
-    """
+    """Free dock slots per facility: capacity minus the facility's occupancy (clipped at zero)."""
     occupied = occupancy_per_facility(inventory)
     capacity = capacities.set_index("facility_id")["capacity"]
     idx = capacity.index.union(occupied.index)
@@ -58,31 +27,7 @@ def free_docks(inventory: pd.DataFrame, capacities: pd.DataFrame) -> pd.Series:
 def dock_up_to_capacity(
     due: pd.DataFrame, free: pd.Series, target_col: str = "planned_target_id"
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split docking flows at their target into ``(fits, overflow)``.
-
-    The one docking rule: within each target the first ``free`` flows (in row
-    order) dock; the rest are overflow. Vectorized through a per-target
-    cumulative count -- no Python loop. ``target_col`` selects which station the
-    flows dock at (the same pattern :func:`_dock_deltas` uses):
-    ``planned_target_id`` for flows docking at their planned station,
-    ``realized_target_id`` for a redirect round docking at the station chosen
-    for it.
-
-    Parameters
-    ----------
-    due : pandas.DataFrame
-        Flows docking this period (one station id per row in ``target_col``).
-    free : pandas.Series
-        Free dock slots per facility, from :func:`free_docks`.
-    target_col : str, optional
-        The column naming the station each flow docks at. Defaults to
-        ``planned_target_id``.
-
-    Returns
-    -------
-    tuple of (pandas.DataFrame, pandas.DataFrame)
-        The flows that fit and the overflow flows, both subsets of ``due``.
-    """
+    """Split docking flows into ``(fits, overflow)``; the first ``free`` per target fit."""
     if due.empty:
         return due, due
     rank = due.groupby(target_col).cumcount()
@@ -95,27 +40,7 @@ def dock_up_to_capacity(
 
 
 def _nearest_free_station(targets: pd.Series, free: pd.Series, geo: pd.DataFrame) -> pd.Series:
-    """Nearest *other* station with a free dock for each station id in ``targets``.
-
-    Ranks candidates with :func:`gbp.model.neighbor_distance_sq` -- the one
-    metric shared with the explainer ``redirect_neighbor_table``, so what the
-    explainer shows is the order used here. Returns a Series aligned to
-    ``targets`` (NA if none).
-
-    Parameters
-    ----------
-    targets : pandas.Series
-        Planned target station ids needing a free neighbour.
-    free : pandas.Series
-        Free dock slots per facility, from :func:`free_docks`.
-    geo : pandas.DataFrame
-        Facility geography: ``facility_id``, ``lat``, ``lng``.
-
-    Returns
-    -------
-    pandas.Series
-        Aligned to ``targets``: the nearest other station with a free dock, or NA.
-    """
+    """Nearest other station with a free dock for each id in ``targets`` (NA if none)."""
     candidates = free[free > 0].index
     coords = geo.set_index("facility_id")[["lat", "lng"]]
     target_coords = (
@@ -148,14 +73,7 @@ def _leg_durations(
     source: pd.Series,
     target: pd.Series,
 ) -> pd.Series:
-    """Travel time in periods for each (source, target) pair, aligned to ``source``.
-
-    The pair's mean historical ``duration`` from the OD matrix, over all periods
-    and commodities. For a pair no historical trip ever rode, the estimate is
-    ``routes.duration_periods`` — the scenario's routing mode (straight-line
-    distance over the mean speed, or the OSRM riding time). Both round to whole
-    periods.
-    """
+    """Travel time in periods for each (source, target) pair, aligned to ``source``."""
     pair_duration = od_matrix.groupby(["source_id", "planned_target_id"])["duration"].mean()
     pairs = pd.MultiIndex.from_arrays([source, target])
     from_od = pd.Series(pair_duration.reindex(pairs).to_numpy(), index=source.index)
@@ -164,15 +82,7 @@ def _leg_durations(
 
 
 def _dock_deltas(docked: pd.DataFrame, target_col: str) -> pd.DataFrame:
-    """+1 per docking bike, grouped by the station docked at and the commodity.
-
-    For the redirect's round loop only: its rows are decisions, not events yet,
-    so the loop cannot derive its deltas from events the way the state's real
-    inventory write does (:func:`gbp.model.inventory_deltas_from_events`).
-    ``target_col`` selects which station the bike docked at:
-    ``planned_target_id`` when it docked at its planned target,
-    ``realized_target_id`` when an overflow flow was redirected elsewhere.
-    """
+    """+1 per docking bike, grouped by the station docked at and the commodity."""
     return (
         docked.groupby([target_col, "commodity_category"])
         .size()
@@ -190,50 +100,7 @@ def plan_overflow_redirect(
     overflow: pd.DataFrame,
     period_id: int,
 ) -> pd.DataFrame:
-    """Resolve each overflow flow: docked at a redirect target, riding a new leg, or lost.
-
-    A decision, not a state change: turning the outcomes into events is the
-    phase's job. Returns one row per overflow flow with four added columns:
-
-    - ``outcome`` -- how the flow resolved this period:
-      ``"docked"`` (its new leg had zero travel time and a dock was taken for
-      it now), ``"riding"`` (its new leg takes time; whether it fits is
-      decided when it arrives, so it may bounce again there) or ``"lost"``
-      (no station in the network has a free dock);
-    - ``realized_target_id`` -- the station chosen for the new leg (NA when
-      lost);
-    - ``leg_end_period`` -- ``period_id`` plus the pair's travel time from the
-      OD matrix (see :func:`_leg_durations`; NA when lost);
-    - ``phase_round`` -- the round that resolved it, 1-based (NA when lost).
-
-    Legs that dock in this same period (zero travel time) fill docks in rounds:
-    each round docks up to the free capacity, and the next round sees those
-    docks taken -- a running local copy of inventory tracks them.
-
-    Parameters
-    ----------
-    inventory : pandas.DataFrame
-        Current inventory: ``facility_id``, ``commodity_category``, ``quantity``.
-    capacities : pandas.DataFrame
-        Dock capacities: ``facility_id``, ``capacity``.
-    geo : pandas.DataFrame
-        Facility geography: ``facility_id``, ``lat``, ``lng``.
-    od_matrix : pandas.DataFrame
-        OD demand model; the source of the per-pair travel times.
-    routes : gbp.routing.Routes
-        The scenario's distance / travel-time answerer; the travel-time
-        fallback for a pair with no OD entry (see :func:`_leg_durations`).
-    overflow : pandas.DataFrame
-        The flows that found no free dock at their arc's target.
-    period_id : int
-        The period the overflow happened in.
-
-    Returns
-    -------
-    pandas.DataFrame
-        One row per overflow flow, with ``outcome``, ``realized_target_id``,
-        ``leg_end_period`` and ``phase_round``.
-    """
+    """Resolve each overflow flow: docked at a redirect target, riding a new leg, or lost."""
     resolved = []
     remaining = overflow
     running = inventory
@@ -287,37 +154,12 @@ def plan_overflow_redirect(
 # Demand realization and OD expansion (FormDepartures / FormPotentialTrips)
 # ---------------------------------------------------------------------------
 def scale_demand(quantity: pd.Series, demand_scale_factor: float) -> pd.Series:
-    """Scale a demand count by the run's factor and round it to whole bikes.
-
-    The one scaling rule, applied per row. The run boundary
-    (``scaled_demand_inputs``) calls it once on the demand and arrivals tables,
-    so the whole run -- the departures phase, the run validator, the rebalancing
-    target -- reads the demand the run faces instead of rescaling it. Rounding
-    is per row, so scaling the whole table once matches scaling each period in
-    turn.
-    """
+    """Scale a demand count by the run's factor and round it to whole bikes (per row)."""
     return (quantity * demand_scale_factor).round().astype("Int64")
 
 
 def realize_departures(demand_now: pd.DataFrame, inventory: pd.DataFrame) -> pd.DataFrame:
-    """Departures per (facility, commodity): ``min(demand, inventory)``.
-
-    Demand above the inventory is lost to a stockout; inventory is per commodity,
-    so classic and electric demand are limited independently. Never triggers in an exact
-    replay, where inventory always covers the historical demand.
-
-    Parameters
-    ----------
-    demand_now : pandas.DataFrame
-        This period's demand: ``facility_id``, ``commodity_category``, ``quantity``.
-    inventory : pandas.DataFrame
-        Current inventory: ``facility_id``, ``commodity_category``, ``quantity``.
-
-    Returns
-    -------
-    pandas.DataFrame
-        ``facility_id``, ``commodity_category``, ``departed``, ``lost``.
-    """
+    """Departures per (facility, commodity): ``min(demand, inventory)``, the rest lost."""
     available = inventory.rename(columns={"quantity": "available"})
     out = demand_now.merge(available, on=["facility_id", "commodity_category"], how="left")
     out["available"] = out["available"].fillna(0)
@@ -332,31 +174,7 @@ def realize_departures(demand_now: pd.DataFrame, inventory: pd.DataFrame) -> pd.
 def form_potential_trips(
     departures: pd.DataFrame, od_matrix: pd.DataFrame, period_id: int
 ) -> pd.DataFrame:
-    """Split each source's departures across targets by the OD probabilities.
-
-    Each ``(source, commodity)`` departs ``quantity`` bikes this period; the OD
-    matrix ``P(target | source, commodity)`` decides their targets. The
-    expected count per target (``departures * probability``) is rounded to whole
-    bikes by the largest-remainder method, so the per-source total is preserved
-    exactly. Each OD pair's mean historical duration sets the arrival period.
-
-    Parameters
-    ----------
-    departures : pandas.DataFrame
-        Realized departures this period: ``source_id``, ``commodity_category``,
-        ``quantity``.
-    od_matrix : pandas.DataFrame
-        OD demand model from :func:`journal.flows_to_od_matrix` (``probability``
-        and ``duration`` per ``(source_id, planned_target_id, commodity_category)``).
-    period_id : int
-        The current (departure) period.
-
-    Returns
-    -------
-    pandas.DataFrame
-        ``period_id``, ``source_id``, ``planned_target_id``, ``commodity_category``,
-        ``quantity``, ``planned_end_period`` -- only rows with ``quantity > 0``.
-    """
+    """Split each source's departures across targets by the OD probabilities (largest-remainder)."""
     cols = [
         "period_id",
         "source_id",
@@ -403,12 +221,7 @@ def form_potential_trips(
 
 
 def expand_potential_trips(potential_trips: pd.DataFrame, period_id: int) -> pd.DataFrame:
-    """Expand aggregate OD potential trips into one concrete departed row per bike.
-
-    Each aggregate row carries ``quantity`` identical bikes; this repeats it into
-    that many trip rows and assigns a simulator ``flow_id`` (``sim_`` prefix so it
-    cannot collide with the historical ``hist_`` ids).
-    """
+    """Expand aggregate OD potential trips into one concrete departed row per bike."""
     rep = potential_trips.loc[
         potential_trips.index.repeat(potential_trips["quantity"])
     ].reset_index(drop=True)

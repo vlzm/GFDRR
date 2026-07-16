@@ -1,38 +1,4 @@
-"""The retraining pipeline (plan, phase 6; Notations.md §17).
-
-Five idempotent steps, runnable as one command and one by one::
-
-    download → build-table → train → backtest → promote
-
-- ``download`` — the trigger lives here: ask the bucket for published months
-  missing from ``data/raw/`` and fetch them (trips plus status dumps). A
-  scheduler (cron, later a cloud job) only has to start the pipeline.
-- ``build-table`` — build the missing training partitions, oldest first.
-- ``train`` — fit the candidate family on every partition on disk and
-  register it as a model version (Notations.md §17). The same family on the
-  same months of the same data version is the same model — the existing
-  version is reused, not registered twice.
-- ``backtest`` — the phase-4 backtest over the candidate's family and the
-  champion's family — the same splits for both; the backtest itself scores
-  every split against the seasonal naive baseline.
-- ``promote`` — the rule, not a manual choice: the candidate becomes
-  champion only when its mean backtest score is at least as good as the
-  champion's over the same splits (equal promotes — same recipe, newer data
-  version wins). Otherwise it stays a challenger. Either way one row goes to
-  the pipeline log ``data/ml/pipeline_log.csv``: when, which data version,
-  which versions with their scores, promoted or not, and why.
-
-Rerunning the whole pipeline with no new data changes nothing: nothing to
-download, nothing to build, the train step reuses the registered version,
-and when that version is already the champion the backtest is skipped and
-the log row says so.
-
-Terminal use::
-
-    python -m gbp.ml.pipeline                       # all steps, lightgbm
-    python -m gbp.ml.pipeline --steps train backtest promote
-    python -m gbp.ml.pipeline --months 202602       # bound download/build-table
-"""
+"""The retraining pipeline: download, build-table, train, backtest, promote."""
 
 from __future__ import annotations
 
@@ -106,13 +72,7 @@ def partition_months(training_root: pathlib.Path | None = None) -> list[str]:
 def published_missing_months(
     known_months: Sequence[str], today: pd.Timestamp | None = None
 ) -> list[str]:
-    """Return the months the bucket has published but the disk does not have — the trigger.
-
-    Checks each calendar month after the newest known one, up to the current
-    month. Citi Bike publishes with about a month's delay and in order, so
-    the scan stops at the first unpublished month; most days this returns
-    nothing or one month.
-    """
+    """Return the months the bucket has published but the disk does not have."""
     if not known_months:
         return []
     last_known = pd.Period(max(normalize_month(m) for m in known_months), freq="M")
@@ -129,14 +89,7 @@ def published_missing_months(
 
 
 def refresh_dvc(log: Callable[[str], None] = print) -> None:
-    """Update the ``.dvc`` files after the tracked data changed.
-
-    Runs ``dvc add`` on ``data/raw`` and ``data/ml/training`` so the data
-    version (the git commit of the ``.dvc`` files, ``-dirty`` while they are
-    uncommitted) reflects the new months. Without dvc on PATH, or on any dvc
-    error, the pipeline continues with a note — the log then names the stale
-    version, which is still better than stopping a retrain.
-    """
+    """Update the ``.dvc`` files after the tracked data changed."""
     repo = pathlib.Path(__file__).resolve().parents[2]
     try:
         subprocess.run(
@@ -156,12 +109,7 @@ def step_download(
     raw: pathlib.Path | None = None,
     log: Callable[[str], None] = print,
 ) -> list[str]:
-    """Fetch the trigger months (or the given ones): trip CSVs plus status dumps.
-
-    Without ``months``, asks the bucket for published months missing from
-    disk. Months already on disk are skipped by the downloaders, so the step
-    is idempotent. Returns the months that brought new files.
-    """
+    """Fetch the trigger months (or the given ones): trip CSVs plus status dumps."""
     if months is None:
         known = raw_trip_months(raw)
         if not known:
@@ -184,11 +132,7 @@ def step_build_table(
     paths: MlPaths | None = None,
     log: Callable[[str], None] = print,
 ) -> list[str]:
-    """Build the missing training partitions, oldest first. Returns the built months.
-
-    Without ``months``, builds every month whose CSVs are on disk but whose
-    partition is not. A partition already on disk is kept as is.
-    """
+    """Build the missing training partitions, oldest first; return the built months."""
     paths = paths or MlPaths.resolve()
     if months is None:
         months = raw_trip_months(paths.raw)
@@ -215,12 +159,7 @@ def step_train(
     store: MlflowStore | None = None,
     log: Callable[[str], None] = print,
 ) -> ModelVersion:
-    """Fit the candidate on every partition and register it, reusing a twin.
-
-    The idempotent step: a registered version with the same family, months,
-    and data version is returned as is — fitting again would only register a
-    twin of it.
-    """
+    """Fit the candidate on every partition and register it, reusing a twin."""
     store = store or MlflowStore()
     if months is None:
         months = partition_months(training_root)
@@ -255,15 +194,7 @@ def step_backtest(
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
 ) -> pd.DataFrame:
-    """Backtest the candidate's and the champion's families over the same splits.
-
-    The phase-4 backtest, unchanged: the promote rule needs both sides
-    scored on the same splits. The backtest itself scores every split
-    against the shared naive month forecast, so the seasonal naive does not
-    need to run as a family here. When the champion is the same family as
-    the candidate (or there is no champion yet), one set of scores serves
-    both sides.
-    """
+    """Backtest the candidate's and the champion's families over the same splits."""
     paths = paths or MlPaths.resolve()
     store = store or MlflowStore()
     if months is None:
@@ -298,14 +229,7 @@ def promote_decision(
     champion: ModelVersion | None,
     comparison: pd.DataFrame | None,
 ) -> tuple[bool, str, float | None, float | None]:
-    """Apply the promote rule; return (promoted, reason, candidate score, champion score).
-
-    The rule: no champion → the candidate is promoted; the candidate already
-    is the champion → nothing changes; otherwise the candidate must score at
-    least as well as the champion on ``PRIMARY_METRIC`` over the same splits.
-    Equal scores promote — the two sides are then the same recipe refit on
-    the same splits, and the newer data version wins the tie.
-    """
+    """Apply the promote rule; return (promoted, reason, candidate score, champion score)."""
     if champion is None:
         score = (
             family_score(comparison, str(candidate.tags["model_family"]))
@@ -353,10 +277,7 @@ def step_promote(
     log_path: pathlib.Path | None = None,
     log: Callable[[str], None] = print,
 ) -> dict[str, object]:
-    """Promote or keep the champion by the rule, and append the log row.
-
-    Returns the row that went to the pipeline log.
-    """
+    """Promote or keep the champion by the rule, and append the log row."""
     store = store or MlflowStore()
     champion = store.champion_version()
     promoted, reason, candidate_score, champion_score = promote_decision(
@@ -395,17 +316,7 @@ def run_pipeline(
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
 ) -> dict[str, object] | None:
-    """Run the requested steps in their fixed order; return the promote row if promote ran.
-
-    ``months`` bounds only the download and build-table steps; training and
-    the backtest always read every partition on disk — a new month extends
-    the history, it does not replace it. The ``.dvc`` files are refreshed
-    when download or build-table changed the default data folders, so the
-    data version in the log names what was actually trained on — a run with
-    its own ``paths`` (a test on ``tmp_path``) never touches dvc. ``paths``
-    also names the MLflow store folder (``paths.tracking``); the store object
-    is created once here and passed to every step that talks to MLflow.
-    """
+    """Run the requested steps in their fixed order; return the promote row if promote ran."""
     unknown = set(steps) - set(STEPS)
     if unknown:
         raise ValueError(f"unknown steps: {', '.join(sorted(unknown))}; known: {', '.join(STEPS)}")

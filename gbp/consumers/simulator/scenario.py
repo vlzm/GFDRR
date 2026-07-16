@@ -1,18 +1,4 @@
-"""The canonical scenario: its phase list and the size-then-run entry point.
-
-Running a scenario correctly takes several steps in a fixed order: measure the
-initial inventory and dock capacities with :func:`size_state_for_demand`, put
-the measured state in place, run the real demand against it, and check the run
-invariants. Doing these steps by hand in every caller invites mistakes:
-building the :class:`Environment` before the sizing result is in place gives a
-plausible-looking but wrong run. :func:`run_sized_scenario` is the one place
-that owns this order; the terminal runner (``app/runner.py``) and the notebook
-both call it.
-
-The input ``resolved`` is never modified: the run happens on a shallow copy
-that carries the sized tables, and the sized tables come back on the
-:class:`ScenarioRun` result.
-"""
+"""The canonical scenario: its phase list and the size-then-run entry point."""
 
 import copy
 import dataclasses
@@ -52,43 +38,12 @@ _PHASE_BUILDERS: dict[str, Callable[[], Phase]] = {
 
 
 def canonical_phases() -> list[Phase]:
-    """Build the canonical three-phase list every run of the scenario uses.
-
-    The order is the one declared in :data:`gbp.model.CANONICAL_PHASE_ORDER`, so
-    it is authored once. The engine also checks the built list is sorted by
-    ``phase_rank``, which confirms the two agree.
-    """
+    """Build the canonical three-phase list every run of the scenario uses."""
     return [_PHASE_BUILDERS[spec.name]() for spec in CANONICAL_PHASE_ORDER]
 
 
 def scaled_demand_inputs(resolved: ScenarioInputs, factor: float) -> ScenarioInputs:
-    """Bind the run's demand scale into the scenario tables, once, at the boundary.
-
-    The run faces a scaled version of the demand. Instead of every phase, the
-    validator and the rebalancer each rescaling the raw table with the same
-    factor, the scale is applied here once and the whole run reads the demand it
-    actually faces. Two tables carry the demand: ``historical_demand_df`` (the
-    departures ``FormDeparturesPhase`` forms) and ``historical_arrivals_df`` (the
-    arrivals the rebalancer's ``target_inventory`` reads); both scale by the same
-    factor. Rounding is per row (:func:`~gbp.consumers.simulator.mechanics.scale_demand`),
-    so scaling the whole table once matches scaling each period in turn.
-
-    ``resolved`` is not modified: the scaled tables land on a shallow copy.
-    ``factor == 1.0`` returns ``resolved`` unchanged (no copy).
-
-    Parameters
-    ----------
-    resolved : ScenarioInputs
-        The scenario inputs to scale. Every table other than the two demand
-        tables is shared as-is.
-    factor : float
-        The demand multiplier; must be positive.
-
-    Returns
-    -------
-    ScenarioInputs
-        The inputs the run faces, with the two demand tables scaled.
-    """
+    """Bind the run's demand scale into the scenario tables, once (factor 1.0: unchanged)."""
     if factor <= 0:
         raise ValueError(f"demand scale factor must be > 0, got {factor}")
     if factor == 1.0:
@@ -109,11 +64,7 @@ def scaled_demand_inputs(resolved: ScenarioInputs, factor: float) -> ScenarioInp
 
 @dataclasses.dataclass(frozen=True)
 class ScenarioRun:
-    """Everything a finished sized run hands back to its caller (Notations.md §11).
-
-    The finalized journal, the final simulation state, the sized state tables
-    the run started from, and the invariant violations (empty = valid).
-    """
+    """Everything a finished sized run hands back to its caller."""
 
     simulated_flows_df: pd.DataFrame
     state: SimulationState
@@ -133,54 +84,7 @@ def run_sized_scenario(
     phases: list[Phase] | None = None,
     sizing_data: ScenarioInputs | None = None,
 ) -> ScenarioRun:
-    """Size the state, run the scenario against it, check the run invariants.
-
-    The state (initial inventory and dock capacities) is sized against
-    ``sizing_scale_factor``; the run itself faces ``demand_scale_factor``.
-    Equal values give a clean, no-loss run; a larger run scale makes the
-    limits take effect (stockout and dock-full events appear).
-
-    Parameters
-    ----------
-    resolved : ScenarioInputs
-        The scenario inputs. Not modified: the run works on a shallow copy
-        that carries the sized tables.
-    scenario_id : str
-        Scenario id stamped on the sizing and run configs.
-    demand_scale_factor : float, optional
-        Demand multiplier the run faces.
-    sizing_scale_factor : float, optional
-        Demand multiplier the state is sized to survive with no loss.
-    number_of_periods : int
-        How many periods to step.
-    validate : bool, optional
-        When True (default), raise :class:`RunInvariantError` if the finished
-        run violates the run invariants I1-I5. When False, the violations are
-        only recorded on the result (the runner stores them in ``meta.json``).
-    phases : list of Phase, optional
-        The phase list the *run* uses. Default: ``canonical_phases()``. Pass
-        ``canonical_phases() + rebalancing_phases(params)`` to run with the
-        overnight rebalancing (Notations.md §14). The sizing run always uses
-        the canonical three phases -- the state is sized for the demand alone,
-        so the rebalancer's effect shows up against it instead of being sized
-        away.
-    sizing_data : ScenarioInputs, optional
-        The scenario data the sizing run measures. Default: ``resolved``
-        itself, which gives a clean run. Passing different data sizes the
-        state on one demand table while the run faces another; the gap
-        between the two shows up as lost and redirected events. The
-        two-level evaluation uses this for its replay-state forecast runs
-        (Notations.md §11): the state is sized on the actual demand
-        (``sizing_data``), the run faces a forecast (``resolved``). The two
-        must describe the same scenario — same facilities, period grid, and
-        OD matrix — or the sized state is meaningless.
-
-    Returns
-    -------
-    ScenarioRun
-        The finalized journal, the final state, the sized state tables, and
-        the invariant violations (empty = valid).
-    """
+    """Size the state, run the scenario against it, check the run invariants."""
     # Bind each run's demand scale into its data once, here at the boundary. The
     # sizing run and the real run face different scales, so they get different
     # scaled copies; from here on the engine and the phases read the demand they

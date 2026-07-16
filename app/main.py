@@ -1,9 +1,4 @@
-"""Streamlit entry point: page registry and navigation.
-
-Start with ``streamlit run app/main.py``. Every page is a reader of saved run
-artifacts (Notations.md §12); the only page that computes anything heavy is
-"Run scenario", which runs the simulator and saves a new artifact.
-"""
+"""Streamlit entry point: page registry and navigation."""
 
 import pathlib
 import sys

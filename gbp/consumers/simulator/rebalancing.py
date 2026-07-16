@@ -1,41 +1,4 @@
-"""Overnight rebalancing: plan truck moves once per window, execute them per period.
-
-Rebalancing moves bikes between stations by truck at night so that the morning
-demand finds them (Notations.md §14). Two clocks are involved and they never
-mix:
-
-- The **solver clock** is minutes since the window started. The routing solver
-  plans every truck's route on this axis, inside ``window_minutes``.
-- The **simulator clock** is periods. Each planned stop is applied in the
-  period its minute falls into; the sub-period detail is kept only for
-  explanation.
-
-So the plan is computed at one point of simulated time (the period that opens
-the window) and executed across the following periods. The trucks never
-"return to the depot at the end of each period" -- the period edge exists only
-for accounting.
-
-The flow of one window, in order:
-
-1. :class:`PlanRebalancingPhase` (fires only in the window-opening period,
-   writes no events): :func:`target_inventory` computes how many bikes each
-   station should hold for the morning; :func:`station_imbalance` compares that
-   with the bikes on hand; :func:`build_rebalance_nodes` splits the imbalance
-   into solver visits of at most ``portion_size`` bikes;
-   :func:`solve_rebalance_vrp` routes the trucks through those visits (the
-   OR-Tools core); :func:`assign_bikes_to_stops` turns the routes into the
-   bike-level plan stored on ``SimulationState.rebalance_plan``.
-2. :class:`ApplyRebalancingPhase` (fires every period, ``phase_rank`` 3):
-   executes the plan rows whose periods have come -- pickups take bikes out of
-   docks (``departed``, ``flow_type="rebalance"``), dropoffs dock them
-   (``arrived``). Between the two the bikes sit in ``in_transit`` like any
-   riding bike.
-
-The plan is built from the inventory at planning time, but the night demand of
-the window's own periods keeps running. Execution therefore never trusts the
-plan blindly: a pickup is cut down to the bikes actually on hand, and a
-dropoff that finds the station full docks at the truck's home depot instead.
-"""
+"""Overnight rebalancing: plan truck moves once per window, execute them per period."""
 
 import dataclasses
 from collections.abc import Callable
@@ -98,7 +61,7 @@ PLAN_COLUMNS = list(PLAN_DTYPES)
 
 
 def empty_rebalance_plan() -> pd.DataFrame:
-    """Empty bike-level rebalance plan (the columns of Notations.md §14)."""
+    """Empty bike-level rebalance plan."""
     return pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in PLAN_DTYPES.items()})
 
 
@@ -107,40 +70,7 @@ def empty_rebalance_plan() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 @dataclasses.dataclass(frozen=True)
 class RebalancingParams:
-    """Settings for one rebalancing window (Notations.md §14).
-
-    Attributes
-    ----------
-    window_start_hour : int
-        Wall-clock hour that opens the window; the planning phase fires in
-        each period whose start hour equals it. Default 1 (01:00).
-    window_minutes : int
-        How long the trucks work: every route must start and end at the depot
-        within this many minutes. Default 120 (two hours).
-    target_start_hour, target_end_hour : int
-        The morning hours the target inventory is computed for: expected
-        departures minus expected arrivals over the periods whose start hour
-        is in ``[target_start_hour, target_end_hour)``, same calendar day as
-        the window. Defaults 6 and 12.
-    portion_size : int
-        Most bikes one solver visit moves. A large imbalance is split into
-        several visits so one truck does not have to serve it whole. Default 5.
-    truck_speed_km_per_hour : float
-        Truck speed for the straight-line travel-time estimate
-        (:func:`truck_travel_minutes`). Default 25.
-    stop_service_minutes : float
-        Fixed minutes a truck spends at every stop (parking, opening up).
-        Default 2.
-    bike_service_minutes : float
-        Extra minutes per bike loaded or unloaded at a stop. Default 0.5.
-    drop_penalty_minutes : int
-        Solver cost (in travel minutes) of skipping one visit. Set high, so
-        the solver serves as many visits as fit in the window and only then
-        minimizes driving. Default 10_000.
-    solver_time_limit_seconds : int
-        Real (wall-clock) seconds the solver may search. This is the solver's
-        own running time, not simulated time. Default 10.
-    """
+    """Settings for one rebalancing window."""
 
     window_start_hour: int = 1
     window_minutes: int = 120
@@ -167,38 +97,7 @@ def target_inventory(
     plan_start: pd.Timestamp,
     params: RebalancingParams,
 ) -> pd.DataFrame:
-    """Bikes each station should hold for the morning (Notations.md §14).
-
-    For each ``(facility, commodity)`` the morning is walked period by period:
-    expected departures minus expected arrivals, added up as a running total.
-    The highest point of that running total is the most bikes the station is
-    ever short by, so holding that many at the window's end covers the whole
-    morning. A station whose arrivals outrun its departures never runs short
-    and gets target 0.
-
-    Parameters
-    ----------
-    demand : pandas.DataFrame
-        Expected departures per ``(period_id, facility_id, commodity_category)``
-        with ``quantity``. This is the demand the run faces, already scaled by
-        the run's factor at the run boundary (``scaled_demand_inputs``).
-    arrivals : pandas.DataFrame
-        Expected arrivals, same shape, already scaled the same way.
-    periods_df : pandas.DataFrame
-        The period grid with ``period_id`` and ``start_timestamp``; picks the
-        morning periods by wall-clock hour.
-    plan_start : pandas.Timestamp
-        Start of the window-opening period; the morning is the same calendar
-        day, hours ``[params.target_start_hour, params.target_end_hour)``.
-    params : RebalancingParams
-        The window settings.
-
-    Returns
-    -------
-    pandas.DataFrame
-        ``facility_id``, ``commodity_category``, ``target`` (whole bikes,
-        never negative). Facilities that never run short are absent (target 0).
-    """
+    """Bikes each station should hold for the morning (peak of the running net shortfall)."""
     empty = pd.DataFrame(
         {
             "facility_id": pd.Series(dtype="string"),
@@ -235,12 +134,7 @@ def target_inventory(
 
 
 def station_imbalance(inventory: pd.DataFrame, target: pd.DataFrame) -> pd.DataFrame:
-    """``inventory - target`` per (facility, commodity) (Notations.md §14).
-
-    Positive: the station has bikes to give (pickups happen there). Negative:
-    it needs bikes (dropoffs happen there). A facility missing from either
-    table counts as 0 there.
-    """
+    """``inventory - target`` per (facility, commodity); positive gives bikes, negative needs."""
     inv = inventory[[*_KEYS, "quantity"]].astype(dict.fromkeys(_KEYS, "string"))
     tgt = target[[*_KEYS, "target"]].astype(dict.fromkeys(_KEYS, "string"))
     out = inv.merge(tgt, on=_KEYS, how="outer")
@@ -251,17 +145,7 @@ def station_imbalance(inventory: pd.DataFrame, target: pd.DataFrame) -> pd.DataF
 def clip_dropoffs_to_free_docks(
     imbalance: pd.DataFrame, inventory: pd.DataFrame, capacities: pd.DataFrame
 ) -> pd.DataFrame:
-    """Cut each station's planned inflow down to its free docks.
-
-    A station cannot take in more bikes than it has free dock slots. Docks are
-    shared across commodities, so the planned inflow is totalled per facility
-    with the same rule the free docks use
-    (:func:`gbp.model.occupancy_per_facility`). When that total exceeds the
-    facility's free docks, every commodity's share is scaled down by the same
-    factor and rounded down, so the total fits. Pickups (positive imbalance)
-    are untouched -- they are already bounded by the bikes on hand, because
-    ``target >= 0`` implies ``imbalance <= inventory``.
-    """
+    """Cut each station's planned inflow down to its free docks (pickups untouched)."""
     out = imbalance.copy()
     need = (-out["imbalance"]).clip(lower=0)
     need_per_facility = out["facility_id"].map(occupancy_per_facility(out.assign(quantity=need)))
@@ -275,16 +159,7 @@ def clip_dropoffs_to_free_docks(
 
 
 def _trim_to_common_total(imbalance: pd.DataFrame) -> pd.DataFrame:
-    """Trim the larger side so pickups and dropoffs move the same bike count.
-
-    Per commodity, only ``min(total surplus, total shortage)`` bikes can
-    actually move: every truck must end its route empty, so a picked-up bike
-    with no station short of one (or a shortage with no bike to send) cannot
-    be served. Without the trim a lone surplus of 5 against a shortage of 3
-    would give the solver no same-total node subset on both sides, and it
-    would move nothing. Facilities with the largest imbalance keep their
-    share first.
-    """
+    """Trim the larger side so pickups and dropoffs move the same bike count per commodity."""
 
     def _cap(side: pd.DataFrame, cap: int) -> pd.Series:
         amount = side["imbalance"].abs().sort_values(ascending=False, kind="stable")
@@ -307,21 +182,7 @@ def _trim_to_common_total(imbalance: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_rebalance_nodes(imbalance: pd.DataFrame, portion_size: int) -> pd.DataFrame:
-    """Split the imbalance into solver visits of at most ``portion_size`` bikes.
-
-    First the two sides are matched: per commodity only
-    ``min(total surplus, total shortage)`` bikes can move, so the excess is
-    trimmed away (:func:`_trim_to_common_total`). Then each facility's share
-    is split into portions: a facility 12 bikes over its target with
-    ``portion_size=5`` becomes three pickup nodes of 5, 5 and 2 bikes, so the
-    solver may send different trucks to them or skip the least valuable one.
-    Facilities at their target produce no node.
-
-    Returns
-    -------
-    pandas.DataFrame
-        :data:`NODE_COLUMNS` -- one row per node.
-    """
+    """Split the imbalance into solver visits of at most ``portion_size`` bikes."""
     balanced = _trim_to_common_total(imbalance)
     nonzero = balanced[balanced["imbalance"] != 0]
     if nonzero.empty:
@@ -345,22 +206,7 @@ def truck_travel_minutes(
     facility_ids: list[str],
     truck_speed_km_per_hour: float,
 ) -> pd.DataFrame:
-    """Truck travel time in minutes between the given facilities.
-
-    Straight-line (great-circle) distance over the truck speed -- the same
-    formula mode the scenario's ``haversine`` routing uses, with a truck speed
-    instead of a riding speed. The scenario's ``routes`` object is *not*
-    reused here even in ``osrm`` mode: its table is built with the bike
-    profile and would give riding times.
-
-    TODO: fetch a car-profile OSRM table instead (a second ``Routes`` built
-    against a car-profile server), so trucks drive road distances.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Square matrix of minutes; rows and columns are the facility ids.
-    """
+    """Truck travel time in minutes between facilities (straight-line over truck speed)."""
     sel = facilities_geo_df[facilities_geo_df["facility_id"].isin(facility_ids)]
     sel = sel[["facility_id", "lat", "lng"]]
     pairs = sel.merge(sel, how="cross", suffixes=("_from", "_to"))
@@ -385,7 +231,7 @@ _STOP_DTYPES = {
 
 
 def _empty_stops() -> pd.DataFrame:
-    """Empty stops table (:data:`STOP_COLUMNS`)."""
+    """Empty stops table."""
     return pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in _STOP_DTYPES.items()})
 
 
@@ -395,61 +241,7 @@ def solve_rebalance_vrp(
     trucks: pd.DataFrame,
     params: RebalancingParams,
 ) -> pd.DataFrame:
-    """Route the trucks through the pickup and dropoff nodes within the window.
-
-    The core routing problem (pickup and delivery of one interchangeable
-    good): every truck starts and ends empty at its home depot, a pickup node
-    puts its bikes on the truck, a dropoff node takes bikes off it, the load
-    never goes below zero or above the truck's capacity, and every route fits
-    into ``params.window_minutes``. Nodes that do not fit are skipped at a
-    high cost, so the solver serves as many as it can and only then minimizes
-    driving.
-
-    The OR-Tools model, piece by piece:
-
-    - Locations: the first positions are the home depots (one per distinct
-      depot in the fleet), the positions after them are the nodes (a facility
-      appears once per node). Each truck's route starts and ends at the
-      position of its own home depot. All quantities of time are integers in
-      tenths of a minute (OR-Tools works in whole numbers).
-    - Travel: moving from ``a`` to ``b`` costs the service time at ``a``
-      (``stop_service_minutes + bike_service_minutes * quantity``; zero at
-      a depot) plus the travel minutes ``a -> b``. With the service time
-      charged at departure, the running total of a route at a node is that
-      node's arrival minute.
-    - A "minutes" dimension caps every route at ``window_minutes``, return
-      to the home depot included.
-    - One load dimension per commodity, bounded ``[0, truck capacity]`` and
-      forced to 0 at the route's end: a truck can only drop bikes it picked
-      up, of the same commodity, and never keeps bikes at the end. With more
-      than one commodity a shared total-load dimension caps the combined
-      load at the truck's capacity.
-    - Every node may be skipped at ``drop_penalty_minutes``; the penalty is
-      far above any travel cost, so skipping is a last resort.
-    - Search: cheapest-arc first solution, then guided local search until
-      ``solver_time_limit_seconds`` of real time.
-
-    Parameters
-    ----------
-    nodes : pandas.DataFrame
-        The solver visits (:data:`NODE_COLUMNS`, from
-        :func:`build_rebalance_nodes`).
-    travel_minutes : pandas.DataFrame
-        Square matrix of truck travel minutes over the involved facilities,
-        home depots included (from :func:`truck_travel_minutes`).
-    trucks : pandas.DataFrame
-        The fleet: ``resource_id``, ``capacity`` (bikes per truck),
-        ``home_facility_id`` (the depot the truck starts from and returns to).
-    params : RebalancingParams
-        Window length, service times, drop penalty, solver time limit.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The stops table (:data:`STOP_COLUMNS`): each truck's visits in order,
-        with the arrival ``minute`` of every stop. Skipped nodes simply do not
-        appear.
-    """
+    """Route the trucks through the pickup and dropoff nodes within the window (OR-Tools VRP)."""
     if nodes.empty:
         return _empty_stops()
 
@@ -553,24 +345,7 @@ def solve_rebalance_vrp(
 def assign_bikes_to_stops(
     stops: pd.DataFrame, window_period_id: int, minutes_per_period: int
 ) -> pd.DataFrame:
-    """Turn the solver's stops into the bike-level rebalance plan.
-
-    Walks each truck's route in visit order and matches bikes to stops: a
-    pickup puts its bikes on the truck, a dropoff hands over the bikes that
-    were picked up earliest (per truck and commodity). Each handed-over bike
-    becomes one plan row with its pickup and dropoff stop. The solver's
-    minutes also become simulator periods here:
-    ``period = window_period_id + minute // minutes_per_period``.
-
-    Two asserts reject a malformed ``stops`` table: a dropoff larger than the
-    bikes on the truck, and bikes still on a truck at its route's end. A
-    solver that respects its load bounds can produce neither.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The plan (:data:`PLAN_COLUMNS`), one row per bike.
-    """
+    """Turn the solver's stops into the bike-level rebalance plan, one row per bike."""
     rows: list[dict[str, object]] = []
     # Bikes currently on each truck: (resource, commodity) -> [(source, minute), ...]
     on_truck: dict[tuple[str, str], list[tuple[str, float]]] = {}
@@ -617,32 +392,7 @@ SolverFn = Callable[[pd.DataFrame, pd.DataFrame, pd.DataFrame, RebalancingParams
 # The two phases
 # ---------------------------------------------------------------------------
 class PlanRebalancingPhase(Phase):
-    """Plan the window's truck moves; store the plan on the state.
-
-    Fires only in a period whose wall-clock start hour is
-    ``params.window_start_hour`` (once per simulated day); every other period
-    passes through untouched. Writes no events and moves no inventory -- the
-    plan is a decision, and :class:`ApplyRebalancingPhase` applies it.
-
-    The planning inventory is the state *after* this period's own user phases
-    (this phase runs later in the phase list), so the freshest picture the
-    simulator has. The window's later night demand can still invalidate parts
-    of the plan; execution cuts those parts down (see the module docstring).
-
-    When one side is missing -- no station is short, or none has bikes to
-    give -- the phase stores an empty plan and never calls the solver. A
-    broken truck setup raises ``SimulatorConfigError`` instead of being
-    planned around: no truck at all, a truck without ``home_facility_id``,
-    or a home depot missing from the facility tables.
-
-    Parameters
-    ----------
-    params : RebalancingParams
-        The window settings.
-    solver : SolverFn, optional
-        The routing solver. Defaults to :func:`solve_rebalance_vrp`; tests
-        inject a hand-written stand-in here.
-    """
+    """Plan the window's truck moves; store the plan on the state (fires once per simulated day)."""
 
     # Writes no events; the rank only places the phase in the ordered list.
     phase_rank = REBALANCE_RANK
@@ -671,20 +421,7 @@ def plan_rebalance(
     params: RebalancingParams,
     solver: SolverFn = solve_rebalance_vrp,
 ) -> pd.DataFrame:
-    """Build the bike-level rebalance plan for the window opening at ``period``.
-
-    The ordered core of :class:`PlanRebalancingPhase`, split out so a test can
-    call it with a scripted ``solver`` and assert on the plan without running
-    the engine. The scheduling guard (fire only in the window-opening period)
-    stays in the phase; this function assumes the window is open.
-
-    The sequence: target inventory -> imbalance -> clip dropoffs to free docks
-    -> solver visits. When one side is missing (no station is short, or none has
-    bikes to give) the plan is empty and the solver is never called. A broken
-    truck setup raises :class:`SimulatorConfigError` (see the class docstring).
-
-    Returns the plan (empty when nothing moves).
-    """
+    """Build the bike-level rebalance plan for the window opening at ``period`` (empty if idle)."""
     target = target_inventory(
         resolved.historical_demand_df,
         resolved.historical_arrivals_df,
@@ -728,25 +465,7 @@ def plan_rebalance(
 
 
 class ApplyRebalancingPhase(Phase):
-    """Execute the plan rows whose period has come (``phase_rank`` 3).
-
-    Runs every period, after the three user-trip phases; a period with no due
-    plan rows and no rebalance bike in ``in_transit`` passes through
-    unchanged. The work happens in three ordered rounds (each its own
-    inventory step):
-
-    - round 0 -- dock the dropoffs due now for bikes picked up in an earlier
-      period (they were waiting in ``in_transit``);
-    - round 1 -- this period's pickups, cut down to the bikes actually on
-      hand at each source; a cut pickup disappears from the plan and the bike
-      stays where the night demand left it;
-    - round 2 -- dock the dropoffs of bikes picked up within this same period.
-
-    A dropoff docks at its planned station while it has free docks; bikes that
-    do not fit dock at the truck's home depot instead (the truck could not
-    unload and takes them back). The depot's own capacity is not checked -- it
-    is the parking of last resort.
-    """
+    """Execute the plan rows whose period has come, in three ordered rounds."""
 
     phase_rank = REBALANCE_RANK
 
@@ -770,23 +489,7 @@ def apply_rebalance(
     resolved: ScenarioInputs,
     t: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build this period's rebalance events and the plan still left to run.
-
-    The ordered core of :class:`ApplyRebalancingPhase`, split out so a test can
-    call it on a hand-built state and assert on the ordering without the engine.
-    The three rounds run in order, each seeing the docks the earlier rounds took
-    or freed (``inventory_now`` reads the state with the rounds built so far
-    applied):
-
-    - round 0 -- dock the dropoffs due now for bikes picked up earlier;
-    - round 1 -- this period's pickups, cut to the bikes actually on hand;
-    - round 2 -- dock the dropoffs of bikes picked up within this period.
-
-    Returns ``(events, remaining_plan)``: the event batch to write, carrying a
-    ``phase_round`` per round (empty when nothing happens), and the plan rows
-    whose pickup period is still ahead. The caller writes the batch once through
-    ``apply_step_events``, which turns each round into its own inventory step.
-    """
+    """Build this period's rebalance events and the plan still left to run."""
     plan = state.rebalance_plan
     in_transit = state.in_transit
     on_truck = in_transit["flow_type"] == "rebalance"
@@ -852,13 +555,7 @@ def _dock_dropoffs(
     home_by_resource: pd.Series,
     period_id: int,
 ) -> pd.DataFrame:
-    """Dock dropped-off bikes; what does not fit goes to the truck's home depot.
-
-    The same docking rule as the user phases (:func:`dock_up_to_capacity`) at
-    the planned station; the overflow's ``realized_target_id`` becomes the
-    truck's home depot. ``inventory`` is the caller's decision input -- the
-    state with the earlier rounds applied. Returns the ``arrived`` events.
-    """
+    """Dock dropped-off bikes; what does not fit goes to the truck's home depot."""
     fits, overflow = dock_up_to_capacity(due, free_docks(inventory, capacities))
     fits = fits.assign(realized_target_id=fits["planned_target_id"])
     overflow = overflow.assign(realized_target_id=overflow["resource_id"].map(home_by_resource))
@@ -867,14 +564,7 @@ def _dock_dropoffs(
 
 
 def _pickups_up_to_inventory(due: pd.DataFrame, inventory: pd.DataFrame) -> pd.DataFrame:
-    """Keep the planned pickups the source can actually give.
-
-    Within each ``(source, commodity)`` the first plan rows (in pickup-minute
-    order) are kept, up to the bikes on hand; the rest are cut from the plan --
-    their bikes stay where the night demand left them, and their dropoffs never
-    happen. The same cumulative-count pattern as :func:`dock_up_to_capacity`,
-    keyed by source and commodity.
-    """
+    """Keep the planned pickups the source can actually give (first rows up to bikes on hand)."""
     if due.empty:
         return due
     ordered = due.sort_values(["pickup_minute", "flow_id"], kind="stable")
@@ -888,5 +578,5 @@ def _pickups_up_to_inventory(due: pd.DataFrame, inventory: pd.DataFrame) -> pd.D
 def rebalancing_phases(
     params: RebalancingParams, solver: SolverFn = solve_rebalance_vrp
 ) -> list[Phase]:
-    """Build the two rebalancing phases, in order, to append to ``canonical_phases()``."""
+    """Build the two rebalancing phases, in order."""
     return [PlanRebalancingPhase(params, solver), ApplyRebalancingPhase()]

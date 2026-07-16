@@ -1,20 +1,4 @@
-"""Raw Citi Bike loaders and the ``RawModelData`` container.
-
-Reads the raw trip CSV, then derives the raw entity tables (stations, depots,
-trucks, bikes) with their capacities, costs and rates. ``RawModelData`` runs
-all of this once and exposes the results as attributes; ``ResolvedModelData``
-(in :mod:`dataloader_graph`) consumes it.
-
-The trip CSV is the only external data in the project, so it gets an explicit
-schema (:data:`TRIPS_SCHEMA`): the loaded table is checked once, at load time,
-and a bad CSV fails here with a full list of violations instead of surfacing
-later as an unrelated pandas error or a run-end invariant violation.
-
-Loading keeps a processed copy of each CSV in ``data/processed/`` (Notations.md
-§15): the first load parses and cleans the CSV and writes the result as
-parquet; later loads read the parquet, which is much faster. The folder is a
-cache — deleting it is always safe, the next load rebuilds it.
-"""
+"""Raw Citi Bike loaders and the ``RawModelData`` container of raw entity tables."""
 
 import pathlib
 
@@ -35,13 +19,7 @@ SERVICE_AREA_LNG = (-74.5, -73.4)
 
 
 def in_service_area(trips_df: pd.DataFrame) -> pd.Series:
-    """Mark the rows whose both endpoints lie inside the service-area box.
-
-    Most published months carry a handful of rows at test docks or with
-    plainly wrong coordinates (zeros, another city). Those rows are data
-    errors; the loaders drop them the same way they drop rows with missing
-    key fields.
-    """
+    """Mark the rows whose both endpoints lie inside the service-area box."""
     lat_lo, lat_hi = SERVICE_AREA_LAT
     lng_lo, lng_hi = SERVICE_AREA_LNG
     inside = pd.Series(True, index=trips_df.index)
@@ -71,20 +49,7 @@ KEY_FIELDS = [
 
 
 def clean_trips(trips_df: pd.DataFrame) -> pd.DataFrame:
-    """Drop the rows no consumer of the trips table can use.
-
-    Three groups go, each a data error in the published file, not a broken
-    file: rows with a missing key field (:data:`KEY_FIELDS`); rows with an
-    endpoint outside the service area (:func:`in_service_area`); and trips
-    that end before they start. The last group appears once a year: on the
-    fall-back night of daylight saving time the published wall-clock
-    timestamps repeat one hour, so a trip riding across the clock change
-    looks reversed. The timestamps carry no timezone marker, so the true
-    order cannot be recovered.
-
-    Every loader that parses a trip CSV calls this one function — old and new
-    schema alike — so the cleaning rules cannot drift apart.
-    """
+    """Drop the rows no consumer of the trips table can use (missing key, out of area, reversed)."""
     trips_df = trips_df.dropna(subset=KEY_FIELDS)
     trips_df = trips_df[in_service_area(trips_df)]
     trips_df = trips_df[_trip_time_ordered(trips_df)]
@@ -123,32 +88,13 @@ TRIPS_SCHEMA = pa.DataFrameSchema(
 # Raw loaders
 # ---------------------------------------------------------------------------
 def processed_trips_path(trips_path: str) -> pathlib.Path:
-    """Where the processed copy of one trip CSV lives.
-
-    ``<data folder>/processed/<csv name>.parquet`` — the ``processed`` folder
-    sits next to the folder the CSV is in, so ``data/raw/x.csv`` maps to
-    ``data/processed/x.parquet``.
-    """
+    """Where the processed parquet copy of one trip CSV lives, under ``<data folder>/processed``."""
     csv = pathlib.Path(trips_path).resolve()
     return csv.parent.parent / "processed" / (csv.stem + ".parquet")
 
 
 def load_trips_raw_df(trips_path: str) -> pd.DataFrame:
-    """Load one raw trip CSV, using its processed parquet copy when it is fresh.
-
-    The first load parses the CSV, drops the unusable rows
-    (:func:`clean_trips`), and
-    writes the cleaned table to ``data/processed/<csv name>.parquet``
-    (see :func:`processed_trips_path`). Later loads read that parquet copy
-    instead, which is much faster than parsing the CSV. The copy counts as
-    fresh while it is newer than its CSV; delete the ``processed`` folder to
-    force a rebuild — for example after changing the cleaning code here.
-
-    The schema check (:data:`TRIPS_SCHEMA`) runs on every load, whichever
-    file was read; it raises ``ValueError`` with every violation found. The
-    processed copy is written only after the check passes, so a bad table is
-    never cached.
-    """
+    """Load one raw trip CSV, using its processed parquet copy when it is fresh."""
     csv = pathlib.Path(trips_path)
     processed = processed_trips_path(trips_path)
     processed_is_fresh = processed.exists() and processed.stat().st_mtime >= csv.stat().st_mtime
@@ -260,12 +206,7 @@ def get_trips_df(trips_raw_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_trucks_df(n_trucks: int) -> pd.DataFrame:
-    """Build a table of ``n_trucks`` trucks with generated ids.
-
-    Every truck starts at the first depot (``home_depot_id = "depot_1"``);
-    a run can replace the fleet with
-    :func:`gbp.loaders.dataloader_graph.apply_truck_fleet`.
-    """
+    """Build a table of ``n_trucks`` trucks with generated ids, all starting at ``depot_1``."""
     truck_ids = [f"truck_{i + 1}" for i in range(n_trucks)]
     return pd.DataFrame({"truck_id": truck_ids, "home_depot_id": "depot_1"})
 
@@ -294,25 +235,7 @@ def get_bike_rates_df(electric_bike_rate: float, classic_bike_rate: float) -> pd
 # Raw model data container
 # ---------------------------------------------------------------------------
 class RawModelData:
-    """Raw entity tables for one scenario, loaded once from data sources.
-
-    Everything here still uses the raw column names — ``station_id``,
-    ``depot_id``, ``truck_id``, ``ride_id``, ``rideable_type``. The rename to
-    the canonical schema (``facility_id``, ``resource_id``,
-    ``commodity_category``) happens in the ``get_*`` functions at the top of
-    ``dataloader_graph.py``; past that boundary only canonical names exist.
-
-    Parameters
-    ----------
-    trips_path : str
-        Path to the raw Citi Bike trip CSV.
-    seed : int
-        Seed for the random generator used to synthesize depots and trucks.
-    n_depots, depot_capacity, n_trucks, truck_capacity_bikes : int
-        Sizing of the synthetic depot and truck fleet.
-    truck_rate, electric_bike_rate, classic_bike_rate : float
-        Per-unit rates for trucks and the two bike commodities.
-    """
+    """Raw entity tables for one scenario, loaded once from data sources, in raw column names."""
 
     def __init__(
         self,

@@ -1,20 +1,4 @@
-"""Run-level invariant checks (I1-I5) for a finished simulation.
-
-Tier-2 of the loss-logging design: properties of the whole journal at run end,
-too broad for a single phase's contract. ``validate_run`` runs once at the end
-of ``Environment.run`` (on by default via ``EnvironmentConfig.validate``), so
-the canonical run is checked every time. I1/I2 are pure functions of the journal
-(:mod:`gbp.model.flows`); I3/I4/I5 also read the live final inventory, the
-in-transit set and the initial inventory, so they live here in the simulator layer.
-I5 is the step-contract guard: no inventory step takes a station below zero.
-
-All checks return a list of human-readable violations (empty == holds);
-``validate_run`` collects I1-I5 into that one list. The engine computes them at
-end of run and stores them on ``Environment.violations``; the run entry point
-(``run_sized_scenario``) raises :class:`RunInvariantError` when the list is
-non-empty. Like the rest of the constraint logic, every invariant has no effect
-in an exact replay and only matters above the baseline.
-"""
+"""Run-level invariant checks (I1-I5) for a finished simulation."""
 
 from __future__ import annotations
 
@@ -48,29 +32,7 @@ class RunInvariantError(AssertionError):
 
 
 def faced_demand(resolved: ScenarioInputs, config: EnvironmentConfig | None) -> pd.DataFrame:
-    """Return the demand the run actually faced: the table cut to its horizon.
-
-    The demand-split invariant I1 compares the journal against the demand the
-    run saw. The run's scale is already bound into ``resolved.historical_demand_df``
-    at the run boundary (``scaled_demand_inputs``), so the same table
-    ``FormDeparturesPhase`` splits is the one I1 checks against; there is nothing
-    to rescale here. The one thing still to apply is the horizon: the run never
-    sees periods at or past ``config.number_of_periods``.
-
-    Parameters
-    ----------
-    resolved : ScenarioInputs
-        The scenario inputs the run faced; its ``historical_demand_df`` already
-        carries the run's demand scale.
-    config : EnvironmentConfig or None
-        The run's config. None means a plain full-grid replay (the whole
-        table) -- the default for a direct :func:`validate_run` call.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The demand rows the run faced.
-    """
+    """Return the demand the run actually faced: the table cut to its horizon."""
     demand = resolved.historical_demand_df
     if config is None:
         return demand
@@ -82,36 +44,7 @@ def validate_run(
     resolved: ScenarioInputs,
     config: EnvironmentConfig | None = None,
 ) -> list[str]:
-    """Check invariants I1-I5 on a finished run; return all violations.
-
-    The five invariants: I1 — demand splits exactly into
-    ``departed + lost(stockout)``; I2 — every departed flow due by run end
-    closes with exactly one ``arrived`` or ``lost(dock_full)``; I3 — the live
-    final inventory equals the inventory recomputed from the journal; I4 —
-    bikes are conserved across final inventory, dock-full losses and
-    ``in_transit``; I5 — no step takes a station's inventory below zero.
-
-    Parameters
-    ----------
-    state : SimulationState
-        The final simulation state (live inventory and in-transit set).
-    resolved : ScenarioInputs
-        The scenario inputs (initial inventory and historical demand).
-    config : EnvironmentConfig or None, optional
-        The config the run used. The demand-split check I1 compares the journal
-        against the demand the run actually faced: ``resolved.historical_demand_df``
-        (already scaled at the run boundary) cut to ``config.number_of_periods``
-        (:func:`faced_demand`). None (the default) means a plain full-grid
-        replay over the whole table.
-
-    Returns
-    -------
-    list of str
-        Human-readable invariant violations; empty when the run is valid.
-        The list also covers the journal schema
-        (:func:`gbp.model.journal_schema.check_journal_schema`), checked here
-        once per run, before I1-I5.
-    """
+    """Check invariants I1-I5 (and the journal schema) on a finished run; return all violations."""
     flows = finalize_flows(state.state_flows_df)
     initial = resolved.initial_inventory_df
     demand = faced_demand(resolved, config)
@@ -133,14 +66,7 @@ def validate_run(
 def _check_projection_consistency(
     live: pd.DataFrame, flows: pd.DataFrame, initial: pd.DataFrame
 ) -> list[str]:
-    """I3 -- the live final inventory equals the inventory recomputed from the journal.
-
-    A safety check: since ``apply_step_events`` derives the live inventory from
-    the events themselves (``inventory_deltas_from_events``), the two sides can
-    only diverge if the incremental per-batch arithmetic and the full journal
-    recomputation (``get_inventory_df``) disagree -- or if something writes the
-    inventory outside the single write path.
-    """
+    """I3 -- the live final inventory equals the inventory recomputed from the journal."""
     if flows.empty:
         return []
     projected = get_inventory_df(flows, initial)
@@ -165,14 +91,7 @@ def _check_projection_consistency(
 def _check_conservation(
     state: SimulationState, flows: pd.DataFrame, initial: pd.DataFrame
 ) -> list[str]:
-    """I4 -- bikes are conserved across inventory, dock-full losses and transit.
-
-    ``Σ initial == Σ final_inventory + Σ lost(reason="dock_full") + Σ in_transit``.
-    At run end a bike is either docked somewhere (inventory), gone from the system
-    (lost to a full dock) or still riding because the run window ended mid-trip (in
-    transit). A stockout bike never left a dock and a redirect keeps the bike in
-    the system, so neither leaves the system.
-    """
+    """I4 -- bikes are conserved across inventory, dock-full losses and transit."""
     initial_total = int(initial["quantity"].sum())
     final_total = int(state.state_inventory_df["quantity"].sum())
     lost_dock_full = flows[(flows["event_type"] == "lost") & (flows["reason"] == "dock_full")]
@@ -187,17 +106,7 @@ def _check_conservation(
 
 
 def _check_step_nonnegativity(flows: pd.DataFrame, initial: pd.DataFrame) -> list[str]:
-    """I5 -- no inventory step drives a station's inventory below zero.
-
-    This guards the step contract (Notations.md §0.1): one ``(period_id,
-    phase_rank, phase_round)`` tuple is exactly one inventory batch. The journal
-    cannot prove that contract directly -- the batch boundary is not stored -- but
-    it catches the harmful case: if two batches that needed ordering collapse into
-    one step (one phase emitting a second ordered batch under the same tuple),
-    applying them as a single batch can take a station's inventory below zero. A
-    bike cannot be docked or undocked at a station that has none, so any negative
-    ``inventory_after`` is a real ordering bug, not just a bookkeeping one.
-    """
+    """I5 -- no inventory step drives a station's inventory below zero."""
     if flows.empty:
         return []
     moments = inventory_at_moments(flows, initial)

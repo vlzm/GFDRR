@@ -1,38 +1,4 @@
-"""Build and save forecast demand tables (Notations.md §17).
-
-A model's whole job is to produce a forecast demand table: a table in
-``HISTORICAL_DEMAND_SCHEMA`` shape whose ``quantity`` comes from a model, for
-periods that have no history yet. The models themselves live behind the one
-interface in ``gbp/ml/models/``; this module is the forecast builder around
-them. It holds the one rounding rule that turns fractional forecasts into
-whole bikes, the forecast input (:func:`forecast_input` — the feature table a
-model predicts from, built by the shared feature module), the one
-horizon-prediction recipe (:func:`predict_horizon` — history window →
-forecast input → prediction → whole bikes), and the forecast artifact — the
-folder ``data/ml/forecasts/<forecast_name>/`` with ``demand.parquet`` and
-``meta.json`` that a forecast run (Notations.md §11) is loaded from.
-
-Three builders save an artifact:
-
-- :func:`build_seasonal_naive_forecast` — the phase-1 path: from one trip
-  CSV's demand and period grid, seasonal naive only.
-- :func:`build_model_forecast` — from the training partitions, any model
-  family by name, fitted on the spot.
-- :func:`build_champion_forecast` — the platform's path (plan, phase 6):
-  the fitted champion resolved from the model registry by its alias
-  (Notations.md §17), never by a file path.
-
-Terminal use (one command each; wrapped here for width)::
-
-    python -m gbp.ml.forecast --trips-path data/raw/202601-citibike-tripdata_1.csv
-        --forecast-name seasonal_naive_w1 --horizon-periods 168
-
-    python -m gbp.ml.forecast --model lightgbm --months 202502 ... 202512
-        --forecast-name lightgbm_202601 --horizon-periods 744
-
-    python -m gbp.ml.forecast --champion --forecast-name champion_202602
-        --horizon-periods 744
-"""
+"""Build and save forecast demand tables."""
 
 from __future__ import annotations
 
@@ -77,14 +43,7 @@ def list_forecasts(root: pathlib.Path | None = None) -> list[str]:
 
 
 class ForecastMeta(pydantic.BaseModel):
-    """The ``meta.json`` contract of a forecast artifact.
-
-    Written next to ``demand.parquet`` so a forecast names what produced it
-    (model name and version), what it was built from (``inputs``, the history
-    window), and the horizon it covers (``t0``, ``horizon_periods``,
-    ``period_len_hours`` — enough to rebuild the forecast period grid with
-    :func:`forecast_periods_from_meta`).
-    """
+    """The meta.json contract of a forecast artifact."""
 
     forecast_name: str
     model_name: str
@@ -102,7 +61,7 @@ class ForecastMeta(pydantic.BaseModel):
 
     @property
     def grid(self) -> PeriodGrid:
-        """The forecast horizon this meta describes, as a :class:`PeriodGrid`."""
+        """The forecast horizon this meta describes, as a PeriodGrid."""
         return PeriodGrid(
             pd.Timestamp(self.t0),
             self.horizon_periods,
@@ -116,24 +75,7 @@ def forecast_periods_from_meta(meta: ForecastMeta) -> pd.DataFrame:
 
 
 def counts_from_demand(demand_df: pd.DataFrame, periods_df: pd.DataFrame) -> pd.DataFrame:
-    """Turn the historical demand marginal into a zero-filled counts grid.
-
-    The demand marginal lists only positive rows, but the feature builder
-    reads departure counts in training-table shape, where a station-hour
-    with no departures is a real zero observation. So the grid crosses every
-    period of ``periods_df`` with every ``(facility, commodity)`` seen in
-    the demand, takes each row's quantity from the demand, and fills the
-    rest with 0.
-
-    Raises ``ValueError`` when the demand names a period the grid does not
-    have — such a row would silently vanish otherwise.
-
-    Returns
-    -------
-    pandas.DataFrame
-        ``start_timestamp``, ``facility_id``, ``commodity_category``,
-        ``quantity`` — one row per period × facility × commodity.
-    """
+    """Turn the historical demand marginal into a zero-filled counts grid."""
     known = demand_df["period_id"].isin(set(periods_df["period_id"]))
     if not known.all():
         missing = demand_df.loc[~known, "period_id"].unique()[:5].tolist()
@@ -153,38 +95,7 @@ def counts_from_demand(demand_df: pd.DataFrame, periods_df: pd.DataFrame) -> pd.
 
 
 def round_forecast_demand(demand_df: pd.DataFrame) -> pd.DataFrame:
-    """Round fractional forecast quantities to whole bikes — the one rounding rule.
-
-    The engine moves whole bikes, so a forecast demand table must hold whole
-    numbers. Rounding each row on its own drifts the totals: a thousand
-    stations forecast at 0.4 would round to zero demand. The rule, decided
-    once here (plan, phase 1): within each ``(period_id, commodity_category)``
-    group, round the group total to the nearest whole number, give every row
-    the whole part of its own value, and hand the remaining bikes one each to
-    the rows with the largest fractional parts (ties broken by
-    ``facility_id``, so the result is deterministic). This is the
-    largest-remainder method — the same rule ``form_potential_trips`` uses to
-    split a source's departures over targets.
-
-    Two properties follow. The group total is exact: the rounded table demands
-    as many bikes per period and commodity as the fractional one, to the
-    nearest bike. And no demand is invented: a row with fractional part zero
-    is never rounded up.
-
-    Rows that end at zero are dropped — like the historical demand marginal,
-    the table lists only positive demand.
-
-    Parameters
-    ----------
-    demand_df : pandas.DataFrame
-        Fractional demand: ``period_id``, ``facility_id``,
-        ``commodity_category``, ``quantity``.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The same table with whole-bike ``quantity`` values, positive rows only.
-    """
+    """Round a fractional forecast to whole bikes (largest-remainder, group totals stay exact)."""
     m = demand_df.copy()
     m["base"] = np.floor(m["quantity"]).astype("int64")
     m["remainder"] = m["quantity"] - m["base"]
@@ -209,36 +120,7 @@ def forecast_input(
     forecast_periods_df: pd.DataFrame,
     weather_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Build the feature table a model predicts from (plan, phase 3).
-
-    One row per ``(period, facility, commodity)`` of the forecast horizon:
-    every facility × commodity of the history window crossed with every
-    horizon period, with the feature columns appended by the same functions
-    that build the training table (``gbp/ml/features.py``) — never a copy.
-    For the same station-day this table and the training table hold
-    identical feature values; a test in ``tests/test_ml_features.py``
-    proves it.
-
-    Parameters
-    ----------
-    history_df : pandas.DataFrame
-        Departure counts in training-table shape (zero rows kept), for
-        example read from the training partitions. Only the history window
-        (the ``HISTORY_WEEKS`` weeks right before the horizon) is used.
-    forecast_periods_df : pandas.DataFrame
-        The forecast period grid (:func:`get_forecast_periods_df`).
-    weather_df : pandas.DataFrame, optional
-        Daily weather covering the horizon dates. In a backtest this is the
-        actual weather of the held-out month — a perfect weather forecast.
-        A true future horizon has no published weather; without a supplied
-        weather forecast the weather columns stay NaN.
-
-    Returns
-    -------
-    pandas.DataFrame
-        ``period_id``, ``start_timestamp``, ``facility_id``,
-        ``commodity_category`` plus the ``FEATURE_COLUMNS``.
-    """
+    """Build the feature table a model predicts from, over the forecast horizon."""
     t0 = forecast_periods_df["start_timestamp"].iloc[0]
     history = clip_history_window(history_df, t0)
     if history.empty:
@@ -264,40 +146,7 @@ def predict_horizon(
     training_root: pathlib.Path | None = None,
     weather_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Predict one forecast horizon with a fitted model, in whole bikes.
-
-    The one recipe every forecast demand table is built by: take the history
-    window before the horizon, build the forecast input
-    (:func:`forecast_input`), let the model predict, and round the fractional
-    values to whole bikes (:func:`round_forecast_demand`). The forecast
-    builders in this module and the shared naive baseline
-    (:func:`naive_month_prediction`) call this function instead of
-    assembling the steps themselves.
-
-    Parameters
-    ----------
-    model : DemandModel
-        A fitted model — only its ``predict`` is called.
-    forecast_periods_df : pandas.DataFrame
-        The forecast period grid (:func:`get_forecast_periods_df`, or
-        ``month_period_grid`` for a full month).
-    history_df : pandas.DataFrame, optional
-        Departure counts in training-table shape. Without it the history is
-        read from the training partitions before the horizon
-        (``load_history_counts``); the horizon must then start at a month's
-        first hour, because the partitions are monthly.
-    training_root : pathlib.Path, optional
-        Training partitions folder override; used only when ``history_df``
-        is not given.
-    weather_df : pandas.DataFrame, optional
-        Daily weather covering the horizon dates; without it the weather
-        features stay NaN.
-
-    Returns
-    -------
-    pandas.DataFrame
-        A forecast demand table: whole-bike quantities, positive rows only.
-    """
+    """Predict one forecast horizon with a fitted model, in whole bikes."""
     if history_df is None:
         # Imported here, not at the top: gbp.ml.training is the partition
         # builder, and only this default needs it.
@@ -312,18 +161,7 @@ def predict_horizon(
 def naive_month_prediction(
     month: str, training_root: pathlib.Path | None = None
 ) -> pd.DataFrame | None:
-    """Forecast one calendar month with the seasonal naive — the shared baseline.
-
-    The one naive forecast both quality measures rely on: the backtest
-    divides every family's error by its error (``mae_over_naive``), and the
-    monitoring alert compares a model version's rolling MAE against it
-    (``naive_mae``). Built like any forecast: the family comes from the
-    factory, and the prediction goes through the one recipe
-    :func:`predict_horizon` on the month's period grid, with the history
-    read from the training partitions before the month. Weather is not
-    read — the seasonal naive does not use it. Returns None when no earlier
-    partition exists.
-    """
+    """Forecast one calendar month with the seasonal naive; None if no earlier partition exists."""
     # Imported here, not at the top: gbp.ml.training is the partition
     # builder, and only the partition-backed helpers need it.
     from gbp.ml.training import load_history_counts
@@ -339,15 +177,7 @@ def naive_month_prediction(
 def save_forecast(
     demand_df: pd.DataFrame, meta: ForecastMeta, root: pathlib.Path | None = None
 ) -> pathlib.Path:
-    """Write one forecast artifact to ``<forecasts root>/<forecast_name>/``.
-
-    The demand table is checked against ``HISTORICAL_DEMAND_SCHEMA`` before
-    anything is written — the integration contract says the simulator reads a
-    forecast exactly as it reads historical demand, so a wrong shape fails
-    here, not inside a run. ``meta.json`` is written last, so a folder with a
-    ``meta.json`` is always a complete artifact (``list_forecasts`` keys on
-    that file).
-    """
+    """Write one forecast artifact, after checking the demand table against the schema."""
     violations = schema_violations(HISTORICAL_DEMAND_SCHEMA, demand_df)
     if violations:
         raise ValueError(
@@ -390,22 +220,7 @@ def _finish_forecast(
     training_root: pathlib.Path | None = None,
     weather_df: pd.DataFrame | None = None,
 ) -> pathlib.Path:
-    """Predict the horizon and save the artifact — the tail every builder ends with.
-
-    The three public builders differ only in how the model, the history
-    window, and the horizon weather are obtained. Once those are in hand, the
-    rest is one recipe: build the forecast period grid
-    (:func:`get_forecast_periods_df`), predict it in whole bikes
-    (:func:`predict_horizon`), fill the :class:`ForecastMeta` contract, and
-    write the artifact (:func:`save_forecast`). This function owns that tail so
-    the ``meta.json`` contract is assembled in one place.
-
-    The fields that differ between builders are passed in: ``model_version``
-    (``"1"`` for a freshly fitted model, the registry version for the
-    champion), ``history_start`` / ``history_end`` / ``inputs`` (what the
-    forecast input read), and the prediction inputs (``history_df`` or
-    ``training_root``, plus an already-resolved ``weather_df``).
-    """
+    """Predict the horizon and save the artifact — the tail every builder ends with."""
     forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, period_len)
     forecast_demand_df = predict_horizon(
         model,
@@ -438,38 +253,7 @@ def build_seasonal_naive_forecast(
     inputs: list[str],
     root: pathlib.Path | None = None,
 ) -> pathlib.Path:
-    """Build a seasonal naive forecast for the periods right after history and save it.
-
-    The phase-1 builder: history is a demand marginal plus its period grid
-    (what one trip CSV gives), the model is the seasonal naive. The path is
-    the interface one — the demand becomes a zero-filled counts grid
-    (:func:`counts_from_demand`), and the prediction goes through the one
-    recipe :func:`predict_horizon`, so the mean reads the history window
-    like every history feature and the fractional values are rounded to
-    whole bikes. The forecast horizon starts where the history ends (the
-    last period's ``end_timestamp``) and runs for ``horizon_periods``
-    periods of the same length, numbered from 0.
-
-    Parameters
-    ----------
-    demand_df : pandas.DataFrame
-        The historical demand marginal the model averages over.
-    periods_df : pandas.DataFrame
-        The historical period grid.
-    forecast_name : str
-        Folder name of the forecast artifact.
-    horizon_periods : int
-        How many periods the forecast covers.
-    inputs : list of str
-        File names of the raw source files the history came from.
-    root : pathlib.Path, optional
-        Forecasts root override (defaults to :func:`forecasts_root`).
-
-    Returns
-    -------
-    pathlib.Path
-        The saved forecast artifact folder.
-    """
+    """Build and save a seasonal naive forecast for the periods right after history."""
     t0 = periods_df["end_timestamp"].iloc[-1]
     period_len = periods_df["end_timestamp"].iloc[0] - periods_df["start_timestamp"].iloc[0]
     counts = counts_from_demand(demand_df, periods_df)
@@ -497,14 +281,7 @@ def _horizon_weather(
     weather_df: pd.DataFrame | None,
     log: Callable[[str], None],
 ) -> pd.DataFrame | None:
-    """Return the horizon's published daily weather, or None when unreachable.
-
-    A true future horizon has no published weather; whatever NOAA has for the
-    horizon dates is used, unpublished dates leave the weather features NaN,
-    and a fully unreachable weather source is skipped with a note — the
-    models accept missing values. A caller-supplied ``weather_df`` is
-    returned unchanged.
-    """
+    """Return the horizon's published daily weather, or None when unreachable."""
     if weather_df is not None:
         return weather_df
     try:
@@ -525,42 +302,7 @@ def build_model_forecast(
     log: Callable[[str], None] = print,
     **model_params: object,
 ) -> pathlib.Path:
-    """Fit one model family on the training partitions and save its forecast.
-
-    The interface path: ``create_model`` builds the family by name, ``fit``
-    reads the stacked partitions of ``train_months``, and the horizon starts
-    right where the last training month ends. The weather for the horizon is
-    whatever NOAA has published for those dates; unpublished dates leave the
-    weather features NaN, and a fully unreachable weather file is skipped
-    with a note — the models accept missing values.
-
-    Parameters
-    ----------
-    model_name : str
-        A model family name (``MODEL_FAMILIES`` in ``gbp/ml/models``).
-    train_months : list of str
-        The months whose partitions the model trains on, as ``YYYYMM``.
-    horizon_periods : int
-        How many one-hour periods the forecast covers.
-    forecast_name : str
-        Folder name of the forecast artifact.
-    paths : MlPaths, optional
-        Folder overrides for the forecast artifacts, the training partitions,
-        and the raw files (the raw folder feeds the horizon weather). Default:
-        the repository folders (:meth:`MlPaths.resolve`).
-    weather_df : pandas.DataFrame, optional
-        Daily weather for the horizon dates; without it the published
-        weather is loaded (and missing dates stay NaN).
-    log : callable, optional
-        Where progress notes go (default: ``print``).
-    **model_params
-        Extra settings for the family's constructor.
-
-    Returns
-    -------
-    pathlib.Path
-        The saved forecast artifact folder.
-    """
+    """Fit one model family on the training partitions and save its forecast."""
     # Imported here, not at the top: gbp.ml.training is the partition
     # builder, and only this builder needs it.
     from gbp.ml.training import load_training_table
@@ -601,42 +343,7 @@ def build_champion_forecast(
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
 ) -> pathlib.Path:
-    """Build a forecast with the champion, resolved from the registry by its alias.
-
-    The platform's forecast path (plan, phase 6): the model is the fitted
-    version the ``champion`` alias points at (``MlflowStore.resolve_champion``
-    in ``gbp/ml/registry.py``) — no refitting, no file paths. The saved
-    ``meta.json`` records the family as ``model_name`` and the registry
-    version number as ``model_version``; the version's own training months
-    live on its registry tags. The ``history_*`` fields and ``inputs`` name
-    what the forecast input read: the training partitions of the
-    ``HISTORY_WEEKS`` window before the horizon.
-
-    Parameters
-    ----------
-    horizon_periods : int
-        How many one-hour periods the forecast covers.
-    forecast_name : str
-        Folder name of the forecast artifact.
-    t0_month : str, optional
-        The month the horizon starts at, as ``YYYYMM`` — the forecast then
-        starts at that month's first hour. Default: right after the newest
-        training partition on disk.
-    paths : MlPaths, optional
-        Folder overrides for the forecast artifacts, the training partitions,
-        the raw files, and the MLflow store. Default: the repository folders
-        (:meth:`MlPaths.resolve`).
-    weather_df : pandas.DataFrame, optional
-        Daily weather for the horizon dates; without it the published
-        weather is loaded (and missing dates stay NaN).
-    log : callable, optional
-        Where progress notes go (default: ``print``).
-
-    Returns
-    -------
-    pathlib.Path
-        The saved forecast artifact folder.
-    """
+    """Build a forecast with the champion, resolved from the registry by its alias."""
     # Imported here, not at the top: the registry drags in MLflow and the
     # training module is the partition builder — only this builder needs them.
     from gbp.ml.registry import MlflowStore
@@ -679,13 +386,7 @@ def build_champion_forecast(
 
 
 def main() -> None:
-    """Terminal entry point: build one forecast artifact.
-
-    Three modes: ``--trips-path`` builds the phase-1 seasonal naive from one
-    raw trip CSV; ``--months`` (with ``--model``) trains any model family on
-    the training partitions; ``--champion`` predicts with the fitted version
-    the registry's champion alias points at.
-    """
+    """Terminal entry point: build one forecast artifact."""
     parser = argparse.ArgumentParser(description="Build a forecast demand table and save it.")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--trips-path", help="raw trip CSV path (seasonal naive only)")

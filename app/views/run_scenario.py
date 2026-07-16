@@ -1,11 +1,4 @@
-"""Run page: set the scenario parameters, run, save a new artifact.
-
-The page never picks between the two backends itself (docs/reference/api.md):
-``backend.current()`` returns the chosen one, and the page asks it for the
-saved forecasts, the save location, and the run. Locally the run executes in
-this process; with ``API_URL`` set it is queued on the server and polled, and
-the status box shows the same progress lines either way.
-"""
+"""Run page: set the scenario parameters, run, save a new artifact."""
 
 import backend
 import pandas as pd

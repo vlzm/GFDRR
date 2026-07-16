@@ -1,53 +1,4 @@
-"""One feature builder for the training table and the forecast input.
-
-The model's inputs (the feature columns) are built here and only here. The
-training-table builder (``gbp/ml/training.py``) and the forecast input
-builder (``gbp/ml/forecast.py``) call these functions — neither keeps its
-own copy, so the two paths cannot drift apart (train/serve skew: the model
-sees one definition of a feature in training and another in production).
-
-The one information rule
-------------------------
-Every history feature of a target row is computed from departure counts
-strictly before the target rows — never from the target rows themselves,
-never from counts after them. Both builders pass the same history window:
-the counts of the ``HISTORY_WEEKS`` weeks right before the rows they build
-(:func:`clip_history_window`). The training table of one month is built as
-if that month were being forecast: its features read only the months before
-it. A lag whose source hour lies past the end of the history stays missing
-(NaN) — that happens for rows more than a week into a forecast horizon — so
-a model must accept missing values (LightGBM does).
-
-The feature columns
--------------------
-- Calendar, from ``start_timestamp`` alone: ``hour_of_day`` (0-23),
-  ``day_of_week`` (0 = Monday), ``month`` (1-12), ``is_holiday`` (US public
-  holidays).
-- Weather, joined by calendar date from the daily Central Park table
-  (``load_weather_daily`` in ``gbp/ml/data.py``): ``temperature_max_c``,
-  ``temperature_min_c``, ``precipitation_mm``. A backtest joins the actual
-  weather of the held-out month, which plays the role of a perfect weather
-  forecast. A true future horizon has no published weather; its weather
-  columns stay NaN unless a weather forecast table is supplied.
-- History, from the history window: ``quantity_lag_1w`` (the count at the
-  same hour one week earlier), ``quantity_mean_4w`` (the mean of the same
-  hour over the past ``LAG_WEEKS`` weeks, taken over the weeks the history
-  covers), ``facility_mean`` (the station's mean count over the window),
-  ``facility_hour_of_week_mean`` (the station's mean count at this hour of
-  week — Notations.md §17).
-
-Censored demand
----------------
-The target (``quantity``) is the observed departure count, and the platform
-assumes observed departures ≈ demand. The assumption is biased low exactly
-where the system fails: an hour a station stood with no bikes records zero
-departures no matter how many people wanted one. Archived station-status
-snapshots exist for the training months, so each training row also carries
-the mark ``stockout_share`` (``gbp/ml/station_status.py``) — the share of
-its hour the station had no bikes — and training can exclude or down-weight
-the marked rows. The mark is not a feature: future stockouts are unknown at
-prediction time, so it never appears in ``FEATURE_COLUMNS``.
-"""
+"""One feature builder for the training table and the forecast input."""
 
 from __future__ import annotations
 
@@ -114,12 +65,7 @@ def _us_holiday_days(days: pd.Series) -> set[pd.Timestamp]:
 
 
 def add_calendar_features(table: pd.DataFrame) -> pd.DataFrame:
-    """Add the calendar columns, computed from ``start_timestamp`` alone.
-
-    ``hour_of_day`` is 0-23, ``day_of_week`` is 0-6 with 0 = Monday,
-    ``month`` is 1-12, and ``is_holiday`` marks US public holidays (the
-    federal list of the ``holidays`` package).
-    """
+    """Add the calendar columns, computed from ``start_timestamp`` alone."""
     out = table.copy()
     ts = out["start_timestamp"]
     out["hour_of_day"] = ts.dt.hour.astype("int64")
@@ -131,19 +77,7 @@ def add_calendar_features(table: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_weather_features(table: pd.DataFrame, weather_df: pd.DataFrame) -> pd.DataFrame:
-    """Join the daily weather onto the rows by calendar date.
-
-    Every hour of a day gets that day's values; a date missing from
-    ``weather_df`` leaves the columns NaN.
-
-    Parameters
-    ----------
-    table : pandas.DataFrame
-        Rows with a ``start_timestamp`` column.
-    weather_df : pandas.DataFrame
-        One row per ``date`` with the ``WEATHER_FEATURES`` columns — the
-        shape ``load_weather_daily`` (``gbp/ml/data.py``) returns.
-    """
+    """Join the daily weather onto the rows by calendar date."""
     missing = [c for c in ["date", *WEATHER_FEATURES] if c not in weather_df.columns]
     if missing:
         raise ValueError(f"weather table lacks columns: {missing}")
@@ -162,13 +96,7 @@ def add_weather_features(table: pd.DataFrame, weather_df: pd.DataFrame) -> pd.Da
 
 
 def add_history_features(table: pd.DataFrame, history_df: pd.DataFrame) -> pd.DataFrame:
-    """Add the history columns, computed from ``history_df`` only.
-
-    ``history_df`` holds departure counts in training-table shape
-    (``start_timestamp``, ``facility_id``, ``commodity_category``,
-    ``quantity``; zero rows kept — a zero is an observation, not a gap).
-    A value whose source hours are not in the history stays NaN.
-    """
+    """Add the history columns, computed from ``history_df`` only."""
     keys = ["facility_id", "commodity_category"]
     hist = history_df[[*keys, "start_timestamp", "quantity"]]
     if hist.duplicated([*keys, "start_timestamp"]).any():
@@ -228,28 +156,7 @@ def build_features(
     history_df: pd.DataFrame,
     weather_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Append every feature column to the target rows.
-
-    Parameters
-    ----------
-    targets_df : pandas.DataFrame
-        The rows to describe: ``start_timestamp``, ``facility_id``,
-        ``commodity_category``. Other columns pass through untouched.
-    history_df : pandas.DataFrame
-        Departure counts in training-table shape, strictly before the
-        target rows (raises otherwise). Counts older than the history
-        window are dropped here, so every caller sees the same window.
-    weather_df : pandas.DataFrame, optional
-        Daily weather (``load_weather_daily``). Without it the weather
-        columns stay NaN — the table's shape does not depend on whether
-        weather is available.
-
-    Returns
-    -------
-    pandas.DataFrame
-        ``targets_df`` with the ``FEATURE_COLUMNS`` appended, same row
-        order.
-    """
+    """Append every feature column to the target rows."""
     _require_history_before_targets(targets_df, history_df)
     history = clip_history_window(history_df, targets_df["start_timestamp"].min())
     out = add_calendar_features(targets_df)

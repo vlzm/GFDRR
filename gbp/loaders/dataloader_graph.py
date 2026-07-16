@@ -1,14 +1,4 @@
-"""Graph (resolved) model data.
-
-The period grid, the historical flow log, the graph entities/attributes, and
-the replay demand the engine consumes.
-
-``ResolvedModelData`` is built once per scenario from a :class:`RawModelData`
-and exposes the graph tables. The simulator reads a narrow subset of them,
-named by the contract ``ScenarioInputs``
-(``gbp/consumers/simulator/inputs.py``); ``ResolvedModelData`` is one supplier
-of that contract (declared statically at the bottom of this module).
-"""
+"""Graph (resolved) model data: period grid, flow log, entities, and replay demand."""
 
 import copy
 import dataclasses
@@ -151,26 +141,13 @@ def to_period_id(ts: pd.Series, t0: pd.Timestamp, period_len: pd.Timedelta) -> p
 
 
 def hour_of_week(ts: pd.Series) -> pd.Series:
-    """Map timestamps to the hour of the week: ``weekday * 24 + hour``, 0..167.
-
-    0 is Monday 00:00. Two timestamps in different weeks share a value when
-    they fall on the same weekday and hour — the key the forecast path uses to
-    carry weekly patterns (demand averages, OD shares) onto future periods.
-    """
+    """Map timestamps to the hour of the week: ``weekday * 24 + hour``, 0..167 (0 is Mon 00:00)."""
     return (ts.dt.dayofweek * 24 + ts.dt.hour).astype("int64")
 
 
 @dataclasses.dataclass(frozen=True)
 class PeriodGrid:
-    """A numbering of periods from ``t0`` with a fixed period length.
-
-    The one place the rule "period ``k`` covers
-    ``[t0 + k * period_len, t0 + (k + 1) * period_len)``, numbered 0, 1, 2, …"
-    is written. Every task that numbers periods from a start builds its grid
-    here -- the forecast horizon, the month period grid, monitoring's
-    forecast-to-month alignment, and the run's ``meta.json`` -- so their
-    numbering cannot drift apart.
-    """
+    """A numbering of periods from ``t0`` with a fixed period length, starting at 0."""
 
     t0: pd.Timestamp
     n_periods: int
@@ -189,14 +166,7 @@ class PeriodGrid:
         return periods_df
 
     def align_to(self, other: "PeriodGrid") -> pd.DataFrame:
-        """Line this grid's periods up with ``other``'s by wall-clock time.
-
-        Returns one row per period of this grid whose start falls inside
-        ``other``'s span and lands on one of ``other``'s period boundaries:
-        ``period_id`` (this grid's) next to ``other_period_id`` (the matching
-        period of ``other``). Empty when the two grids use different period
-        lengths, or when no period of this grid lines up with ``other``.
-        """
+        """Line this grid's periods up with ``other`` by wall-clock time (empty when none align)."""
         empty = pd.DataFrame({"period_id": [], "other_period_id": []}).astype("int64")
         if self.period_len != other.period_len:
             return empty
@@ -219,13 +189,7 @@ class PeriodGrid:
 def get_periods_df(
     trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta
 ) -> pd.DataFrame:
-    """Build the period grid covering every trip, with start/end timestamps.
-
-    Period ``k`` covers ``[t0 + k * period_len, t0 + (k + 1) * period_len)``;
-    the grid runs out to the last trip's end. ``t0`` itself is set by
-    ``ResolvedModelData.__init__``: the earliest trip start, floored to the
-    hour.
-    """
+    """Build the period grid covering every trip, with start/end timestamps."""
     n_periods = int(to_period_id(trips_df["ended_at"], t0, period_len).max()) + 1
     return PeriodGrid(t0, n_periods, period_len).frame()
 
@@ -233,14 +197,7 @@ def get_periods_df(
 def get_forecast_periods_df(
     t0: pd.Timestamp, number_of_periods: int, period_len: pd.Timedelta
 ) -> pd.DataFrame:
-    """Build the period grid of a forecast horizon: ``number_of_periods`` from ``t0``.
-
-    The same shape as :func:`get_periods_df`, but the length comes from the
-    forecast horizon instead of the last trip. Period ids restart at 0: a
-    forecast run is its own scenario with its own clock, and the run machinery
-    (the demand filter per period, the invariant checks, the panel) all count
-    periods from 0.
-    """
+    """Build the period grid of a forecast horizon: ``number_of_periods`` from ``t0``, ids at 0."""
     return PeriodGrid(t0, number_of_periods, period_len).frame()
 
 
@@ -250,48 +207,7 @@ def get_forecast_periods_df(
 def get_historical_flows_df(
     trips_df: pd.DataFrame, t0: pd.Timestamp, period_len: pd.Timedelta
 ) -> pd.DataFrame:
-    """Expand each historical trip into a realized-flow event log.
-
-    Ground-truth history contains only flows that actually happened, so each
-    completed trip is one flow that emits two events in order: ``departed``
-    (move 0, event 0) at the start period and ``arrived`` (move 0, event 1) at
-    the end period. History never redirects, so every historical flow stays on a
-    single arc (``move_id == 0``). The outcomes that exist only under simulation
-    (``lost``, ``redirected``) are intentionally absent here — this is a
-    representation of input data, not the simulator's own journal. Each field is
-    filled only by the event that determines it (e.g. ``realized_end_period`` is
-    null until ``arrived``); the full picture of a flow is recovered by stitching
-    its rows on ``flow_id``.
-
-    ``flow_id`` is namespaced with a ``hist_`` prefix so it cannot collide with
-    flows the simulator generates and appends to the same journal.
-
-    The rows are built with the shared :func:`~gbp.model.flows.departed_events` /
-    :func:`~gbp.model.flows.arrived_events` builders, get their ordering columns
-    from :func:`~gbp.model.flows.stamp_history_ordering` (the rule for a source
-    with no phases), and are ordered by :func:`~gbp.model.flows.finalize_flows` --
-    the same finalize the simulator uses -- so a base replay's finalized journal
-    is identical to this log by construction. The finished journal is checked
-    with :func:`~gbp.model.journal_schema.check_journal_schema` before it is
-    returned: bad input data fails at load time, not as a run-end violation.
-
-    Parameters
-    ----------
-    trips_df : pandas.DataFrame
-        Trips with ``started_at``, ``ended_at``, ``start_station_id``,
-        ``end_station_id`` and ``rideable_type``. The row index seeds ``flow_id``.
-    t0 : pandas.Timestamp
-        Start of the period grid.
-    period_len : pandas.Timedelta
-        Length of a single period.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Event log with columns :data:`FLOW_EVENT_COLUMNS`, sorted by
-        ``period_id`` then ``flow_id`` then ``event_id`` (the per-trip
-        ``move_id`` / ``event_id`` are set by the builders).
-    """
+    """Expand each historical trip into a realized-flow event log, checked against the schema."""
     trips = pd.DataFrame(
         {
             "flow_id": "hist_" + trips_df.index.astype("string"),
@@ -324,36 +240,7 @@ def get_historical_flows_df(
 def get_trip_speed_km_per_period(
     trips_df: pd.DataFrame, facilities_geo_df: pd.DataFrame, period_len: pd.Timedelta
 ) -> float:
-    """Mean riding speed over the historical trips, in kilometres per period.
-
-    Total great-circle distance divided by total ride time, so long trips weigh
-    more than short ones. Speed must come from the raw ``started_at`` /
-    ``ended_at`` timestamps: the OD matrix stores durations rounded to whole
-    periods, and most trips are shorter than one period, so a speed computed
-    from the OD matrix would divide by near-zero times.
-
-    Trips that start and end at the same station, take no time, or miss a
-    coordinate carry no speed information and are skipped.
-
-    :class:`gbp.routing.Routes` uses this value to turn a straight-line
-    distance into a travel time — in the ``haversine`` routing mode for every
-    pair, in the ``osrm`` mode only for pairs the server cannot route.
-
-    Parameters
-    ----------
-    trips_df : pandas.DataFrame
-        Trips with ``started_at``, ``ended_at``, ``start_station_id``,
-        ``end_station_id``.
-    facilities_geo_df : pandas.DataFrame
-        Facility geography: ``facility_id``, ``lat``, ``lng``.
-    period_len : pandas.Timedelta
-        Length of a single period.
-
-    Returns
-    -------
-    float
-        Kilometres a bike rides in one period, on average.
-    """
+    """Mean riding speed over the historical trips, in kilometres per period (distance-weighted)."""
     coords = facilities_geo_df.set_index("facility_id")
     distance_km = haversine_km(
         trips_df["start_station_id"].map(coords["lat"]),
@@ -387,11 +274,7 @@ def get_facilities_df(stations_df: pd.DataFrame, depots_df: pd.DataFrame) -> pd.
 
 
 def get_resources_df(trucks_df: pd.DataFrame) -> pd.DataFrame:
-    """Build the resource table from trucks: id, category, home facility.
-
-    ``home_facility_id`` is the depot the truck starts and ends its
-    rebalancing route at (Notations.md §14).
-    """
+    """Build the resource table from trucks: id, category, home facility."""
     out = trucks_df[["truck_id", "home_depot_id"]].rename(
         columns={"truck_id": "resource_id", "home_depot_id": "home_facility_id"}
     )
@@ -470,32 +353,7 @@ def apply_truck_fleet(
     truck_capacity_bikes: int,
     truck_rate: float,
 ) -> "ResolvedModelData":
-    """Return a shallow copy of ``resolved`` with a new truck fleet.
-
-    ``truck_homes`` lists the home depot of each truck, one entry per truck:
-    ``["depot_1", "depot_1", "depot_3"]`` is a fleet of three trucks, two
-    based at ``depot_1`` and one at ``depot_3``. The fleet is a run
-    parameter: the heavy graph tables are untouched, only the three resource
-    tables (``resources_df``, ``resources_capacities_df``,
-    ``resources_rates_df``) are rebuilt. ``ValueError`` for an empty
-    ``truck_homes`` list and for a home that is not a depot facility.
-
-    Parameters
-    ----------
-    resolved : ResolvedModelData
-        The resolved scenario data. Not modified.
-    truck_homes : list of str
-        Home depot per truck; every entry must be a depot facility.
-    truck_capacity_bikes : int
-        Bikes one truck can carry.
-    truck_rate : float
-        Price per hour of truck use, in dollars.
-
-    Returns
-    -------
-    ResolvedModelData
-        A shallow copy carrying the new fleet.
-    """
+    """Return a shallow copy of ``resolved`` with a new truck fleet (one entry per truck)."""
     if not truck_homes:
         raise ValueError("truck_homes is empty: the fleet needs at least one truck")
     facilities = resolved.facilities_df
@@ -527,34 +385,7 @@ def map_od_matrix_by_hour_of_week(
     periods_df: pd.DataFrame,
     forecast_periods_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Carry the historical OD matrix onto forecast periods by hour of week.
-
-    Forecast periods have no history, so they have no OD matrix of their own.
-    This builds one from the historical matrix: pool the historical rows that
-    share an hour of week (Monday 08:00 across all weeks is one pool), then
-    give every forecast period the pool of its own hour of week.
-
-    Within one pool, per ``(source, target, commodity)``: ``count`` is the sum
-    of the historical counts, ``duration`` is the count-weighted mean of the
-    historical mean durations (rounded to whole periods), and ``probability``
-    is recomputed as the pair's share of the pool's total per
-    ``(source, commodity)`` — so the shares sum to 1 again.
-
-    Parameters
-    ----------
-    od_matrix_df : pandas.DataFrame
-        The historical OD matrix (``HISTORICAL_OD_MATRIX_SCHEMA``).
-    periods_df : pandas.DataFrame
-        The historical period grid; gives each OD row its hour of week.
-    forecast_periods_df : pandas.DataFrame
-        The forecast period grid (:func:`get_forecast_periods_df`).
-
-    Returns
-    -------
-    pandas.DataFrame
-        An OD matrix in the same schema whose ``period_id`` values are the
-        forecast periods.
-    """
+    """Carry the historical OD matrix onto forecast periods by hour of week."""
     period_hours = periods_df[["period_id"]].assign(
         hour_of_week=hour_of_week(periods_df["start_timestamp"])
     )
@@ -595,30 +426,7 @@ def restrict_demand_to_scenario(
     resolved: "ResolvedModelData",
     periods_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, float]:
-    """Keep the demand rows the scenario can run; report the dropped share.
-
-    A forecast run maps the scenario's OD matrix onto the forecast periods by
-    hour of week, so a demand row can only run when its ``(facility,
-    commodity, hour of week)`` has OD rows in the scenario. Rows at stations
-    the scenario has never seen have no OD rows either, so one rule covers
-    both. :func:`apply_forecast_demand` refuses exactly the rows this cut
-    drops.
-
-    Parameters
-    ----------
-    demand_df : pandas.DataFrame
-        A demand table on the ``periods_df`` grid.
-    resolved : ResolvedModelData
-        The scenario whose OD matrix the run will use.
-    periods_df : pandas.DataFrame
-        The period grid of ``demand_df`` (maps ``period_id`` to wall-clock).
-
-    Returns
-    -------
-    tuple of (pandas.DataFrame, float)
-        The kept rows (same columns, sorted) and the dropped share of the
-        demand total (0.0 when nothing was dropped).
-    """
+    """Keep the demand rows the scenario can run; report the dropped share of the demand total."""
     od = resolved.historical_od_matrix_df.merge(
         resolved.periods_df[["period_id", "start_timestamp"]], on="period_id"
     )
@@ -644,41 +452,7 @@ def apply_forecast_demand(
     forecast_demand_df: pd.DataFrame,
     forecast_periods_df: pd.DataFrame,
 ) -> "ResolvedModelData":
-    """Return a shallow copy of ``resolved`` that runs on a forecast demand table.
-
-    The copy replaces four fields: the forecast period grid (``periods_df``
-    and its ``t0``), the forecast demand table, and a historical OD matrix
-    mapped onto the forecast periods by hour of week
-    (:func:`map_od_matrix_by_hour_of_week`). Everything else — facilities,
-    capacities, routes, the historical observations — is shared as-is. The
-    forecast table sits in the ``historical_demand_df`` slot because that is
-    the one demand slot the engine reads; the run's ``meta.json`` records that
-    the demand came from a forecast (``demand_source``, ``forecast_name``).
-
-    Like the loader itself, this is a load boundary: the two incoming tables
-    are schema-checked here (``PERIODS_SCHEMA``, ``HISTORICAL_DEMAND_SCHEMA``),
-    plus two cross-table checks a schema cannot express — every demand
-    facility must exist in the facility table, and every demanded
-    ``(facility, commodity, period)`` must have OD rows, or the engine would
-    silently drop those departures and break the demand-split invariant (I1).
-
-    Parameters
-    ----------
-    resolved : ResolvedModelData
-        The resolved scenario data. Not modified.
-    forecast_demand_df : pandas.DataFrame
-        A forecast demand table (Notations.md §17): whole-bike quantities in
-        ``HISTORICAL_DEMAND_SCHEMA`` shape, on the forecast period grid.
-    forecast_periods_df : pandas.DataFrame
-        The forecast period grid (:func:`get_forecast_periods_df`). Its period
-        length must equal the grid of ``resolved`` — OD durations are counted
-        in periods, so a different length would re-time every trip.
-
-    Returns
-    -------
-    ResolvedModelData
-        A shallow copy carrying the forecast demand, grid, and OD matrix.
-    """
+    """Return a shallow copy of ``resolved`` that runs on a forecast demand table."""
     violations = [
         *schema_violations(PERIODS_SCHEMA, forecast_periods_df),
         *schema_violations(HISTORICAL_DEMAND_SCHEMA, forecast_demand_df),
@@ -733,32 +507,7 @@ def apply_saved_forecast(
     forecast_name: str,
     root: pathlib.Path | None = None,
 ) -> tuple["ResolvedModelData", float]:
-    """Return a copy of ``resolved`` that runs on a saved forecast, named by ``forecast_name``.
-
-    The step every forecast run (Notations.md §11) starts with, in one place:
-    load the forecast artifact from ``data/ml/forecasts/<forecast_name>/``,
-    rebuild its period grid from ``meta.json``, cut the demand to what the
-    scenario can run (:func:`restrict_demand_to_scenario` — a forecast can
-    name stations or station-hours the scenario's trip CSV has never seen),
-    and put it in place of the historical demand
-    (:func:`apply_forecast_demand`).
-
-    Parameters
-    ----------
-    resolved : ResolvedModelData
-        The resolved scenario data. Not modified.
-    forecast_name : str
-        Name of a saved forecast (a folder under ``data/ml/forecasts/``).
-    root : pathlib.Path, optional
-        Forecasts root override (defaults to ``data/ml/forecasts/``).
-
-    Returns
-    -------
-    tuple of (ResolvedModelData, float)
-        A shallow copy running on the forecast, and the share of the forecast
-        demand the cut dropped (0.0 when nothing was dropped) — a run's
-        ``meta.json`` records it as ``forecast_dropped_share``.
-    """
+    """Return a copy of ``resolved`` that runs on a saved forecast, plus the dropped share."""
     # Imported inside the function: ``gbp.ml.forecast`` imports this module
     # at its top, so a module-level import back would be a circular import.
     from gbp.ml import forecast
@@ -800,28 +549,7 @@ def get_replay_initial_inventory_df(
     facilities_df: pd.DataFrame,
     commodities_categories_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Smallest initial inventory that lets the replay run with no stockout.
-
-    A stockout is checked *inside* a period, during the departures phase, before
-    that period's own same-period arrivals are docked (a same-period arrival is a
-    trip that both starts and ends within the one period). The binding low point
-    of inventory is therefore per inventory step (Notations.md "step"), not per
-    period: the end-of-period value already counts those late same-period
-    arrivals, so it overstates what is on hand at the moment of departure. Sizing
-    the start inventory against the per-period low point leaves real stockouts.
-
-    Starting from zero inventory, :func:`inventory_at_moments` gives the inventory
-    after every step; its per-``(facility, commodity)`` minimum is the deepest the
-    trajectory ever goes. Holding that much inventory at the start lifts the whole
-    trajectory so its floor is exactly zero, and every historical departure finds
-    a bike.
-
-    Returns
-    -------
-    pandas.DataFrame
-        One row per ``(station, commodity)`` with ``facility_id``,
-        ``commodity_category`` and ``quantity``.
-    """
+    """Smallest initial inventory that lets the replay run with no stockout (per inventory step)."""
     stations = facilities_df.loc[facilities_df["facility_category"] == "station", ["facility_id"]]
     grid = stations.merge(commodities_categories_df[["commodity_category"]], how="cross")
 
@@ -844,42 +572,7 @@ def get_replay_initial_inventory_df(
 # Resolved model data container
 # ---------------------------------------------------------------------------
 class ResolvedModelData:
-    """Graph data for one scenario, built from a :class:`RawModelData`.
-
-    Exposes the rich graph tables (entities, attributes, historical
-    observations). The simulator reads only the fields listed by its input
-    contract, :class:`~gbp.consumers.simulator.inputs.ScenarioInputs`; this
-    class is one supplier of that contract.
-
-    ``initial_inventory_df`` and ``facilities_capacities_df`` are built for the
-    base replay: the smallest state that runs the historical demand with no
-    stockout and no dock-full. To run a *scaled* demand, replace both with the
-    output of :func:`gbp.consumers.simulator.size_state_for_demand`, which sizes
-    them against the scaled scenario's own journal.
-
-    ``__init__`` builds the tables in dependency order: entities, attributes,
-    the time grid, the historical flow journal, the base replay initial
-    inventory, the historical marginals, riding speed and ``routes``, and the
-    empty ``simulated_*`` fields (filled by :func:`attach_simulation` after a
-    run). It ends with two load-time checks: an assert that the period-0
-    start-of-period inventory equals the initial inventory (the two are built
-    by different code paths), and ``check_engine_tables`` — every table the
-    engine reads against its schema in ``ENGINE_TABLE_SCHEMAS``.
-
-    Parameters
-    ----------
-    raw : RawModelData
-        The loaded raw entity tables.
-    period_len : pandas.Timedelta, optional
-        Length of a single simulation period. Defaults to one hour.
-    routing_mode : {"haversine", "osrm"}, optional
-        How ``routes`` measures distance and travel time between facilities
-        (see :mod:`gbp.routing`). Defaults to ``"haversine"``. The ``"osrm"``
-        mode needs a running OSRM server and fetches the full
-        facility-to-facility table here, once.
-    osrm_url : str, optional
-        Base URL of the OSRM server. Only read when ``routing_mode="osrm"``.
-    """
+    """Graph data for one scenario, built from a ``RawModelData`` and checked at load time."""
 
     def __init__(
         self,
@@ -1003,11 +696,7 @@ class ResolvedModelData:
 
 
 def check_engine_tables(resolved: "ResolvedModelData") -> list[str]:
-    """Check every engine-facing table of ``resolved`` against its schema.
-
-    Runs each schema of :data:`ENGINE_TABLE_SCHEMAS` with ``lazy=True`` and
-    returns all violations as one list (empty = every table is valid).
-    """
+    """Check every engine-facing table of ``resolved`` against its schema (empty list = valid)."""
     violations: list[str] = []
     for attribute, schema in ENGINE_TABLE_SCHEMAS.items():
         violations += schema_violations(schema, getattr(resolved, attribute))
@@ -1015,11 +704,7 @@ def check_engine_tables(resolved: "ResolvedModelData") -> list[str]:
 
 
 def _supplies_scenario_inputs(resolved: ResolvedModelData) -> "ScenarioInputs":
-    """Declare that the loader's product supplies the simulator's input contract.
-
-    Never called. mypy checks the ``return`` here: if ``ResolvedModelData``
-    stops carrying a field of ``ScenarioInputs``, the typecheck fails.
-    """
+    """Declare that the loader's product supplies the simulator's input contract (mypy-only)."""
     return resolved
 
 
@@ -1031,22 +716,7 @@ def attach_simulation(
     simulated_flows_df: pd.DataFrame,
     simulated_resources_df: pd.DataFrame | None = None,
 ) -> None:
-    """Populate the ``simulated_*`` observation slots from a finished run.
-
-    All simulated marginals are derived from the finalized flow journal with the
-    same functions used for the historical ones, so the two sets are directly
-    comparable (in the base scenario they are equal).
-
-    Parameters
-    ----------
-    resolved : ResolvedModelData
-        Container to fill in place.
-    simulated_flows_df : pandas.DataFrame
-        Finalized simulated flow journal (e.g. ``Environment.simulated_flows_df``).
-    simulated_resources_df : pandas.DataFrame, optional
-        Resource observations from the run. Defaults to an empty table (trucks
-        are idle in the historical replay).
-    """
+    """Populate the ``simulated_*`` observation slots from a finished run."""
     resolved.simulated_flows_df = simulated_flows_df
     resolved.simulated_resources_df = (
         simulated_resources_df if simulated_resources_df is not None else empty_resources_obs_df()

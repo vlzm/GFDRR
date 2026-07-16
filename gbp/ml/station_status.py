@@ -1,45 +1,4 @@
-"""Archived station-status snapshots and the ``stockout_share`` mark.
-
-Censored demand: the training target is the observed departure count, and
-the platform assumes observed departures ≈ demand. The assumption fails
-exactly where the simulator's own losses live — an hour a station stood
-with no bikes records zero departures no matter how many people wanted one.
-So each training row carries the mark ``stockout_share``: the share of its
-hour (0..1) the station had zero bikes available. Training can exclude or
-down-weight rows with a high share. The mark is not a feature — future
-stockouts are unknown at prediction time — so the forecast input never has
-it.
-
-The source (checked 2026-07-10)
--------------------------------
-CityBikes archives the public station feed and publishes monthly dumps:
-``https://data.citybik.es/dumps/by-network/<year>/<YYYYMM>-citi-bike-nyc-stats.parquet``,
-one row per status change per station: ``nuid`` (the station's feed id),
-``name``, ``latitude``, ``longitude``, ``bikes`` (bikes available),
-``timestamp``. Dumps for New York start at 2024-11. Earlier public archives
-(The Open Bus, the Kaggle station snapshots) stop in 2019-2021, so months
-before 2024-11 get no mark: the column stays NaN and the written assumption
-above stands for them. Attribution: "Bike-share data by CityBikes
-contributors, available from https://data.citybik.es".
-
-How the mark is computed
-------------------------
-- Dump timestamps are UTC; they are converted to New York wall-clock time
-  first. One local month also needs the next month's dump: the last local
-  evening of a month lies in the next UTC month. (On the two daylight
-  saving switch days the local clock jumps; the affected hour is counted
-  approximately and the share is clipped to 1.)
-- Between two records a station's count is carried forward — the feed only
-  writes changes, so no record means no change.
-- ``bikes`` counts every bike type, so the mark is per station: the same
-  value for every ``commodity_category`` of the facility. An hour with only
-  electric bikes on the racks counts as having bikes.
-- The feed's stations are matched to the trips' ``facility_id`` by
-  coordinates: each facility (the median of its trip endpoint coordinates)
-  takes the nearest feed station within ``MATCH_DISTANCE_M`` meters. A
-  facility without a match keeps NaN — unknown, not zero.
-- A matched station-hour with no zero-bike time gets share 0.0.
-"""
+"""Archived station-status snapshots and the ``stockout_share`` mark."""
 
 from __future__ import annotations
 
@@ -82,12 +41,7 @@ def download_status_months(
     raw: pathlib.Path | None = None,
     log: Callable[[str], None] | None = None,
 ) -> list[pathlib.Path]:
-    """Download the status dumps that are missing from ``data/raw/``.
-
-    A month the archive has not published (before 2024-11, or not archived
-    yet) is noted and skipped — the mark is best-effort, so a missing dump
-    is not an error. Returns the newly downloaded files.
-    """
+    """Download the status dumps missing from ``data/raw/``; return the new files."""
     base = raw or raw_dir()
     base.mkdir(parents=True, exist_ok=True)
     say = log or (lambda message: None)
@@ -109,12 +63,7 @@ def download_status_months(
 
 
 def load_status_records(month: str, raw: pathlib.Path | None = None) -> pd.DataFrame | None:
-    """Read the records that cover one local month: its dump plus the next month's.
-
-    The next month's dump holds the last local evening of ``month`` (the
-    dumps cut at UTC month borders). Returns None when the month's own dump
-    is not on disk — without it there is no usable coverage.
-    """
+    """Read the records for one local month: its dump plus the next month's; None if no dump."""
     own = status_dump_path(month, raw)
     if not own.exists():
         return None
@@ -126,25 +75,7 @@ def load_status_records(month: str, raw: pathlib.Path | None = None) -> pd.DataF
 
 
 def stockout_shares(status_records_df: pd.DataFrame, month: str) -> pd.DataFrame:
-    """Compute per station the share of each local hour with zero bikes available.
-
-    Records are status changes, so each record's value holds until the
-    station's next record (the last one holds until the month ends). The
-    zero-bike stretches are cut at hour borders and summed per hour.
-
-    Parameters
-    ----------
-    status_records_df : pandas.DataFrame
-        Feed records: ``nuid``, ``bikes``, ``timestamp`` (UTC, naive).
-    month : str
-        The local calendar month to cover, as ``YYYYMM`` or ``YYYY-MM``.
-
-    Returns
-    -------
-    pandas.DataFrame
-        ``nuid``, ``start_timestamp`` (local hour), ``stockout_share`` —
-        only the hours with a positive share.
-    """
+    """Compute per station the share of each local hour with zero bikes available."""
     start, end = month_bounds(month)
     df = status_records_df[["nuid", "timestamp", "bikes"]].copy()
     df["timestamp"] = (
@@ -209,17 +140,7 @@ def match_facilities(
     station_coords_df: pd.DataFrame,
     max_distance_m: float = MATCH_DISTANCE_M,
 ) -> pd.DataFrame:
-    """Match each facility to the nearest feed station within the cutoff.
-
-    Distance is plain flat-map meters (good enough at city scale). A
-    facility with no station inside ``max_distance_m`` is left out of the
-    result.
-
-    Returns
-    -------
-    pandas.DataFrame
-        ``facility_id``, ``nuid`` — one row per matched facility.
-    """
+    """Match each facility to the nearest feed station within the cutoff."""
     if facility_coords_df.empty or station_coords_df.empty:
         return pd.DataFrame(
             {"facility_id": pd.Series(dtype=object), "nuid": pd.Series(dtype=object)}
@@ -249,20 +170,7 @@ def stockout_share_table(
     raw: pathlib.Path | None = None,
     status_records_df: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
-    """Build one month's mark keyed by facility, plus the list of covered facilities.
-
-    Reads the dumps from disk (``download_status_months`` fetches them
-    beforehand); pass ``status_records_df`` to skip the disk read. When the
-    month's dump is absent the table is empty and no facility is covered —
-    the ``stockout_share`` column of that month then stays NaN.
-
-    Returns
-    -------
-    tuple of (pandas.DataFrame, list of str)
-        Rows ``facility_id``, ``start_timestamp``, ``stockout_share`` for
-        the hours with a positive share, and the facilities the feed covers
-        (their remaining hours mean share 0.0, not unknown).
-    """
+    """Build one month's mark keyed by facility, plus the list of covered facilities."""
     if status_records_df is None:
         status_records_df = load_status_records(month, raw)
     if status_records_df is None:

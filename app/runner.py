@@ -1,18 +1,4 @@
-"""Run one scenario end to end and save its run artifact.
-
-The pipeline is the canonical one from ``notebooks/test_pipeline.ipynb``:
-load the raw data, resolve the graph tables, size the initial inventory and
-dock capacities against the sizing demand, run the scaled demand, validate
-the run invariants, and save every table the UI reads (Notations.md §12).
-
-Terminal use::
-
-    python app/runner.py --run-name demand_x2 --demand-scale 2.0 --periods 50
-    python app/runner.py --run-name with_trucks --rebalancing \
-        --truck-homes depot_1,depot_1,depot_3
-    python app/runner.py --run-name forecast_demo --demand-source forecast \
-        --forecast-name seasonal_naive_w1
-"""
+"""Run one scenario end to end and save its run artifact."""
 
 from __future__ import annotations
 
@@ -55,18 +41,7 @@ DEFAULT_TRUCK_RATE = 50.0
 
 
 class RunRequest(pydantic.BaseModel):
-    """The full recipe of one run: every parameter that says what to run.
-
-    One definition, shared by every entry point. The API takes it as the
-    ``POST /runs`` body, the Run scenario page and the two-level evaluation
-    build it, and :func:`run_scenario` reads every field from it -- so the run
-    parameters cannot drift entry point by entry point. It carries what to run,
-    not where: the resolved data, the runs root, and the progress callback are
-    passed to :func:`run_scenario` next to it.
-
-    ``run_name`` is restricted to plain file-name characters, so it always
-    names a folder inside the runs root.
-    """
+    """The full recipe of one run: every parameter that says what to run."""
 
     run_name: str = pydantic.Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     demand_scale_factor: float = 1.0
@@ -82,7 +57,7 @@ class RunRequest(pydantic.BaseModel):
 
     @pydantic.model_validator(mode="after")
     def _forecast_needs_a_name(self) -> RunRequest:
-        """Require a forecast name when the demand source is a forecast (Notations.md §11)."""
+        """Require a forecast name when the demand source is a forecast."""
         if self.demand_source == "forecast" and not self.forecast_name:
             raise ValueError("demand_source='forecast' needs a forecast_name")
         return self
@@ -94,13 +69,7 @@ class RunRequest(pydantic.BaseModel):
         return list(DEFAULT_TRUCK_HOMES)
 
     def rebalancing_meta(self) -> dict[str, object]:
-        """Build the run's rebalancing block for ``meta.json`` (Notations.md §14).
-
-        ``{"enabled": False}`` for a run without rebalancing; with it on, the
-        resolved truck homes and the per-truck capacity are added, so the meta
-        records the fleet the run actually used (the default fleet when the
-        request left ``truck_homes`` unset).
-        """
+        """Build the run's rebalancing block for ``meta.json``."""
         meta: dict[str, object] = {"enabled": self.rebalancing}
         if self.rebalancing:
             meta["truck_homes"] = self.resolved_truck_homes()
@@ -114,25 +83,7 @@ def build_graph_data(
     routing_mode: str = "haversine",
     osrm_url: str = DEFAULT_OSRM_URL,
 ) -> ResolvedModelData:
-    """Load the raw sources and resolve the graph tables (the heavy step).
-
-    Parameters
-    ----------
-    trips_path : str, optional
-        Path to the raw Citi Bike trip CSV.
-    period_len_hours : float, optional
-        Wall-clock length of one period, in hours.
-    routing_mode : {"haversine", "osrm"}, optional
-        How distances and travel times between facilities are measured
-        (see :mod:`gbp.routing`). ``"osrm"`` needs a running OSRM server.
-    osrm_url : str, optional
-        Base URL of the OSRM server. Only read when ``routing_mode="osrm"``.
-
-    Returns
-    -------
-    ResolvedModelData
-        The resolved scenario data, ready for :func:`run_scenario`.
-    """
+    """Load the raw sources and resolve the graph tables (the heavy step)."""
     raw = RawModelData(
         trips_path=trips_path,
         seed=42,
@@ -159,37 +110,7 @@ def run_scenario(
     root: pathlib.Path | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> pathlib.Path:
-    """Resolve the run's demand from ``graph_data``, then run and save it.
-
-    The entry point the API, the Run scenario page and the terminal runner
-    use. It reads the recipe from ``request`` and turns ``graph_data`` into the
-    data the run faces: the historical replay as it is, or -- with
-    ``request.demand_source="forecast"`` -- a saved forecast loaded from
-    ``data/ml/forecasts/`` and mapped onto the scenario by
-    :func:`apply_saved_forecast` (Notations.md §11). It then hands that data to
-    :func:`run_and_save`, which sizes, runs, validates, and saves the artifact.
-
-    ``graph_data`` is never modified: the forecast step and the truck fleet
-    (in :func:`run_and_save`) both work on shallow copies, so the Run page can
-    share one cached ``graph_data`` across runs.
-
-    Parameters
-    ----------
-    graph_data : ResolvedModelData
-        The resolved scenario data (the historical replay).
-    request : RunRequest
-        The run recipe: name, scale factors, period count, demand source,
-        forecast name, and the rebalancing fleet.
-    root : pathlib.Path, optional
-        Runs root override.
-    on_progress : callable, optional
-        Called with a short message before each stage (for UI status boxes).
-
-    Returns
-    -------
-    pathlib.Path
-        The saved artifact folder.
-    """
+    """Resolve the run's demand from ``graph_data``, then run and save it."""
 
     def progress(message: str) -> None:
         if on_progress is not None:
@@ -227,54 +148,7 @@ def run_and_save(
     root: pathlib.Path | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> pathlib.Path:
-    """Apply the fleet, size and run the scenario on ``data``, save the artifact.
-
-    The step every run shares, working on the data the run actually faces.
-    :func:`run_scenario` calls it after resolving the demand from a history or
-    a forecast source; the two-level evaluation (``app/evaluate.py``) calls it
-    with data whose demand it applied itself, adding ``sizing_data`` so the
-    state is sized on one demand table while the run faces another -- the
-    replay-state forecast run (Notations.md §11).
-
-    The state (initial inventory and dock capacities) is sized against
-    ``request.sizing_scale_factor``; the run itself faces
-    ``request.demand_scale_factor``. Equal values give a clean, no-loss run; a
-    larger run scale makes the limits take effect (stockout and dock-full
-    events appear).
-
-    Both the run and the saved artifact are built from this one ``data``, so
-    the artifact records the period grid and ``t0`` the run actually used -- a
-    forecast run's ``data`` carries the forecast horizon. There is no
-    ``graph_data`` in scope to pass by mistake.
-
-    :func:`run_sized_scenario` is called with ``validate=False``: a violated
-    invariant is recorded in ``meta.json`` as ``violations`` instead of
-    raising, so the UI can show a failed run next to the good ones.
-
-    Parameters
-    ----------
-    data : ResolvedModelData
-        The scenario data the run faces (its demand already in place). Not
-        modified: the truck fleet is applied to a shallow copy.
-    request : RunRequest
-        The run recipe (see :class:`RunRequest`).
-    sizing_data : ResolvedModelData, optional
-        The data the state is sized on, when it differs from ``data`` (the
-        two-level evaluation's replay state). Default: size on ``data`` itself,
-        which gives a clean run.
-    forecast_dropped_share : float, optional
-        Share of the forecast demand cut before the run, recorded in the meta.
-        None on history runs.
-    root : pathlib.Path, optional
-        Runs root override.
-    on_progress : callable, optional
-        Called with a short message before each stage (for UI status boxes).
-
-    Returns
-    -------
-    pathlib.Path
-        The saved artifact folder.
-    """
+    """Apply the fleet, size and run the scenario on ``data``, save the artifact."""
 
     def progress(message: str) -> None:
         if on_progress is not None:

@@ -1,12 +1,4 @@
-"""Simulation engine: the period-stepping ``Environment`` and its config.
-
-Historical replay (minimal working version). The base scenario re-emits every
-historical trip exactly, so that ``simulated_flows_df == historical_flows_df``.
-Inventory and in-transit are tracked as real state. The constraints that *change*
-outcomes (dock overflow -> redirect, stockout -> lost) are fully implemented in
-the phases, but do nothing in an exact replay (saturated inventory and capacity)
-and only become meaningful once demand is pushed above the historical baseline.
-"""
+"""Simulation engine: the period-stepping ``Environment`` and its config."""
 
 import time
 
@@ -38,17 +30,7 @@ def init_state(resolved: ScenarioInputs, first_period: PeriodRow) -> SimulationS
 
 
 class Environment:
-    """Steps a run period by period.
-
-    Each period runs the scheduled phases, appends their events to the journal,
-    and advances the clock.
-
-    Construction refuses a run that cannot execute (``SimulatorConfigError``):
-    a scenario with both ``historical_demand_df`` and ``initial_inventory_df``
-    empty, ``number_of_periods`` larger than the period grid (the run would
-    silently step fewer periods), and a phase list out of ``phase_rank`` order
-    (the journal's ``step_id`` and ``phase_rank`` orders would disagree).
-    """
+    """Steps a run period by period."""
 
     def __init__(self, resolved: ScenarioInputs, config: EnvironmentConfig) -> None:
         if resolved.historical_demand_df.empty and resolved.initial_inventory_df.empty:
@@ -87,13 +69,7 @@ class Environment:
 
     @property
     def violations(self) -> list[str]:
-        """Run invariants the finished run broke (empty == valid).
-
-        Filled by :meth:`run` when ``EnvironmentConfig.validate`` is on;
-        empty before the run finishes or when the check is off. The engine
-        computes them but does not raise -- ``run_sized_scenario`` reads this
-        list and decides whether to raise :class:`RunInvariantError`.
-        """
+        """Run invariants the finished run broke (empty == valid)."""
         return self._violations
 
     @property
@@ -107,14 +83,7 @@ class Environment:
         return self._period_cursor >= len(self._periods[: self._config.number_of_periods])
 
     def run(self) -> SimulationState:
-        """Step every period to the end, check the run invariants, return the state.
-
-        The invariant check (I1-I5) runs by default (``EnvironmentConfig.validate``)
-        and its result lands on :attr:`violations`; the engine does not raise, so
-        a caller can record a failed run as easily as fail on it. The check costs
-        one extra ``finalize_flows`` plus one ``inventory_at_moments`` pass over
-        the finished journal.
-        """
+        """Step every period to the end, check the run invariants, return the state."""
         run_started = time.monotonic()
         with structlog.contextvars.bound_contextvars(scenario_id=self._config.scenario_id):
             while not self.is_done:
@@ -132,11 +101,7 @@ class Environment:
         return self._state
 
     def step(self) -> SimulationState:
-        """Run one period: execute each phase in order, advance the clock.
-
-        Each phase writes its own events to the journal through
-        :meth:`SimulationState.apply_step_events` and returns the next state.
-        """
+        """Run one period: execute each phase in order, advance the clock."""
         period = self._periods[self._period_cursor]
         with structlog.contextvars.bound_contextvars(period_id=period.period_id):
             for phase in self._config.phases:

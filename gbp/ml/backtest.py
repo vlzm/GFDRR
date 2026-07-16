@@ -1,48 +1,4 @@
-"""Rolling-origin backtest over the training partitions (plan, phase 4).
-
-The backtest (Notations.md §17) is the level-1 evaluation: train on months
-``1..k``, forecast month ``k+1``, move the split forward, at least 3 splits.
-Rows from the future never appear in training — the splits move only
-forward, there are no random splits.
-
-For every split and every model family the run is the same four steps:
-
-1. stack the training partitions of the split's training months;
-2. build the forecast input for the held-out month — the history window
-   comes from the partitions right before it, the weather is the held-out
-   month's actual weather (a perfect weather forecast; real forecasts for a
-   true future month will be worse);
-3. ``fit`` on the training table, ``predict`` on the forecast input;
-4. score the fractional demand against the month's actual counts
-   (``gbp/ml/metrics.py``) and log everything to MLflow.
-
-MLflow tracking goes to the local store ``data/ml/mlflow/`` — the runs in
-``mlflow.db`` (SQLite), the model files under ``artifacts/``. Browse it with
-``mlflow ui --backend-store-uri sqlite:///data/ml/mlflow/mlflow.db``.
-Every ``(model, split)``
-pair is one MLflow run: parameters (model settings, training months, the
-data version — the git commit of the ``.dvc`` files, Notations.md §17),
-the metrics of the split, and the fitted model files as artifacts. One
-extra run holds the cross-model table: mean metrics per model family next
-to their ratio against the seasonal naive baseline — the shared naive
-month forecast of each held-out month (``naive_month_prediction`` in
-``gbp/ml/forecast.py``). One asymmetry to know: the families are scored on
-their fractional demand, while the shared naive baseline goes through
-``predict_horizon`` and is therefore rounded to whole bikes before its
-score is computed. How that run is stored is the store's knowledge:
-:meth:`gbp.ml.registry.MlflowStore.log_comparison` writes it and
-:meth:`~gbp.ml.registry.MlflowStore.latest_comparison` (used by the
-pipeline's promote step) reads it back.
-
-Terminal use (all four families, three splits, all partitions on disk)::
-
-    python -m gbp.ml.backtest
-
-or explicitly::
-
-    python -m gbp.ml.backtest --months 202502 202503 ... --splits 3
-        --models seasonal_naive lightgbm
-"""
+"""Rolling-origin backtest of the model families over the training partitions."""
 
 from __future__ import annotations
 
@@ -80,11 +36,7 @@ class BacktestSplit:
 
 
 def backtest_splits(months: Sequence[str], n_splits: int = 3) -> list[BacktestSplit]:
-    """Build the rolling-origin splits: the last ``n_splits`` months are each held out.
-
-    The months must be consecutive calendar months — the history window and
-    the SARIMAX daily series both assume no gaps.
-    """
+    """Build the rolling-origin splits: the last ``n_splits`` months are each held out."""
     ordered = sorted(normalize_month(m) for m in months)
     periods = pd.PeriodIndex(pd.to_datetime([m + "01" for m in ordered]), freq="M")
     gaps = [str(p) for previous, p in zip(periods, periods[1:], strict=False) if p != previous + 1]
@@ -102,12 +54,7 @@ def backtest_splits(months: Sequence[str], n_splits: int = 3) -> list[BacktestSp
 
 
 def data_version() -> str:
-    """Return the data version: the git commit that last touched the ``.dvc`` files.
-
-    ``-dirty`` is appended when a tracked ``.dvc`` file has uncommitted
-    changes; ``unknown`` means git could not answer (no repository, no
-    commits touching the files).
-    """
+    """Return the data version: the git commit that last touched the ``.dvc`` files."""
     repo = pathlib.Path(__file__).resolve().parents[2]
     tracked = ["data/raw.dvc", "data/ml/training.dvc"]
     try:
@@ -137,13 +84,7 @@ def month_forecast_input(
     paths: MlPaths | None = None,
     weather_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Build the forecast input for one held-out month.
-
-    The horizon is the month's full hourly grid (``month_period_grid``), the
-    history window is read from the training partitions before the month,
-    and the weather defaults to the month's actual weather — in a backtest
-    that plays the role of a perfect weather forecast.
-    """
+    """Build the forecast input for one held-out month."""
     paths = paths or MlPaths.resolve()
     horizon = month_period_grid(test_month)
     history = load_history_counts(test_month, paths.training)
@@ -157,16 +98,7 @@ def comparison_table(
     records: list[dict[str, object]],
     baseline_records: list[dict[str, object]] | None = None,
 ) -> pd.DataFrame:
-    """Average the split metrics per model and compare against the baseline.
-
-    One row per model family: the mean of every metric over the splits.
-    ``baseline_records`` holds the per-split metrics of the shared naive
-    month forecast (:func:`gbp.ml.forecast.naive_month_prediction`) — the
-    same forecast the monitoring alert compares against. With it every row
-    gets ``mae_over_naive`` and ``poisson_deviance_over_naive`` — the
-    model's mean error divided by the baseline's (below 1.0 beats the
-    baseline).
-    """
+    """Average the split metrics per model and compare against the baseline."""
     frame = pd.DataFrame(records)
     table = frame.drop(columns=["test_month"]).groupby("model").mean(numeric_only=True)
     order = [m for m in MODEL_FAMILIES if m in table.index]
@@ -188,12 +120,7 @@ def run_backtest(
     weather_df: pd.DataFrame | None = None,
     log: Callable[[str], None] = print,
 ) -> pd.DataFrame:
-    """Backtest the model families over the same splits, log runs to MLflow.
-
-    Returns the comparison table (:func:`comparison_table`). The order of
-    work is split-major: the training table and the forecast input of a
-    split are built once and every model reuses them.
-    """
+    """Backtest the model families over the same splits, log runs to MLflow."""
     unknown = set(model_names) - set(MODEL_FAMILIES)
     if unknown:
         raise ValueError(f"unknown model families: {', '.join(sorted(unknown))}")

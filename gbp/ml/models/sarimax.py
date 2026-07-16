@@ -1,28 +1,4 @@
-"""SARIMAX on the city-level total series — the classical baseline (plan, phase 4).
-
-The model has two parts, and only the first one is SARIMAX:
-
-1. **The level.** Sum the training table into one series — total departures
-   per day for the whole city — and fit SARIMAX on it (default order
-   ``(1, 0, 1)`` with a weekly seasonal part ``(1, 1, 1, 7)``). Daily totals
-   with weekly seasonality keep the series short (about 30 points per month),
-   so the fit takes seconds; SARIMAX on hourly data with a 168-hour season
-   would take hours. The fitted model forecasts the city's daily totals for
-   the horizon.
-2. **The split.** A daily total says nothing about stations or hours. Each
-   day's total is divided over that day's ``(period, facility, commodity)``
-   rows proportionally to ``facility_hour_of_week_mean`` — the same
-   hour-of-week mean the seasonal naive predicts. So the split of a day over
-   stations and hours is the naive one; what SARIMAX adds is the day-level
-   total (trend and recent weeks), which the naive cannot see past the
-   history window.
-
-A day where every row's hour-of-week mean is NaN or zero gets no forecast
-(quantity 0) — there is nothing to split by.
-
-The horizon must start after the training days: the model forecasts forward
-from the end of its series, it does not backcast.
-"""
+"""SARIMAX on the city-level total series — the classical baseline."""
 
 from __future__ import annotations
 
@@ -109,7 +85,7 @@ class SarimaxTotalModel(DemandModel):
 
     @classmethod
     def load(cls, folder: pathlib.Path) -> Self:
-        """Read a model saved by :meth:`save`."""
+        """Read a model saved by ``save``."""
         saved = json.loads((folder / "model.json").read_text())
         model = cls(order=tuple(saved["order"]), seasonal_order=tuple(saved["seasonal_order"]))
         model._result = load_pickle(str(folder / "sarimax_results.pkl"))
