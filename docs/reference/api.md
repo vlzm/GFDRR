@@ -71,7 +71,7 @@ Access control is one shared key: a FastAPI dependency checks the
 `X-API-Key` header on every endpoint except `/health`. `app/api_client.py`
 is a small module of plain functions that never imports fastapi or
 streamlit; the two sides meet only at the HTTP contract, and `RunMeta`
-(`app/artifacts.py`) stays the one definition of `meta.json` on both.
+(`gbp/artifacts.py`) stays the one definition of `meta.json` on both.
 
 ## Artifacts Are Immutable
 
@@ -101,7 +101,7 @@ keep in sync; serving the first one over HTTP means zero.
 
 The simulation layer does not know runs are served over a network, just as
 it does not know Streamlit exists. Both consumers meet at
-`app/artifacts.py`.
+`gbp/artifacts.py`.
 
 ### Parquet Over The Wire
 

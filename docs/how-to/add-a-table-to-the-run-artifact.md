@@ -7,11 +7,11 @@ The run artifact (`data/runs/<run_name>/`,
 [Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads))
 is the only thing the UI and the API read. Pages never compute what the
 artifact builder can precompute — so a new derived table belongs in
-`app/artifacts.py`, built once at save time from the journal.
+`gbp/artifacts.py`, built once at save time from the journal.
 
 ## Steps
 
-All edits are in `app/artifacts.py`.
+All edits are in `gbp/artifacts.py`.
 
 1. Add the file stem to `RUN_TABLES`:
 

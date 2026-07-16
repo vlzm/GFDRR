@@ -74,7 +74,7 @@ Exact contract: [Notations.md §0](../../Notations.md#0-the-flow-event-schema-th
 ### Run artifact
 
 A run artifact is a finished run saved to disk: the folder
-`data/runs/<run_name>/`, built once by `app/artifacts.py`. It holds
+`data/runs/<run_name>/`, built once by `gbp/artifacts.py`. It holds
 `meta.json` (the run's parameters, totals, and invariant violations) and five
 parquet tables; the two you meet first are `flows.parquet` — the journal —
 and `panel.parquet` — per period and station: inventory, demand, departures,
@@ -131,7 +131,7 @@ flowchart LR
     csv["raw trip CSVs<br/>data/raw/"]
     loaders["loaders<br/>gbp/loaders/"]
     sim["simulator<br/>gbp/consumers/simulator/"]
-    builder["artifact builder<br/>app/artifacts.py"]
+    builder["artifact builder<br/>gbp/artifacts.py"]
     runs[("run artifacts<br/>data/runs/, one folder per run")]
     ui["web interface<br/>app/main.py + app/views/"]
     api["run-artifact API<br/>app/api.py"]
@@ -224,7 +224,7 @@ flowchart TB
 ```
 
 Not drawn, to keep the picture readable: `journal_schema.py` is called from
-many places (loaders, `scenario.py`, `validation.py`, `app/artifacts.py`);
+many places (loaders, `scenario.py`, `validation.py`, `gbp/artifacts.py`);
 `engine.py` and `state.py` also call small helpers from `flows.py`;
 `config.py` (the `EnvironmentConfig` settings record) travels along every
 arrow between `scenario.py`, `engine.py` and the phases.
@@ -270,13 +270,17 @@ The run chain reads this picture at one point: a forecast run loads a
 forecast artifact by name, and `apply_forecast_demand` in
 `dataloader_graph.py` puts its demand table in place of the historical one.
 
-### From journal to browser inside app/
+### From journal to browser
+
+The run path and the artifact builder live in `gbp/`; `app/` reads and draws
+them (the CLI `app/runner.py` and the API `app/api.py` are thin entry points
+over the same `gbp` run path):
 
 ```mermaid
 flowchart TB
-    runner["runner.py<br/>build_graph_data, run_scenario"]
-    evaluate["evaluate.py<br/>the two-level evaluation"]
-    artifacts["artifacts.py<br/>save_scenario_run, load_run_*"]
+    run["gbp/consumers/run.py<br/>build_graph_data, run_scenario"]
+    evaluate["gbp/ml/evaluation.py<br/>the two-level evaluation"]
+    artifacts["gbp/artifacts.py<br/>save_scenario_run, load_run_*"]
     runs[("data/runs/<br/>one folder per run")]
     api["api.py<br/>six endpoints, one worker thread"]
     client["api_client.py<br/>HTTP calls to the API"]
@@ -285,25 +289,26 @@ flowchart TB
     main["main.py<br/>page registry"]
     views["views/<br/>ten Streamlit pages"]
 
-    runner -->|"finished run:<br/>journal + sized state"| artifacts
+    run -->|"finished run:<br/>journal + sized state"| artifacts
     evaluate -->|"saves its runs and reads<br/>their panels through"| artifacts
     artifacts -->|"writes and reads"| runs
-    api -->|"starts runs through"| runner
+    api -->|"starts runs through"| run
     api -->|"loads and saves through"| artifacts
     client -->|"GET / POST over HTTP"| api
     shared -->|"reads through"| backend
     backend -->|"disk backend"| artifacts
     backend -->|"HTTP backend, when API_URL is set"| client
-    backend -->|"local runs"| runner
+    backend -->|"local runs"| run
     main -->|"registers"| views
     views -->|"saved-run pages ask for tables"| shared
     views -.->|"Run scenario page starts runs"| backend
 ```
 
-`runner.py` connects this picture to the previous ones: `build_graph_data`
-calls the loaders, and `run_scenario` calls `run_sized_scenario`, then
-passes the result to the artifact builder. `evaluate.py` is a second
-terminal entry point: it runs the reference demand and one forecast run per
+The run path (`gbp/consumers/run.py`) connects this picture to the previous
+ones: `build_graph_data` calls the loaders, and `run_scenario` calls
+`run_sized_scenario`, then passes the result to the artifact builder.
+`gbp/ml/evaluation.py` is a second terminal entry point (`python -m
+gbp.ml.evaluation`): it runs the reference demand and one forecast run per
 model, saves each as a normal run artifact, and writes
 `data/ml/evaluation/<month>/comparison.csv`.
 
@@ -339,9 +344,7 @@ review the design.
 
 | Module               | Interface in one line                                                    | What it hides                                                                                          |
 | -------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `runner.py`          | `RunRequest`, `build_graph_data(...)`, `run_scenario(graph_data, request) -> saved folder` | the one run recipe (`RunRequest`), the stage order, `run_and_save` (the shared run-then-save step), and the progress reporting                                                             |
-| `artifacts.py`       | `save_scenario_run(result, data, request, ...)`, `load_run_table`, `load_run_meta` | one build function per saved table, which result field feeds which builder, the artifact's pandera schemas, the `METRICS` registry, run naming |
-| `evaluate.py`        | `python -m gbp.ml.evaluation --month <YYYYMM>`                                 | the reference run, one replay-state forecast run per model, the shared demand cut (`restrict_demand_to_scenario`), `comparison.csv`          |
+| `runner.py`          | `python app/runner.py --run-name ...` — the terminal CLI                 | flag parsing over the `gbp` run path (`gbp/consumers/run.py`): it builds one `RunRequest`, calls `run_scenario`, and prints the saved folder (the recipe, the run path, and the artifact builder all live in `gbp/`) |
 | `api.py`             | six HTTP endpoints ([api.md](../reference/api.md))                                    | the single worker thread, the run queue, the disk fallback after a restart                             |
 | `api_client.py`      | `list_runs`, `load_table`, `start_run`, `run_status`                     | URL building, the API-key header, response decoding                                                    |
 | `backend.py`         | `current()` — the chosen backend: reads, and `run_and_wait`              | the disk-or-API choice (`API_URL`), local in-process runs vs POST-and-poll over HTTP                   |

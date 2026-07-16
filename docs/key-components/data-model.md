@@ -108,8 +108,8 @@ demand slot the engine reads — together with the forecast period grid and an
 OD matrix pooled from history by hour of week
 (`map_od_matrix_by_hour_of_week`). It is a load boundary like the loader
 itself: schema checks plus two cross-table checks, described in its
-docstring. The callers are `app/runner.py` (`--demand-source forecast`) and
-`app/evaluate.py`.
+docstring. The callers are the run path `gbp/consumers/run.py`
+(`--demand-source forecast`) and `gbp/ml/evaluation.py`.
 
 ## After A Run: `attach_simulation`
 

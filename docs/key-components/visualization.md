@@ -18,9 +18,9 @@ and the design.
 
 | File | Main role |
 |---|---|
-| `runner.py` | Owns `build_graph_data` and `run_scenario`; the terminal entry point (`python app/runner.py --help` lists the flags). |
-| `artifacts.py` | Owns the `build_*` functions, the `METRICS` table, and save/load. |
-| `evaluate.py` | The two-level evaluation (Notations.md §17): a second terminal entry point ([ml-toolkit.md](ml-toolkit.md)). |
+| `gbp/consumers/run.py` | Owns `RunRequest`, `build_graph_data`, and `run_scenario`; `app/runner.py` is the thin terminal CLI over it (`python app/runner.py --help` lists the flags). |
+| `gbp/artifacts.py` | Owns the `build_*` functions, the `METRICS` table, and save/load. |
+| `gbp/ml/evaluation.py` | The two-level evaluation (Notations.md §17): a second terminal entry point, `python -m gbp.ml.evaluation` ([ml-toolkit.md](ml-toolkit.md)). |
 | `main.py` | The Streamlit entry point: the page list and navigation. |
 | `backend.py` | The one place the app chooses its backend — local files, or HTTP when `API_URL` is set ([api.md](../reference/api.md)). |
 | `ui_shared.py` | Shared page helpers: cached typed loaders, scenario pickers, the KPI row, charts. |
@@ -56,7 +56,7 @@ run is created. `DATA_DIR` moves the data folder.
 
 ## The Main Idea
 
-`runner.py` splits the work by runtime. `build_graph_data` is the slow step
+The run path (`gbp/consumers/run.py`) splits the work by runtime. `build_graph_data` is the slow step
 — it loads the CSV into `RawModelData` and resolves `ResolvedModelData`
 ([data-model.md](data-model.md)), takes minutes, and is independent of the
 run parameters, so callers run it once and reuse it. `run_scenario` does one
