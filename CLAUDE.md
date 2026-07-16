@@ -18,7 +18,7 @@ python -m gbp.ml.training --months 202502 202503  # download raw months, build t
 python -m gbp.ml.backtest         # rolling-origin backtest of the model families, logged to MLflow
 python -m gbp.ml.pipeline         # retraining pipeline: download → build-table → train → backtest → promote
 python -m gbp.ml.forecast --champion --forecast-name <name>  # forecast with the registry champion
-python app/evaluate.py --month 202601  # two-level evaluation: run the simulator on actual vs forecast demand
+python -m gbp.ml.evaluation --month 202601  # two-level evaluation: run the simulator on actual vs forecast demand
 python -m gbp.ml.monitoring --month 202602  # score saved forecasts against the month's actuals, build the drift report
 mlflow ui --backend-store-uri sqlite:///data/ml/mlflow/mlflow.db  # browse the experiments and the model registry
 dvc status                        # data/raw and data/ml/training vs their .dvc files
@@ -67,5 +67,5 @@ Target (code, then narration — write like this):
 - **State a rule once.** When one rule (phase order, period numbering, a storage layout) is encoded in more than one place, derive the copies from one declaration. Do not keep two authors in sync with a test.
 - **Vectorization first.** All math via pandas/NumPy. No `for` loops over data in hot paths.
 - **Strict typing.** Pydantic for all contracts. Type hints on all public functions.
-- **UI.** The Streamlit app lives in `app/`. It is a reader of run artifacts (`data/runs/<run_name>/`, see Notations.md §12): it loads saved tables and draws them. It must not add abstractions to `gbp/` and must not compute anything the artifact builder (`app/artifacts.py`) can precompute. **All UI text (labels, captions, tooltips, page titles) is English only** — same as the code; Russian is for chat with the user, never for the app.
+- **UI.** The Streamlit app lives in `app/`. It is a reader of run artifacts (`data/runs/<run_name>/`, see Notations.md §12): it loads saved tables and draws them. It must not add abstractions to `gbp/` and must not compute anything the artifact builder (`gbp/artifacts.py`) can precompute. **All UI text (labels, captions, tooltips, page titles) is English only** — same as the code; Russian is for chat with the user, never for the app.
 - **Language.** Code, comments, docstrings — English only. Documents (`.md`) — English by default; add a Russian companion (`*_ru.md`) when the user asks, and keep the two in sync. Communication with the user — Russian. The plain-language, no-jargon rule above applies in every language.

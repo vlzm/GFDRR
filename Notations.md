@@ -364,19 +364,19 @@ product) and the synthetic scenarios in `tests/scenarios.py`.
 ## 12. Run artifacts (the files the UI reads)
 
 One saved run is a **run artifact**: a folder `data/runs/<run_name>/` built by
-`app/artifacts.py` (the folder name is the `run_name`). The UI only reads
+`gbp/artifacts.py` (the folder name is the `run_name`). The UI only reads
 those files. Its files:
 
 | Canonical | Meaning |
 |---|---|
-| `meta.json` | The run's parameters (the scale factors, `period_len`, `t0`, `routing_mode`, `demand_source`, `forecast_name`, `forecast_dropped_share`, the `rebalancing` block), its origin (`inputs` — the raw source files; `code_version` — the git commit, `-dirty` when uncommitted), the invariant `violations` from `validate_run`, whole-run `totals`, and the sized state the run started from (`initial_inventory_bikes`, `station_capacity_docks`). The full field list is the pydantic model `RunMeta` (`app/artifacts.py`). |
+| `meta.json` | The run's parameters (the scale factors, `period_len`, `t0`, `routing_mode`, `demand_source`, `forecast_name`, `forecast_dropped_share`, the `rebalancing` block), its origin (`inputs` — the raw source files; `code_version` — the git commit, `-dirty` when uncommitted), the invariant `violations` from `validate_run`, whole-run `totals`, and the sized state the run started from (`initial_inventory_bikes`, `station_capacity_docks`). The full field list is the pydantic model `RunMeta` (`gbp/artifacts.py`). |
 | `flows.parquet` | The finalized journal of the run, widened by `flows_with_measures` with the measures (§6.1). |
 | `panel.parquet` | The **facility period panel**: one row per `(period_id, facility_id, commodity_category)` with that period's values side by side — `quantity_sop`, `quantity_eop` (§9 inventory), `demand`, `departed`, `arrived`, `redirected`, `lost_demand`, `lost_dock_full`. Every map view and hover box is a slice of this one table. |
 | `arcs.parquet` | One row per **arc** — one physical edge of a trip, the `(flow_id, move_id)` pair (§0): `flow_type`, `resource_id`, `source_id`, `target_id` (realized if the arc ended with `arrived`, planned otherwise), `start_period`, `end_period`, the closing `event_type`, `reason`, `distance_km` (§13), and the endpoint coordinates. |
 | `flow_totals.parquet` | One row per `flow_id` with the flow's whole-trip values: `flow_type`, origin `source_id`, the target pair, the periods, terminal `event_type`, `reason`, `duration_periods`, `distance_km`, `cost`. Not here: a stockout loss (it has no flow — it lives in the panel as `lost_demand`) and a flow still riding when the run ends. |
 | `facilities.parquet` | Facility attributes for the maps: `facility_id`, `facility_category`, `lat`, `lng`, `capacity`. |
 
-The contracts live in `app/artifacts.py`: `RunMeta` for `meta.json`, a pandera
+The contracts live in `gbp/artifacts.py`: `RunMeta` for `meta.json`, a pandera
 schema per table (`RUN_TABLE_SCHEMAS`), and `save_scenario_run` — the one
 operation that saves a finished run.
 
@@ -388,7 +388,7 @@ arc in kilometres, measured by the run's `routing_mode` (§13); a flow's
 
 A **metric** is one value the UI can show: a value column of the panel or a
 whole-run number (`cost`, `distance_km`). The `METRICS` table in
-`app/artifacts.py` describes each metric once; `PANEL_VALUES`, the UI label
+`gbp/artifacts.py` describes each metric once; `PANEL_VALUES`, the UI label
 dictionaries and the KPI row are all built from it.
 
 ---
@@ -456,8 +456,8 @@ window and executed period by period. Module:
 
 The API (`app/api.py`, described in `docs/reference/api.md`) serves run
 artifacts (§12) over HTTP and starts runs through the same
-`runner.run_scenario` the Run scenario page calls. The artifact contract (§12)
-**is** the API contract.
+`run_scenario` (`gbp/consumers/run.py`) the Run scenario page calls. The
+artifact contract (§12) **is** the API contract.
 
 | Canonical | Meaning | Instead of |
 |---|---|---|
@@ -491,7 +491,7 @@ demand schema (`HISTORICAL_DEMAND_SCHEMA`, `gbp/loaders/dataloader_graph.py`).
 | `model family` | One way to forecast demand behind the one interface `DemandModel` (`gbp/ml/models/`): `fit(training_table)` learns, `predict(feature_table)` returns fractional demand. Four families: `seasonal_naive`, `sarimax`, `lightgbm`, `graphsage`. Constructed only through `create_model`. | `algorithm`, `estimator`, `model type` |
 | `fractional demand` | A model's raw prediction: demand-shaped rows whose `quantity` is a non-negative float. Becomes a forecast demand table through `round_forecast_demand`; the backtest reads it unrounded. | `raw prediction`, `y_hat` |
 | `backtest` | Model validation on held-out months: train on months `1..k`, forecast month `k+1`, move the split forward (`gbp/ml/backtest.py`). Scores per split: MAE and Poisson deviance (`gbp/ml/metrics.py`), overall and busy vs quiet stations; logged to MLflow. | `cross-validation` |
-| `two-level evaluation` | How a model is judged. Level 1: forecast error against the held-out month's actual counts. Level 2: run the simulator on the forecast with the state held fixed (the replay state from the reference run, §11) and compare the run totals and the panel against the reference. Built by `python app/evaluate.py --month <YYYYMM>`. | `validation`, `A/B test` |
+| `two-level evaluation` | How a model is judged. Level 1: forecast error against the held-out month's actual counts. Level 2: run the simulator on the forecast with the state held fixed (the replay state from the reference run, §11) and compare the run totals and the panel against the reference. Built by `python -m gbp.ml.evaluation --month <YYYYMM>`. | `validation`, `A/B test` |
 | `data version` | The exact content of `data/raw/` and `data/ml/training/`, tracked by DVC: git versions the `.dvc` checksum files, the data lives in the DVC cache and the local remote. A training run names its data version by the git commit of the `.dvc` files. | `dataset snapshot`, `data hash` |
 | `champion` | The model version the platform currently uses for forecasts, marked in the model registry by the alias `champion`. The forecast builder resolves the model by this alias, never by a file path. A version that lost the comparison stays a `challenger`. | `production model`, `best model` |
 | `model version` | One trained model in the registry (named `demand-model`, `gbp/ml/registry.py`): a fitted model plus its family, training months, and data version, carried as tags. Two pipeline runs over the same three reuse the version. | `model artifact`, `checkpoint` |

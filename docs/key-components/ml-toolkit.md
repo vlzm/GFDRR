@@ -88,7 +88,7 @@ by name and runs the same chain as a replay
 |---|---|
 | `python -m gbp.ml.training --months ...` | Download missing months, build the monthly partitions, oldest first. |
 | `python -m gbp.ml.backtest` | The rolling-origin backtest: train on earlier months, forecast the next, move forward; scores (MAE, Poisson deviance) and models logged to MLflow, with ratios against the seasonal naive baseline. |
-| `python app/evaluate.py --month <YYYYMM>` | The two-level evaluation: level 1 compares demand tables, level 2 runs the simulator on the actual and on each forecast with the same replay state, so only demand differs. |
+| `python -m gbp.ml.evaluation --month <YYYYMM>` | The two-level evaluation: level 1 compares demand tables, level 2 runs the simulator on the actual and on each forecast with the same replay state, so only demand differs. |
 | `python -m gbp.ml.pipeline` | The retraining pipeline: `download -> build-table -> train -> backtest -> promote`; every decision appends one row to `data/ml/pipeline_log.csv`. |
 | `python -m gbp.ml.monitoring --month <YYYYMM>` | After a month's actuals arrive: score the saved forecasts against them, mark degraded months, build the drift report. |
 

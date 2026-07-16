@@ -255,7 +255,7 @@ forecast runs against the state sized on the actual demand — and compares
 the run totals against the reference run:
 
 ```bash
-python app/evaluate.py --month 202601
+python -m gbp.ml.evaluation --month 202601
 ```
 
 The saved result for January 2026, ending with which model the platform
