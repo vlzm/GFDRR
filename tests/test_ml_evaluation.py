@@ -1,30 +1,26 @@
-"""Tests for the comparison bookkeeping of the two-level evaluation.
+"""Tests for the two-level evaluation module (``gbp/ml/evaluation.py``).
 
 The heavy path (resolve the scenario, run 744 periods) stays in the evaluation
-itself; these tests pin the logic ``app/eval_comparison.py`` owns -- the run
-and file names, and the comparison rows -- by passing a fake run and fake
-artifact readers, so they run without a simulator run.
+itself; these tests pin the logic the module owns -- the run and file names, the
+comparison rows, and the demand cut that makes every run face the same universe
+-- by passing a fake run and fake artifact readers, so they run without a
+simulator run.
 """
 
-import pathlib
-import sys
 import types
 
 import pandas as pd
 import pytest
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_REPO_ROOT / "app"))
-
-from eval_comparison import (  # noqa: E402  (needs the app folder on sys.path)
-    EvalNames,
-    ModelForecast,
-    build_comparison,
-)
+from gbp.ml import evaluation
+from gbp.ml.evaluation import EvalNames, ModelForecast, build_comparison
 
 CLASSIC = "classic_bike"
 
 
+# ---------------------------------------------------------------------------
+# EvalNames: the run and file names
+# ---------------------------------------------------------------------------
 def test_full_month_names_drop_the_window_suffix():
     names = EvalNames("202601", horizon_periods=744, month_hours=744)
     assert names.is_full_month
@@ -43,6 +39,9 @@ def test_shortened_window_names_carry_the_period_count():
     assert names.comparison_csv == "comparison_168p.csv"
 
 
+# ---------------------------------------------------------------------------
+# build_comparison: the reference and forecast rows
+# ---------------------------------------------------------------------------
 def _demand(rows: list[tuple[int, str, int]]) -> pd.DataFrame:
     """Build a demand table from (period_id, facility_id, quantity) rows."""
     return pd.DataFrame(
@@ -156,3 +155,74 @@ def test_build_comparison_reports_zero_busy_share_when_nothing_is_lost():
         log=lambda _msg: None,
     )
     assert table.iloc[1]["lost_demand_busy_share"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# The shared demand cut (restrict_demand_to_scenario, re-exported here)
+# ---------------------------------------------------------------------------
+def _hourly_periods(start: str, n_periods: int) -> pd.DataFrame:
+    periods = pd.DataFrame({"period_id": range(n_periods)})
+    periods["start_timestamp"] = pd.Timestamp(start) + periods["period_id"] * pd.Timedelta(hours=1)
+    periods["end_timestamp"] = periods["start_timestamp"] + pd.Timedelta(hours=1)
+    return periods
+
+
+def _graph_data() -> types.SimpleNamespace:
+    """Build a scenario slice with OD coverage only for s1 at Monday 00:00."""
+    graph = types.SimpleNamespace()
+    # Two scenario periods on Monday 2026-01-05: hours of week 0 and 1.
+    graph.periods_df = _hourly_periods("2026-01-05", 2)
+    graph.facilities_df = pd.DataFrame({"facility_id": ["s1", "s2"]})
+    graph.historical_od_matrix_df = pd.DataFrame(
+        {
+            "source_id": ["s1"],
+            "planned_target_id": ["s2"],
+            "period_id": [0],
+            "commodity_category": [CLASSIC],
+            "quantity": [1],
+            "probability": [1.0],
+            "mean_duration_periods": [1.0],
+        }
+    )
+    return graph
+
+
+def test_restrict_demand_keeps_only_covered_station_hours():
+    graph = _graph_data()
+    # The demand grid is the next Monday, so its hours of week line up with
+    # the scenario's: period 0 -> hour of week 0 (covered for s1), period 1 ->
+    # hour of week 1 (not covered).
+    periods_df = _hourly_periods("2026-01-12", 2)
+    demand_df = pd.DataFrame(
+        {
+            "period_id": [0, 1, 0],
+            "facility_id": ["s1", "s1", "s2"],
+            "commodity_category": [CLASSIC] * 3,
+            "quantity": [3, 2, 4],
+        }
+    )
+
+    kept, dropped_share = evaluation.restrict_demand_to_scenario(demand_df, graph, periods_df)
+
+    # s1 at the covered hour stays; s1 at the uncovered hour and the unknown
+    # station s2 are dropped: 6 of 9 bikes.
+    assert kept.to_dict("records") == [
+        {"period_id": 0, "facility_id": "s1", "commodity_category": CLASSIC, "quantity": 3}
+    ]
+    assert dropped_share == pytest.approx(6 / 9)
+
+
+def test_restrict_demand_passes_a_fully_covered_table_through():
+    graph = _graph_data()
+    periods_df = _hourly_periods("2026-01-12", 1)
+    demand_df = pd.DataFrame(
+        {
+            "period_id": [0],
+            "facility_id": ["s1"],
+            "commodity_category": [CLASSIC],
+            "quantity": [5],
+        }
+    )
+    kept, dropped_share = evaluation.restrict_demand_to_scenario(demand_df, graph, periods_df)
+    pd.testing.assert_frame_equal(kept, demand_df)
+    assert dropped_share == 0.0
