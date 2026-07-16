@@ -27,8 +27,7 @@ from gbp.model.journal_schema import FLOW_EVENT_SCHEMA, schema_violations
 from gbp.routing import Routes
 
 if TYPE_CHECKING:
-    from runner import RunRequest
-
+    from gbp.consumers.run import RunRequest
     from gbp.consumers.simulator import ScenarioRun
 
 #: The parquet tables a run artifact holds, by file stem.

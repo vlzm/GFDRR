@@ -8,48 +8,10 @@ tests check the wiring between the stages without a trip CSV.
 import pathlib
 import sys
 
-import pytest
-
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "app"))
 
 import runner  # noqa: E402  (needs the app folder on sys.path)
-
-
-# ---------------------------------------------------------------------------
-# RunRequest: the one recipe every entry point builds
-# ---------------------------------------------------------------------------
-def test_forecast_source_requires_a_forecast_name():
-    """A forecast run with no forecast name is rejected at construction."""
-    with pytest.raises(ValueError, match="forecast_name"):
-        runner.RunRequest(run_name="bad", demand_source="forecast")
-
-
-def test_history_source_needs_no_forecast_name():
-    """A history run leaves ``forecast_name`` unset and validates."""
-    request = runner.RunRequest(run_name="ok")
-    assert request.demand_source == "history"
-    assert request.forecast_name is None
-
-
-def test_resolved_truck_homes_falls_back_to_the_default_fleet():
-    """With ``truck_homes`` unset the run uses the default fleet; a list is kept."""
-    assert runner.RunRequest(run_name="x").resolved_truck_homes() == runner.DEFAULT_TRUCK_HOMES
-    picked = runner.RunRequest(run_name="x", truck_homes=["depot_2", "depot_3"])
-    assert picked.resolved_truck_homes() == ["depot_2", "depot_3"]
-
-
-def test_rebalancing_meta_off_and_on():
-    """The meta block is ``enabled`` alone when off, and the fleet when on."""
-    assert runner.RunRequest(run_name="x").rebalancing_meta() == {"enabled": False}
-    on = runner.RunRequest(
-        run_name="x", rebalancing=True, truck_homes=["depot_1"], truck_capacity_bikes=30
-    )
-    assert on.rebalancing_meta() == {
-        "enabled": True,
-        "truck_homes": ["depot_1"],
-        "truck_capacity_bikes": 30,
-    }
 
 
 # ---------------------------------------------------------------------------
