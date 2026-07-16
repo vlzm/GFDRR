@@ -30,9 +30,9 @@ class RunFailed(Exception):
 @st.cache_resource(show_spinner=False)
 def _graph_data_cached(trips_path: str):
     """Load the raw data once per source; later runs reuse the tables."""
-    import runner  # heavy import (pulls the simulator); only a local run pays it
+    from gbp.consumers import run  # heavy import (pulls the simulator); only a local run pays it
 
-    return runner.build_graph_data(trips_path)
+    return run.build_graph_data(trips_path)
 
 
 class DiskBackend:
@@ -66,9 +66,9 @@ class DiskBackend:
 
     def default_trips_path(self) -> str:
         """Return the trips CSV a local run reads by default; the user may point elsewhere."""
-        import runner
+        from gbp.consumers import run
 
-        return runner.DEFAULT_TRIPS_PATH
+        return run.DEFAULT_TRIPS_PATH
 
     def save_location(self, requested_name: str) -> str:
         """Where the run will land: its artifact folder, under the free name."""
@@ -78,12 +78,12 @@ class DiskBackend:
         self, request: RunRequest, trips_path: str | None, on_progress: Callable[[str], None]
     ) -> str:
         """Run one scenario in this process; return the final run name."""
-        import runner
+        from gbp.consumers import run
 
         on_progress("Loading data (a few minutes the first time; cached afterwards)…")
         graph_data = _graph_data_cached(trips_path)
         final_name = artifacts.next_free_run_name(request.run_name)
-        runner.run_scenario(
+        run.run_scenario(
             graph_data,
             request.model_copy(update={"run_name": final_name}),
             on_progress=on_progress,

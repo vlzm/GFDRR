@@ -21,9 +21,10 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "app"))
 
 import api  # noqa: E402  (needs the app folder on sys.path)
-import runner  # noqa: E402
 
 from gbp import artifacts  # noqa: E402
+from gbp.consumers import run  # noqa: E402
+from gbp.consumers.run import RunRequest  # noqa: E402
 from tests import scenarios  # noqa: E402
 from tests.test_app_artifacts import _save_run  # noqa: E402
 
@@ -53,7 +54,7 @@ def client(runs_root):
 @pytest.fixture
 def fake_runner(monkeypatch, runs_root):
     """Replace the heavy pipeline with a fast fake that saves a real artifact."""
-    monkeypatch.setattr(runner, "build_graph_data", lambda **kwargs: "graph-data")
+    monkeypatch.setattr(run, "build_graph_data", lambda **kwargs: "graph-data")
 
     def fake_run_scenario(graph_data, request, on_progress=None):
         if on_progress is not None:
@@ -63,7 +64,7 @@ def fake_runner(monkeypatch, runs_root):
         _save_run(request.run_name, resolved, journal, runs_root)
         return runs_root / request.run_name
 
-    monkeypatch.setattr(runner, "run_scenario", fake_run_scenario)
+    monkeypatch.setattr(run, "run_scenario", fake_run_scenario)
 
 
 def _wait_until_finished(client, run_name, timeout=30.0):
@@ -162,7 +163,7 @@ def test_failed_run_reports_the_error(client, fake_runner, monkeypatch):
     def boom(*args, **kwargs):
         raise ValueError("boom")
 
-    monkeypatch.setattr(runner, "run_scenario", boom)
+    monkeypatch.setattr(run, "run_scenario", boom)
     response = client.post("/runs", json={"run_name": "bad", "demand_scale_factor": 1.0})
     state = _wait_until_finished(client, response.json()["run_name"])
     assert state["status"] == "failed"
@@ -235,7 +236,7 @@ def test_api_backend_forwards_progress_and_returns_the_final_name(monkeypatch):
 
     lines: list[str] = []
     name = backend.ApiBackend().run_and_wait(
-        runner.RunRequest(run_name="x"), None, on_progress=lines.append
+        RunRequest(run_name="x"), None, on_progress=lines.append
     )
     assert name == "x_version_2"
     assert lines == ["Queued on the server as x_version_2.", "step 1", "step 2"]
@@ -255,7 +256,7 @@ def test_api_backend_raises_run_failed_with_the_server_error(monkeypatch):
     )
     with pytest.raises(backend.RunFailed) as caught:
         backend.ApiBackend().run_and_wait(
-            runner.RunRequest(run_name="bad"), None, on_progress=lambda line: None
+            RunRequest(run_name="bad"), None, on_progress=lambda line: None
         )
     assert caught.value.run_name == "bad"
     assert "boom" in str(caught.value)

@@ -2,9 +2,10 @@
 
 import backend
 import pandas as pd
-import runner
 import streamlit as st
 import ui_shared
+
+from gbp.consumers import run
 
 st.title("Run scenario")
 st.caption(
@@ -38,7 +39,7 @@ bk = backend.current()
 
 demand_source = st.radio(
     "Demand source",
-    options=list(runner.DEMAND_SOURCES),
+    options=list(run.DEMAND_SOURCES),
     horizontal=True,
     help=(
         "history replays the historical trips; forecast runs on a saved forecast "
@@ -90,7 +91,7 @@ sizing_scale = middle.number_input(
     ),
 )
 periods = right.number_input(
-    "Number of periods", min_value=1, max_value=2000, value=runner.DEFAULT_NUMBER_OF_PERIODS
+    "Number of periods", min_value=1, max_value=2000, value=run.DEFAULT_NUMBER_OF_PERIODS
 )
 rebalancing = st.checkbox(
     "Overnight rebalancing",
@@ -101,7 +102,7 @@ rebalancing = st.checkbox(
     ),
 )
 truck_homes: list[str] = []
-truck_capacity = runner.DEFAULT_TRUCK_CAPACITY_BIKES
+truck_capacity = run.DEFAULT_TRUCK_CAPACITY_BIKES
 if rebalancing:
     with st.expander("Truck fleet", expanded=True):
         st.caption(
@@ -109,10 +110,10 @@ if rebalancing:
             "ends its night route there. Add or delete rows to change the fleet size."
         )
         fleet = st.data_editor(
-            pd.DataFrame({"home_depot": runner.DEFAULT_TRUCK_HOMES}),
+            pd.DataFrame({"home_depot": run.DEFAULT_TRUCK_HOMES}),
             column_config={
                 "home_depot": st.column_config.SelectboxColumn(
-                    "Home depot", options=runner.DEPOT_IDS, required=True
+                    "Home depot", options=run.DEPOT_IDS, required=True
                 )
             },
             num_rows="dynamic",
@@ -150,7 +151,7 @@ if st.button("Run", type="primary"):
     if rebalancing and not truck_homes:
         st.error("Rebalancing is on but the truck fleet is empty. Add at least one truck.")
         st.stop()
-    request = runner.RunRequest(
+    request = run.RunRequest(
         run_name=requested_name,
         demand_scale_factor=float(demand_scale),
         sizing_scale_factor=float(sizing_scale),

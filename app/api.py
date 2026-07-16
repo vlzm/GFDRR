@@ -8,11 +8,11 @@ import threading
 from typing import Literal
 
 import pydantic
-import runner
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Response
-from runner import RunRequest
 
 from gbp import artifacts
+from gbp.consumers import run
+from gbp.consumers.run import RunRequest
 from gbp.loaders.dataloader_graph import ResolvedModelData
 
 PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
@@ -45,8 +45,8 @@ def _server_graph_data() -> ResolvedModelData:
     """Return the server's one ``ResolvedModelData``, built on first use and kept."""
     global _graph_data
     if _graph_data is None:
-        _graph_data = runner.build_graph_data(
-            trips_path=os.environ.get("TRIPS_PATH", runner.DEFAULT_TRIPS_PATH),
+        _graph_data = run.build_graph_data(
+            trips_path=os.environ.get("TRIPS_PATH", run.DEFAULT_TRIPS_PATH),
             routing_mode=os.environ.get("ROUTING_MODE", "haversine"),
         )
     return _graph_data
@@ -65,7 +65,7 @@ def _worker_loop() -> None:
             # The queued request still carries the requested name; the run must
             # use the free (possibly versioned) name resolved when it was
             # queued (``start_run``), so a saved artifact is never overwritten.
-            runner.run_scenario(
+            run.run_scenario(
                 _server_graph_data(),
                 request.model_copy(update={"run_name": state.run_name}),
                 on_progress=state.progress.append,
