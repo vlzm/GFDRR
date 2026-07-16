@@ -1,5 +1,5 @@
 ---
-name: understanding-notebook
+name: understand-code
 description: >
   Generate a "Understanding Notebook" — a Jupyter notebook that helps the developer
   build a mental model of recently implemented code. Use this skill whenever the user
@@ -103,28 +103,28 @@ Do NOT generate Layer 2 for:
 
 ## Project-Specific Context
 
-This skill is used in the GBP (Graph-Based Platform) project. Key conventions:
+This skill is used in this project (a framework for problems on flow graphs). Key conventions:
 
 - **File locations:**
   - Understanding notebooks go in `notebooks/understand/`
-  - Verification notebooks (different purpose!) go in `notebooks/verify/`
-  - Design docs are in `docs/design/`
-  - Storytelling docs are in `docs/story_telling/`
+  - Plans are in `docs/plans/`
+  - Longer written explanations are in `docs/reports/`
 
 - **Existing patterns to follow:**
-  - `notebooks/05_pipeline_walkthrough.ipynb` — good Layer 1 example (walkthrough of build pipeline)
-  - `notebooks/verify/02_environment_skeleton.ipynb` — verification notebook (different purpose but similar cell style)
+  - `notebooks/test_pipeline.ipynb` — the canonical base run, a good Layer 1 example
+    (walks `RawModelData → ResolvedModelData → Environment → SimulationLog`)
 
 - **Data flow to respect:**
   ```
-  Raw Data → RawModelData → build_model() → ResolvedModelData → Consumer
+  RawModelData → ResolvedModelData(raw_data, period_len=...) → Environment → SimulationLog
   ```
-  Most understanding notebooks will start from `ResolvedModelData` (using test fixtures
-  or `build_model(minimal_raw_model(...))`) and trace a consumer's logic.
+  Most understanding notebooks will start from `ResolvedModelData` (built by a helper
+  in `tests/scenarios.py`, e.g. `canonical()` or `build_resolved(...)`) and trace a
+  consumer's logic.
 
-- **Test fixtures:** reuse `tests/unit/build/fixtures.py::minimal_raw_model()` as the
-  data source. Extend with `dataclasses.replace()` when the module needs additional
-  tables populated.
+- **Test fixtures:** reuse the builders in `tests/scenarios.py` (`canonical()`,
+  `stockout()`, `build_resolved(...)`) as the data source. They return `ScenarioInputs`;
+  adjust the inputs when the module needs additional tables populated.
 
 - **Language:** All notebook content (markdown cells, comments, print messages) in English.
   Communication with the developer about the notebook — in Russian.
@@ -136,7 +136,7 @@ When the user asks for an understanding notebook:
 1. **Identify the target module.** Ask if not obvious. Check what was just implemented
    or what the user points to.
 
-2. **Read the design doc** for that module (from `docs/design/`). This gives you the
+2. **Read the plan** for that module (from `docs/plans/`). This gives you the
    logical data flow order — which is the order for Layer 1.
 
 3. **Read the implementation code.** Identify:

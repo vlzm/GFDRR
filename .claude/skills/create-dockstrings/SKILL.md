@@ -1,5 +1,5 @@
 ---
-name: minimal-docstrings
+name: create-dockstrings
 description: >
   Write or fix Python docstrings in this repo's minimal one-line style. Use this skill
   whenever the user asks to "write docstrings", "add docstrings", "convert docstrings",

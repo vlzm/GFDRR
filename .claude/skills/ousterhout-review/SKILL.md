@@ -31,11 +31,14 @@ and concrete refactoring suggestions.
 
 Apply these in order. Each principle has red flags to look for and questions to ask.
 
-### 1. Module depth ratio
+### 1. Module depth
 
-**Principle:** A module's value = (hidden complexity) / (interface complexity).
-Deep modules have simple interfaces and complex implementations.
-Shallow modules have interfaces almost as complex as their implementations.
+**Principle:** Depth is leverage at the interface — a lot of behaviour behind a
+small interface. Deep modules let a caller do a lot while learning little.
+Shallow modules have an interface almost as complex as the implementation.
+Measure depth by leverage, not by a line-count ratio: padding the implementation
+never makes a module deeper, and a large body behind a thin interface is not
+deep on its own.
 
 **Red flags:**
 - Class with many public methods but each is 1-5 lines
@@ -43,10 +46,11 @@ Shallow modules have interfaces almost as complex as their implementations.
 - Module where reading the interface docs takes almost as long as reading the source
 - File with more public functions/classes than private ones
 
-**How to measure:**
-- Count public methods/functions (interface surface)
-- Count total lines of implementation behind that interface
-- Ratio < 5:1 (less than 5 lines of implementation per public method) → shallow
+**How to judge (deletion test):**
+- Imagine deleting the module. If its complexity vanishes, it was a pass-through.
+- If the same complexity reappears across its callers, the module earned its keep.
+- Ask what a caller must learn to use it against how much behaviour they get back —
+  high behaviour per unit of interface is depth.
 - Look at `__init__.py` exports — how much is exposed vs. how much is hidden?
 
 ### 2. Information hiding & information leakage
@@ -148,11 +152,16 @@ Design as if you have several similar-but-different users.
 Interface comments describe the abstraction (what, not how).
 Implementation comments explain non-obvious choices (why, not what).
 
+Repo standard: docstrings are one line (see the `create-dockstrings` skill). A
+single line that names the abstraction already satisfies the interface-comment
+principle here — do not flag a public object for lacking Parameters/Returns
+sections or a multi-line docstring. Type hints carry the types.
+
 **Red flags:**
-- No comments on public interfaces
+- No docstring at all on a public interface (the one-line summary is missing)
 - Comments that repeat the code: `# increment i` / `i += 1`
 - Missing "why" comments on non-obvious design decisions
-- Docstrings that describe parameters without describing the abstraction
+- A one-line docstring that restates the name instead of the abstraction
 
 ### 10. Complexity signals
 

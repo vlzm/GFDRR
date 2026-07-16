@@ -6,6 +6,8 @@ How to deepen a cluster of shallow modules safely, given its dependencies. Assum
 
 When assessing a candidate for deepening, classify its dependencies. The category determines how the deepened module is tested across its seam.
 
+This project is a single process running local pandas — the canonical scenario is two notebooks, with no network calls and no third-party services. So only categories 1 and 2 arise in practice. Categories 3 and 4 are kept for reference, but do not introduce a port, an adapter, or dependency injection for them here: CLAUDE.md rules out that kind of indirection, and there is no boundary to justify it.
+
 ### 1. In-process
 
 Pure computation, in-memory state, no I/O. Always deepenable — merge the modules and test through the new interface directly. No adapter needed.
