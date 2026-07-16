@@ -8,7 +8,12 @@ from typing import Literal, Protocol
 
 import pandas as pd
 
-from gbp.ml.metrics import busy_facility_ids, forecast_metrics
+from gbp.ml.metrics import (
+    busy_facility_ids,
+    forecast_metrics,
+    lost_demand_busy_share,
+    panel_departed_mae,
+)
 
 
 class RunMetaLike(Protocol):
@@ -87,16 +92,6 @@ def run_row(run_name: str, load_meta: LoadMetaFn) -> dict[str, object]:
     }
 
 
-def panel_departed_mae(panel_df: pd.DataFrame, reference_panel_df: pd.DataFrame) -> float:
-    """Mean |departed difference| per station-hour between two run panels."""
-    keys = ["facility_id", "period_id"]
-    joined = reference_panel_df[keys + ["departed"]].merge(
-        panel_df[keys + ["departed"]], on=keys, how="outer", suffixes=("_reference", "")
-    )
-    joined = joined.fillna({"departed_reference": 0, "departed": 0})
-    return float((joined["departed"] - joined["departed_reference"]).abs().mean())
-
-
 def build_comparison(
     names: EvalNames,
     actual_df: pd.DataFrame,
@@ -147,8 +142,6 @@ def build_comparison(
             sizing_demand_df=actual_df,
         )
         panel = load_table(run_name, "panel")
-        lost = panel.groupby("facility_id", observed=True)["lost_demand"].sum()
-        total_lost = float(lost.sum())
         rows.append(
             {
                 "month": names.month,
@@ -158,9 +151,7 @@ def build_comparison(
                 **run_row(run_name, load_meta),
                 **{f"level1_{key}": value for key, value in level_1.items()},
                 "panel_departed_mae": panel_departed_mae(panel, reference_panel),
-                "lost_demand_busy_share": (
-                    float(lost[lost.index.isin(busy)].sum() / total_lost) if total_lost else 0.0
-                ),
+                "lost_demand_busy_share": lost_demand_busy_share(panel, busy),
             }
         )
 
