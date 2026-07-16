@@ -6,14 +6,15 @@ import dataclasses
 from collections.abc import Callable
 from typing import NamedTuple
 
-import artifacts
 import backend
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import pydeck as pdk
 import streamlit as st
-from artifacts import (  # noqa: F401  (re-exported to pages)
+
+from gbp import artifacts
+from gbp.artifacts import (  # noqa: F401  (re-exported to pages)
     METRICS,
     PANEL_FLOW_VALUES,
     PANEL_KEYS,

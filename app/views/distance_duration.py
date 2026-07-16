@@ -1,8 +1,9 @@
 """Distance and duration charts: whole-run, per period, per commodity, per facility."""
 
-import artifacts
 import streamlit as st
 import ui_shared
+
+from gbp import artifacts
 
 st.title("Distance & duration")
 

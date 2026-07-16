@@ -21,9 +21,9 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "app"))
 
 import api  # noqa: E402  (needs the app folder on sys.path)
-import artifacts  # noqa: E402
 import runner  # noqa: E402
 
+from gbp import artifacts  # noqa: E402
 from tests import scenarios  # noqa: E402
 from tests.test_app_artifacts import _save_run  # noqa: E402
 

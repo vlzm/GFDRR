@@ -7,11 +7,11 @@ import pathlib
 from collections.abc import Callable
 from typing import Literal
 
-import artifacts
 import pandas as pd
 from eval_comparison import EvalNames, ModelForecast, build_comparison
 from runner import RunRequest, build_graph_data, run_and_save
 
+from gbp import artifacts
 from gbp.loaders.dataloader_graph import (
     ResolvedModelData,
     apply_forecast_demand,

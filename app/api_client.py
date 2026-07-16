@@ -5,9 +5,10 @@ from __future__ import annotations
 import io
 import os
 
-import artifacts
 import pandas as pd
 import requests
+
+from gbp import artifacts
 
 #: Seconds before an API call fails; a table download can carry millions of rows.
 _TIMEOUT_SECONDS = 120

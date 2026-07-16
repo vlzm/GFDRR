@@ -7,12 +7,13 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import api_client
-import artifacts
 import pandas as pd
 import streamlit as st
 
+from gbp import artifacts
+
 if TYPE_CHECKING:
-    from runner import RunRequest
+    from gbp.consumers.run import RunRequest
 
 #: Seconds between two polls of a run executing on the server.
 _POLL_SECONDS = 2

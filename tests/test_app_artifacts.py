@@ -17,9 +17,9 @@ import pytest
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "app"))
 
-import artifacts  # noqa: E402  (needs the app folder on sys.path)
-import runner  # noqa: E402
+import runner  # noqa: E402  (needs the app folder on sys.path)
 
+from gbp import artifacts  # noqa: E402
 from gbp.model import flows_to_panel  # noqa: E402
 from tests import scenarios  # noqa: E402
 

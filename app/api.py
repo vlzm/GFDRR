@@ -7,12 +7,12 @@ import queue
 import threading
 from typing import Literal
 
-import artifacts
 import pydantic
 import runner
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Response
 from runner import RunRequest
 
+from gbp import artifacts
 from gbp.loaders.dataloader_graph import ResolvedModelData
 
 PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"

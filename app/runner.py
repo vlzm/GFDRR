@@ -6,9 +6,9 @@ import argparse
 import pathlib
 from collections.abc import Callable
 
-import artifacts
 import pandas as pd
 
+from gbp import artifacts
 from gbp.consumers.run import (
     DEFAULT_N_DEPOTS,
     DEFAULT_NUMBER_OF_PERIODS,

@@ -122,9 +122,7 @@ def test_scaled_demand_inputs_scales_both_departures_and_arrivals():
             "quantity": [1],
         }
     )
-    resolved = types.SimpleNamespace(
-        historical_demand_df=demand, historical_arrivals_df=arrivals
-    )
+    resolved = types.SimpleNamespace(historical_demand_df=demand, historical_arrivals_df=arrivals)
     faced = scaled_demand_inputs(resolved, 2.0)
     assert faced.historical_demand_df["quantity"].tolist() == [8]
     assert faced.historical_arrivals_df["quantity"].tolist() == [2]
