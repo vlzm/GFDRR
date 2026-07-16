@@ -27,9 +27,9 @@ Explanations: how each part works and why it is built this way — no
 step-by-step instructions. Read the first page first; every other page
 assumes it.
 
-- [overview.md](key-components/overview.md) — the five concepts (period,
-  demand, station inventory, flow journal, run artifact), then the system
-  as diagrams at three zoom levels, ending with the full module map.
+- [overview.md](key-components/overview.md) — the single idea the framework
+  is built on (a run is an append-only journal), the five concepts as one
+  connected sentence, the shape of a run, and what the design bets on.
 - [data-model.md](key-components/data-model.md) — the loaders: from the raw
   trip CSV to the input tables the simulator reads.
 - [flow-journal.md](key-components/flow-journal.md) — the journal library
