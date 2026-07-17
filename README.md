@@ -22,7 +22,11 @@ causes, not only by forecast error. The simulator replays a month of the
 system on actual demand and on each model's forecast, with the same physical
 state, and compares the outcomes — lost trips, redirects, rebalancing cost.
 A model can win on MAE and still be the more expensive one to operate; this
-is the comparison the whole project exists to make.
+is the comparison the whole project exists to make. The research notebook
+[notebooks/research_demand_forecast.ipynb](notebooks/research_demand_forecast.ipynb)
+tells this story end to end: the data, the censored-demand problem, four
+model families, the backtest, and the two-level comparison that picked the
+champion.
 
 ## Architecture
 
@@ -107,7 +111,9 @@ Three roles, three entry points:
   monitoring).
 - **Data scientist** — the CLI (`python -m gbp.ml.pipeline / forecast /
   evaluation / monitoring`), the MLflow UI for experiments and the model
-  registry, and the two canonical notebooks.
+  registry, the two canonical notebooks, and the research notebook
+  ([notebooks/research_demand_forecast.ipynb](notebooks/research_demand_forecast.ipynb))
+  that documents how the champion model was chosen.
 - **Integrator** — the run-artifact API: the same saved tables over HTTP
   ([docs/reference/api.md](docs/reference/api.md)).
 
