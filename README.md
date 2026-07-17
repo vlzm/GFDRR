@@ -1,8 +1,9 @@
 # gbp — Generalized Framework for Graph-Based Problems
 
-A framework for problems on flow graphs — networks where commodities move
-between facilities; the first and so far only scenario is the Citi Bike
-bike-sharing system in New York City.
+A platform for problems on flow graphs — networks where commodities move
+between facilities. Today it implements exactly one domain, end to end: the
+Citi Bike bike-sharing system in New York City. The platform is built to grow
+by adding domains later; everything below is about this first domain.
 
 ## What this is
 
@@ -15,6 +16,46 @@ Many systems are flow graphs once you name the parts:
 This project models such a system with four entities and one event log, and
 builds tools on top of them: a simulator, a rebalancer, a demand forecast,
 and a web interface for reading the results.
+
+The central idea: a demand forecast is judged by the **operational cost** it
+causes, not only by forecast error. The simulator replays a month of the
+system on actual demand and on each model's forecast, with the same physical
+state, and compares the outcomes — lost trips, redirects, rebalancing cost.
+A model can win on MAE and still be the more expensive one to operate; this
+is the comparison the whole project exists to make.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    csv["raw trip CSVs<br/>data/raw/"]
+    loaders["loaders<br/>gbp/loaders/"]
+    sim["simulator<br/>gbp/consumers/simulator/"]
+    builder["artifact builder<br/>gbp/artifacts.py"]
+    runs[("run artifacts<br/>data/runs/, one folder per run")]
+    ui["web interface<br/>app/main.py + app/views/"]
+    api["run-artifact API<br/>app/api.py"]
+    ml["demand forecasting<br/>gbp/ml/"]
+    forecasts[("forecast artifacts<br/>data/ml/forecasts/")]
+
+    csv -->|"historical trips"| loaders
+    csv -->|"past months, as the training table"| ml
+    ml -->|"forecast demand table"| forecasts
+    forecasts -.->|"in a forecast run, takes the place<br/>of the historical demand"| loaders
+    loaders -->|"scenario inputs"| sim
+    sim -->|"flow journal"| builder
+    builder -->|"saved tables + meta.json"| runs
+    runs -->|"saved tables"| ui
+    runs -->|"saved tables"| api
+    api -.->|"the same tables over HTTP"| ui
+```
+
+The whole system is one path: raw trips become scenario inputs, the simulator
+replays them into a flow journal, the journal is frozen into a run artifact,
+and the web interface and the API only read those artifacts. Demand
+forecasting sits beside the path and enters it at one point: a forecast
+demand table takes the place of the historical one, and the same simulator
+runs on it.
 
 ## The data model
 
@@ -57,14 +98,27 @@ matrix, arrivals — are computed from the journal, not stored separately (§9).
 - Forecast demand: train models on past months, promote a champion, run the
   simulator on its forecast next to the base replay, and compare the two runs.
 
+## Who uses it
+
+Three roles, three entry points:
+
+- **Analyst** — the web interface: ten Streamlit pages over saved runs
+  (overview and comparison, station map, trips, truck routes, costs, model
+  monitoring).
+- **Data scientist** — the CLI (`python -m gbp.ml.pipeline / forecast /
+  evaluation / monitoring`), the MLflow UI for experiments and the model
+  registry, and the two canonical notebooks.
+- **Integrator** — the run-artifact API: the same saved tables over HTTP
+  ([docs/reference/api.md](docs/reference/api.md)).
+
 ## Status
 
-The first scenario is the Citi Bike system in New York City. Implemented
-today: the replay simulator, truck rebalancing, the demand-forecast pipeline
-(training, backtesting, champion promotion, monitoring), the web interface,
-and the run-artifact API. The canonical scenario is two runs: the base
-replay of history in `notebooks/test_pipeline.ipynb` and the run on forecast
-demand in `notebooks/forecast_pipeline.ipynb`. The scenario page:
+Implemented today: the replay simulator, truck rebalancing, the
+demand-forecast pipeline (training, backtesting, champion promotion,
+monitoring), the web interface, and the run-artifact API. The canonical
+scenario is two runs: the base replay of history in
+`notebooks/test_pipeline.ipynb` and the run on forecast demand in
+`notebooks/forecast_pipeline.ipynb`. The scenario page:
 [docs/scenarios/citibike.md](docs/scenarios/citibike.md).
 
 ## Install
@@ -73,8 +127,9 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv venv
-uv pip install -e ".[ui]"          # simulator + web interface
-uv pip install -e ".[dev,ui,api]"  # plus lint, type check, tests, and the run-artifact API
+uv pip install -e ".[ui]"             # simulator + web interface
+uv pip install -e ".[dev,ui,api]"     # plus lint, type check, tests, and the run-artifact API
+uv pip install -e ".[dev,ui,api,ml]"  # plus the demand-forecast toolkit (MLflow, DVC, torch)
 ```
 
 Activate the environment before running anything below
