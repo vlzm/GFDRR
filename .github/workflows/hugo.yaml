@@ -2,14 +2,15 @@
 # Recipe and every "# CHANGED" note come from the researched deploy guide:
 # docs/plans/wayfinder-hugo-site/research/github-pages-deploy.md
 #
-# Runs only for commits on main that touch the site (the paths filter),
-# plus a manual trigger. The Pages source must be set to "GitHub Actions"
-# in Settings -> Pages for this workflow to publish.
+# Runs for commits on the working branch (city_bike_mvp_accounting) that
+# touch the site (the paths filter). The Pages source must be set to
+# "GitHub Actions" in Settings -> Pages, and the github-pages environment
+# (Settings -> Environments) must allow this branch to deploy.
 name: Build and deploy
 on:
   push:
     branches:
-      - main
+      - city_bike_mvp_accounting
     # CHANGED (repo-specific): don't rebuild Pages on unrelated commits
     # (gbp/, notebooks). The full python CI in ci.yml still runs on every push.
     paths:
