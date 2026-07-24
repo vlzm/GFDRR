@@ -13,7 +13,7 @@ ruff format gbp/ tests/ app/      # format
 mypy gbp/                         # typecheck
 streamlit run app/main.py         # UI
 python app/runner.py --help       # run a scenario from the terminal
-uvicorn api:app --app-dir app     # serve the run-artifact API (docs/reference/api.md)
+uvicorn api:app --app-dir app     # serve the run-artifact API (docs/site/content/docs/reference/api.md)
 python -m gbp.ml.training --months 202502 202503  # download raw months, build the training table
 python -m gbp.ml.backtest         # rolling-origin backtest of the model families, logged to MLflow
 python -m gbp.ml.pipeline         # retraining pipeline: download → build-table → train → backtest → promote

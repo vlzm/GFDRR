@@ -119,7 +119,7 @@ def test_overflow_produces_the_four_event_redirect(run_scenario):
 
 
 def test_delayed_redirect_docks_in_a_later_period(run_scenario):
-    # Scenario 5 of docs/key-components/worked-examples.md: the bounce happens in the
+    # Scenario 5 of docs/site/content/docs/architecture/worked-examples.md: the bounce happens in the
     # flow's opening period, the new leg takes two periods (the OD travel time of
     # the s3 -> s2 pair), and the bike docks at s2 with the normal dock batch of
     # the arrival period.

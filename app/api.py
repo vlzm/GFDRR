@@ -104,7 +104,7 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="missing or wrong X-API-Key header")
 
 
-app = FastAPI(title="Citi Bike run artifacts", description="See docs/reference/api.md.")
+app = FastAPI(title="Citi Bike run artifacts", description="See docs/site/content/docs/reference/api.md.")
 protected = APIRouter(dependencies=[Depends(require_api_key)])
 
 

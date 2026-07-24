@@ -1,4 +1,4 @@
-"""The quickstart script of docs/getting-started/quickstart.md, executed verbatim.
+"""The quickstart script of the quickstart page, executed verbatim.
 
 The document holds one runnable script (under ``<!-- code:quickstart-script -->``)
 and three expected outputs (under ``<!-- output:... -->`` anchors). The page
@@ -15,7 +15,15 @@ import io
 import re
 from pathlib import Path
 
-DOC_PATH = Path(__file__).resolve().parent.parent / "docs" / "getting-started" / "quickstart.md"
+DOC_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "docs"
+    / "site"
+    / "content"
+    / "docs"
+    / "getting-started"
+    / "quickstart.md"
+)
 
 #: Colour codes in the captured console output.
 ANSI_CODE = re.compile(r"\x1b\[[0-9;]*m")
