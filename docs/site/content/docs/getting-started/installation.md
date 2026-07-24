@@ -1,3 +1,8 @@
+---
+title: "Installation"
+weight: 1
+---
+
 # Installation
 
 This page takes you from a clean clone to a working install. Step 1 is
@@ -60,7 +65,7 @@ CSVs. The CSVs are named
 
 `docker compose up --build` starts the web interface and the OSRM routing
 server together. The command and the data-folder layout are in the root
-[README.md](../../README.md), section "Run with Docker".
+[README.md](https://github.com/vlzm/GFDRR), section "Run with Docker".
 
 ## OSRM (optional)
 

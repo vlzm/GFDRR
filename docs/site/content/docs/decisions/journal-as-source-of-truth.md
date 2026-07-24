@@ -1,3 +1,8 @@
+---
+title: "The flow journal is the source of truth"
+weight: 1
+---
+
 # The flow journal is the source of truth
 
 ## Decision

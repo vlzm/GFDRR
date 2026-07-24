@@ -1,11 +1,16 @@
+---
+title: "Citi Bike in New York City"
+weight: 1
+---
+
 # Scenario: Citi Bike in New York City
 
 This page describes the first (and so far only) scenario of the framework
 end to end: the problem, how the domain maps onto the four entities, where
 the data comes from, which runs exist, and how to read the results. The
 mechanisms themselves are described once, in
-[docs/key-components/](../key-components/) — this page links to them instead
-of repeating them.
+the [Architecture section](../architecture/) — this page links to them
+instead of repeating them.
 
 ## The problem
 
@@ -15,7 +20,7 @@ space and time. On a weekday morning, stations in residential areas drain
 and stations near offices fill up; in the evening the flow reverses.
 
 Two physical limits turn this unevenness into failures, and both are events
-in the flow journal ([Notations.md §1](../../Notations.md#1-the-four-flow-outcomes-and-the-two-reasons)):
+in the flow journal ([Notations.md §1](../reference/notations.md#1-the-four-flow-outcomes-and-the-two-reasons)):
 
 - A station with no bikes loses its demand: the trip never departs and is
   written as `lost` with `reason = stockout`.
@@ -29,12 +34,12 @@ scale the demand up, add night truck rebalancing, or replace the demand
 table with a model's forecast. The current phase of the project is demand
 forecasting, and a model is judged by both its forecast error and what
 happens when the simulator runs on its forecast (the two-level evaluation,
-[Notations.md §17](../../Notations.md#17-demand-forecasting-the-model-around-the-simulator)).
+[Notations.md §17](../reference/notations.md#17-demand-forecasting-the-model-around-the-simulator)).
 
 ## Entity mapping
 
 The four entities of the data model (the table in the
-[root README](../../README.md)) map onto Citi Bike like this:
+[root README](https://github.com/vlzm/GFDRR)) map onto Citi Bike like this:
 
 | Entity | In Citi Bike | In the code |
 |---|---|---|
@@ -49,7 +54,7 @@ Two boundaries of the mapping:
   and trucks are synthetic: the loader places `n_depots` depots at random
   coordinates inside the city box (`get_depots` in
   `gbp/loaders/dataloader_raw.py`), and the truck fleet is a run parameter
-  ([Notations.md §14](../../Notations.md#14-rebalancing-moving-bikes-by-truck)).
+  ([Notations.md §14](../reference/notations.md#14-rebalancing-moving-bikes-by-truck)).
 - Citi Bike does not publish station inventories or dock capacities. The
   initial inventory and the capacities are measured by a sizing run instead
   ([decision record](../decisions/sizing-run.md)).
@@ -76,7 +81,7 @@ Two loaders turn one CSV into the input tables of the simulator:
   facility table, dock capacities, geography, and `routes`.
 
 How each table is built, column by column:
-[data-model.md](../key-components/data-model.md).
+[data-model.md](../architecture/data-model.md).
 
 For scale: the first file of January 2026
 (`202601-citibike-tripdata_1.csv`) holds 996,388 trips after cleaning,
@@ -96,7 +101,7 @@ One call runs the whole scenario: `run_sized_scenario`
 3. Checks the run invariants I1–I5 on the finished journal.
 
 Two scale factors set the run kind
-([Notations.md §11](../../Notations.md#11-run-kinds)):
+([Notations.md §11](../reference/notations.md#11-run-kinds)):
 `sizing_scale_factor` is the demand the state is built to survive with no
 loss; `demand_scale_factor` is the demand the run actually faces. Equal
 values (the default) give the base replay — departures equal the historical
@@ -105,13 +110,13 @@ stockout and dock-full events appear.
 
 Rebalancing is opt-in: a run that appends `rebalancing_phases(params)` to
 `canonical_phases()` gets two extra phases that plan and execute night
-truck routes ([rebalancing.md](../key-components/rebalancing.md)).
+truck routes ([rebalancing.md](../architecture/rebalancing.md)).
 
 The period loop, the phases, and the invariants:
-[simulation-engine.md](../key-components/simulation-engine.md). The
+[simulation-engine.md](../architecture/simulation-engine.md). The
 smallest real journal of each mechanic — stockout, redirect, truck move —
 with row-by-row tables:
-[worked-examples.md](../key-components/worked-examples.md).
+[worked-examples.md](../architecture/worked-examples.md).
 
 ## Minimal example
 
@@ -193,7 +198,7 @@ the bikes still riding when period 50 ends. The first flow shown is one of
 the long rentals in the data: it departs in period 0 and docks 17 hours
 later; most trips arrive within the same or the next period. The journal
 schema and its read-models:
-[flow-journal.md](../key-components/flow-journal.md).
+[flow-journal.md](../architecture/flow-journal.md).
 
 ## The runs
 
@@ -203,21 +208,21 @@ interface can show.
 
 | Run | Demand | Phases | Where |
 |---|---|---|---|
-| base replay | history, scale 1.0 | the canonical three | [test_pipeline.ipynb](../../notebooks/test_pipeline.ipynb); `python app/runner.py --run-name base` |
+| base replay | history, scale 1.0 | the canonical three | [test_pipeline.ipynb](test-pipeline/); `python app/runner.py --run-name base` |
 | run with rebalancing | history | canonical + the two rebalancing phases | `python app/runner.py --run-name with_trucks --rebalancing` |
-| forecast run | a saved forecast | the canonical three | [forecast_pipeline.ipynb](../../notebooks/forecast_pipeline.ipynb); `python app/runner.py --run-name forecast_demo --demand-source forecast --forecast-name seasonal_naive_w1` |
+| forecast run | a saved forecast | the canonical three | [forecast_pipeline.ipynb](forecast-pipeline/); `python app/runner.py --run-name forecast_demo --demand-source forecast --forecast-name seasonal_naive_w1` |
 
 The notebooks run the same `run_sized_scenario` call as the minimal example
 and then verify the run instead of just printing it.
-[test_pipeline.ipynb](../../notebooks/test_pipeline.ipynb) compares the
+[test_pipeline.ipynb](test-pipeline/) compares the
 simulated marginals against the historical ones, reads the inventory at
 single moments, explains one redirect station by station, and computes
 riding time and cost.
-[forecast_pipeline.ipynb](../../notebooks/forecast_pipeline.ipynb) first
+[forecast_pipeline.ipynb](forecast-pipeline/) first
 builds and saves a seasonal-naive forecast, runs the simulator on it, and
 checks that the simulated departures equal the forecast demand. The
 notebooks save no run artifacts; the runner does
-([visualization.md](../key-components/visualization.md)).
+([visualization.md](../architecture/visualization.md)).
 
 The recipes: another demand scale or another month —
 [change-the-demand.md](../how-to/change-the-demand.md); a run on a saved
@@ -246,7 +251,7 @@ python -m gbp.ml.monitoring --month 202602              # score saved forecasts 
 ```
 
 How each step works — the training table, the features, the censoring, the
-promote rule: [ml-toolkit.md](../key-components/ml-toolkit.md).
+promote rule: [ml-toolkit.md](../architecture/ml-toolkit.md).
 
 A model is judged on this scenario by the two-level evaluation. Level 1
 scores the forecast against the held-out month's actual counts. Level 2
@@ -260,12 +265,12 @@ python -m gbp.ml.evaluation --month 202601
 
 The saved result for January 2026, ending with which model the platform
 should use:
-[model_evaluation_202601.md](../reports/model_evaluation_202601.md).
+[model_evaluation_202601.md](https://github.com/vlzm/GFDRR/blob/city_bike_mvp_accounting/docs/reports/model_evaluation_202601.md).
 
 ## Results and visualization
 
 Every saved run is a folder under `data/runs/` — a run artifact
-([Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads)).
+([Notations.md §12](../reference/notations.md#12-run-artifacts-the-files-the-ui-reads)).
 The web interface lists them:
 
 ```bash
@@ -276,7 +281,7 @@ Pick one run as Scenario A and another as Scenario B in the sidebar — every
 page draws the two side by side. The Overview & compare page starts with
 the whole-run totals:
 
-![The Overview & compare page of the web interface](../assets/ui_overview.png)
+![The Overview & compare page of the web interface](images/ui_overview.png)
 
 The evaluation runs (`eval_202601_...`) are normal run artifacts, so a
 forecast run and its reference run compare in the same two pickers; the
@@ -285,4 +290,4 @@ numeric comparison of one evaluation lands in
 
 The first walk through the interface, page by page:
 [ui.md](../getting-started/ui.md). How the artifact is built and why the
-app only reads: [visualization.md](../key-components/visualization.md).
+app only reads: [visualization.md](../architecture/visualization.md).

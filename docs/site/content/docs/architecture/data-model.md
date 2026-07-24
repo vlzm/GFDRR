@@ -1,3 +1,8 @@
+---
+title: "The data model"
+weight: 2
+---
+
 # About the data model
 
 This page is an explanation, not a map. It stands around the data model that
@@ -30,7 +35,7 @@ take a table with a `station_id` or `truck_id` column, rename it to
 `facility_id` or `resource_id`, and add a category. Stations and depots merge
 into one kind of thing, a facility; trucks become resources; bike types become
 commodity categories. The full rename mapping is the "raw → canonical boundary"
-in [Notations.md §4](../../Notations.md#4-facility-and-its-roles-in-a-trip).
+in [Notations.md §4](../reference/notations.md#4-facility-and-its-roles-in-a-trip).
 
 Why do it this way? Because the simulator downstream should not know it is about
 bikes; it reasons about flows on a graph. The price of that is a steady hum of

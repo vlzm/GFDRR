@@ -1,3 +1,8 @@
+---
+title: "Set up OSRM"
+weight: 5
+---
+
 # OSRM Setup — New York City (Ubuntu + Docker)
 
 OSRM (Open Source Routing Machine) answers routing questions over the

@@ -1,3 +1,8 @@
+---
+title: "The ML toolkit"
+weight: 6
+---
+
 # The ML toolkit — demand forecasting
 
 This document explains how `gbp/ml/` turns Citi Bike trip history into a
@@ -20,7 +25,7 @@ trip, weather, and station-status files
 ```
 
 The canonical terms are
-[Notations.md §17](../../Notations.md#17-demand-forecasting-the-model-around-the-simulator).
+[Notations.md §17](../reference/notations.md#17-demand-forecasting-the-model-around-the-simulator).
 Each module's exact behavior is in its docstring (start from the package
 docstring, `gbp/ml/__init__.py`) — this page gives the map and the design.
 How to run a forecast is [how-to/run-on-a-forecast.md](../how-to/run-on-a-forecast.md).

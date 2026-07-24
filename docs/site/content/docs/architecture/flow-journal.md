@@ -1,3 +1,8 @@
+---
+title: "The flow journal"
+weight: 3
+---
+
 # The flow journal library
 
 This document explains `gbp/model/` — the model layer that owns the flow
@@ -7,7 +12,7 @@ Everything else the project shows — inventory, demand, maps, costs — is
 computed from it.
 
 The column-by-column schema is
-[Notations.md §0](../../Notations.md#0-the-flow-event-schema-the-symbol-table).
+[Notations.md §0](../reference/notations.md#0-the-flow-event-schema-the-symbol-table).
 Worked examples with concrete journal rows are in
 [worked-examples.md](worked-examples.md). Each function's exact behavior is in its
 docstring in `flows.py` — this page gives the map and the design.
@@ -141,7 +146,7 @@ number from the `(period_id, phase_rank, phase_round)` label, which is safe
 only because history is pure user trips — one label is one batch.
 `finalize_flows` stays out of it: it sorts by the stamped number and refuses
 a journal without one. The full reasoning is
-[Notations.md §0.1](../../Notations.md#01-moment-and-step-the-inventory-time-axis).
+[Notations.md §0.1](../reference/notations.md#01-moment-and-step-the-inventory-time-axis).
 
 ### The Redirect Explainer Shares The Decision's Metric
 

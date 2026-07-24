@@ -1,10 +1,15 @@
+---
+title: "Add a table to the run artifact"
+weight: 4
+---
+
 # How to add a table to the run artifact
 
 Task: make every saved run include a new precomputed table, so the web
 interface and the API read it from disk instead of computing it.
 
 The run artifact (`data/runs/<run_name>/`,
-[Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads))
+[Notations.md §12](../reference/notations.md#12-run-artifacts-the-files-the-ui-reads))
 is the only thing the UI and the API read. Pages never compute what the
 artifact builder can precompute — so a new derived table belongs in
 `gbp/artifacts.py`, built once at save time from the journal.

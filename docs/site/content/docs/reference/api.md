@@ -1,3 +1,8 @@
+---
+title: "The run-artifact API"
+weight: 1
+---
+
 # The run-artifact API
 
 This document describes `app/api.py` — the HTTP service over the run
@@ -21,7 +26,7 @@ directly. On a shared server the saved runs live on the server's disk, so
 every client — the Streamlit app, a script, a second service — needs one way
 to reach them. The API is that way: the network form of the same artifact
 contract the UI reads locally
-([Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads)).
+([Notations.md §12](../reference/notations.md#12-run-artifacts-the-files-the-ui-reads)).
 It serves saved files and starts runs by calling the same
 `runner.run_scenario` the Run scenario page calls. It computes nothing
 `artifacts.build_run_tables` can precompute, and it adds nothing to `gbp/`.

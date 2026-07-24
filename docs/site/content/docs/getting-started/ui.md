@@ -1,3 +1,8 @@
+---
+title: "First look at the web interface"
+weight: 3
+---
+
 # First look at the web interface
 
 This page creates a first saved run and opens it in the web interface. The
@@ -39,7 +44,7 @@ Streamlit prints a local URL — usually `http://localhost:8501` — and opens
 it in the browser. The first page is Overview & compare, with the run
 `demo` selected:
 
-![The Overview & compare page of the web interface](../assets/ui_overview.png)
+![The Overview & compare page of the web interface](images/ui_overview.png)
 
 The sidebar has two pickers, shared by every page: Scenario A is the run
 you look at, Scenario B is an optional second run drawn next to it for
@@ -71,7 +76,7 @@ only page that computes anything heavy is "Run scenario".
 
 ## Where to go next
 
-- [How the interface is built](../key-components/visualization.md) — the
+- [How the interface is built](../architecture/visualization.md) — the
   runner, the run artifact, and the app, and why the app only reads.
 - [change-the-demand.md](../how-to/change-the-demand.md) — create runs that
   differ (another scale, another month) and compare them as A and B.

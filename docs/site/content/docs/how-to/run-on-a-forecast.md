@@ -1,8 +1,13 @@
+---
+title: "Run on a forecast"
+weight: 2
+---
+
 # How to run the simulator on a forecast
 
 Task: run a scenario whose demand table comes from a saved forecast instead
 of history — a forecast run
-([Notations.md §11](../../Notations.md#11-run-kinds)).
+([Notations.md §11](../reference/notations.md#11-run-kinds)).
 
 ## 1. Pick a forecast
 
@@ -64,4 +69,4 @@ month.
 
 The canonical forecast run lives in `notebooks/forecast_pipeline.ipynb`; the
 model side (training, backtest, evaluation) is described in
-[ml-toolkit.md](../key-components/ml-toolkit.md).
+[ml-toolkit.md](../architecture/ml-toolkit.md).

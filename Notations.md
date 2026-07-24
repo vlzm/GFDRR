@@ -92,7 +92,7 @@ historical loader derives it from the `(period_id, phase_rank, phase_round)`
 label (`stamp_history_ordering`) — safe because in history one label is always
 exactly one batch. `finalize_flows` assigns no number for either producer: it
 refuses a journal whose order columns are missing. Why the counter beats the
-label: [flow-journal.md](docs/key-components/flow-journal.md).
+label: [flow-journal.md](https://vlzm.github.io/GFDRR/docs/architecture/flow-journal/).
 
 `step_id` carries only the order, never the inventory: inventory at any moment
 is a pure function of the journal. `get_inventory_df` (§9) is the coarse
@@ -419,7 +419,7 @@ car-profile OSRM table is a recorded TODO in `rebalancing.py`.
 Rebalancing moves bikes between stations by truck at night, planned once per
 window and executed period by period. Module:
 `gbp/consumers/simulator/rebalancing.py`; how the two phases work:
-[rebalancing.md](docs/key-components/rebalancing.md). A run opts in by appending
+[rebalancing.md](https://vlzm.github.io/GFDRR/docs/architecture/rebalancing/). A run opts in by appending
 `rebalancing_phases(params)` to `canonical_phases()`.
 
 | Canonical | Meaning |
@@ -472,7 +472,7 @@ artifact contract (§12) **is** the API contract.
 
 The demand forecasting phase adds a model that predicts future demand; the
 simulator runs on that prediction. Code in `gbp/ml/`, data under `data/ml/`
-(§15); how it works: [ml-toolkit.md](docs/key-components/ml-toolkit.md). The words anchor to the
+(§15); how it works: [ml-toolkit.md](https://vlzm.github.io/GFDRR/docs/architecture/ml-toolkit/). The words anchor to the
 demand schema (`HISTORICAL_DEMAND_SCHEMA`, `gbp/loaders/dataloader_graph.py`).
 
 | Canonical | Meaning | Avoid |

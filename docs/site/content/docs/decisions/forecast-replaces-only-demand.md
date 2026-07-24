@@ -1,8 +1,13 @@
+---
+title: "A forecast run replaces only the demand"
+weight: 3
+---
+
 # A forecast run replaces only the demand table
 
 ## Decision
 
-A forecast run ([Notations.md §11](../../Notations.md#11-run-kinds)) is the
+A forecast run ([Notations.md §11](../reference/notations.md#11-run-kinds)) is the
 same run chain as the base replay with one substitution:
 `apply_forecast_demand` (`gbp/loaders/dataloader_graph.py`) returns a
 shallow copy of the resolved data with the forecast demand table in the

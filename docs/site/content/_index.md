@@ -40,11 +40,11 @@ passing every run invariant.
 
 ## Where to go next
 
-- **[See the scenario]({{< relref "/docs/scenario" >}})** — the Citi Bike
+- **[See the scenario](docs/scenario/)** — the Citi Bike
   problem, the data, and what the system does.
-- **[Understand it]({{< relref "/docs/architecture" >}})** — how a run works:
+- **[Understand it](docs/architecture/)** — how a run works:
   the journal, the period loop, rebalancing, the forecast toolkit.
-- **[See why it is built this way]({{< relref "/docs/decisions" >}})** — the
+- **[See why it is built this way](docs/decisions/)** — the
   design decisions behind the architecture.
-- **[Run it yourself]({{< relref "/docs/getting-started" >}})** — install,
+- **[Run it yourself](docs/getting-started/)** — install,
   first run, and the web interface.

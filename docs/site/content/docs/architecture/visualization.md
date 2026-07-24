@@ -1,3 +1,8 @@
+---
+title: "Visualization"
+weight: 7
+---
+
 # Visualization — from a finished run to the screen
 
 This document explains `app/`, the visualization side of the framework: the
@@ -10,7 +15,7 @@ The app has three parts, in the order a run passes through them:
    pure reader of saved artifacts.
 
 The artifact contract is
-[Notations.md §12](../../Notations.md#12-run-artifacts-the-files-the-ui-reads).
+[Notations.md §12](../reference/notations.md#12-run-artifacts-the-files-the-ui-reads).
 Each function's exact behavior is in its docstring — this page gives the map
 and the design.
 

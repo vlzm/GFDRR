@@ -1,3 +1,8 @@
+---
+title: "About the framework"
+weight: 1
+---
+
 # About the whole framework
 
 This page is the one to read first, and the one to read away from the code. It

@@ -13,9 +13,24 @@ locale = 'en-us'
   BookEditLink = '{{ .Site.Params.BookRepo }}/edit/main/docs/site/{{ .Path }}'
   BookSearch = true
   BookComments = false
+  # Resolve relative Markdown links between content pages (e.g.
+  # ../architecture/data-model.md) and image links to global resources.
+  # "warning" logs any link that does not resolve during the build.
+  BookPortableLinks = 'warning'
 
 # KaTeX is loaded per-page via `math: true` (see
 # layouts/partials/docs/inject/head.html); Mermaid via `mermaid: true`.
+
+# Mount the root Notations.md as the reference glossary page. Defining any
+# content mount replaces the default, so the content dir is re-declared too.
+# See docs/plans/wayfinder-hugo-site/tickets/T4-decide-where-notations-lives.md
+[module]
+  [[module.mounts]]
+    source = "content"
+    target = "content"
+  [[module.mounts]]
+    source = "../../Notations.md"
+    target = "content/docs/reference/notations.md"
 
 [markup]
   [markup.goldmark.renderer]

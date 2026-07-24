@@ -1,3 +1,9 @@
+---
+title: "The simulation engine"
+weight: 4
+mermaid: true
+---
+
 # The simulation engine
 
 This document explains how one simulation run works. The simulator does three
@@ -8,7 +14,7 @@ things:
 2. It writes every movement as rows in `state_flows_df`, the flow journal.
 3. It checks that the finished journal and the live state still agree.
 
-The terms are the same as in [`Notations.md`](../../Notations.md). Worked
+The terms are the same as in [`Notations.md`](../reference/notations.md). Worked
 examples with concrete journal rows are in [worked-examples.md](worked-examples.md). What
 each phase and mechanics function reads, does, and writes is in the
 docstrings of `gbp/consumers/simulator/` — this page only gives the map.

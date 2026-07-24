@@ -1,3 +1,8 @@
+---
+title: "The initial state is measured by a sizing run"
+weight: 2
+---
+
 # The initial state is measured by a sizing run, not loaded
 
 ## Decision

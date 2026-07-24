@@ -2,8 +2,9 @@
 id: T9
 title: Set up the deploy pipeline
 label: wayfinder:task
-status: open
+status: closed
 assignee: opus (work session 2026-07-24)
+closed: 2026-07-24
 blocked-by: [T1, T8]
 ---
 
@@ -41,3 +42,25 @@ Pending — needs the human (outward-facing, cannot be done from here):
 
 Resolve (close) this ticket once that URL loads the skeleton site; record
 the URL in the closing note.
+
+## Resolution (2026-07-24) — live
+
+The site is live at **https://vlzm.github.io/GFDRR/** (HTTP 200, title
+"Home • Flow-graph framework").
+
+What actually shipped, differing from the original plan in one way — the
+publish branch:
+
+- The site publishes from **`city_bike_mvp_accounting`**, not `main`
+  (user's decision: that is their working branch; `main` is ~169 commits
+  behind and not the source of truth). `.github/workflows/hugo.yaml`
+  triggers on push to `city_bike_mvp_accounting`.
+- `.github/workflows/hugo.yaml` and the `[caches.images]` block in
+  `docs/site/hugo.toml` follow research/github-pages-deploy.md exactly.
+- Two settings changes the human made on GitHub: Pages Source =
+  "GitHub Actions"; and the **github-pages environment** deployment-branch
+  rule had to be widened to allow `city_bike_mvp_accounting` (its default
+  allows only the default branch — the first deploy failed with "Branch
+  ... is not allowed to deploy to github-pages" until this was changed).
+- Manual `workflow_dispatch` does not show a UI button because the deploy
+  branch is not the repo's default branch; the push trigger is what runs.

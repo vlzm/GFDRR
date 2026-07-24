@@ -1,0 +1,11 @@
+// Site overrides on top of the hugo-book theme.
+
+// The exported notebook pages render pandas tables as raw HTML with the
+// `dataframe` class. Some are wider than the content column, so let them
+// scroll sideways instead of pushing the page out.
+table.dataframe {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}

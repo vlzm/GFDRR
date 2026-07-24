@@ -71,7 +71,9 @@ venv.bak/
 .cursor/
 
 # all files from folder .reference/
-reference/
+# (anchored + dotted: a bare `reference/` also matched the Hugo site's
+# docs/site/content/docs/reference/ section and silently dropped it)
+/.reference/
 
 # mypy
 .mypy_cache/

@@ -1,3 +1,8 @@
+---
+title: "Change the demand"
+weight: 1
+---
+
 # How to change the demand a run faces
 
 Task: run the same scenario with scaled demand, or replay a different month.
@@ -11,7 +16,7 @@ what the run faces — both are flags of `app/runner.py`:
 
 Equal values give a clean run with zero losses. A run scale above the sizing
 scale makes the limits take effect: stockout and dock-full events appear
-(sized run: [Notations.md §11](../../Notations.md#11-run-kinds)). Every scaled
+(sized run: [Notations.md §11](../reference/notations.md#11-run-kinds)). Every scaled
 count is rounded to whole bikes by one shared rule, `scale_demand` in
 `gbp/consumers/simulator/mechanics.py`.
 

@@ -6,6 +6,8 @@ bookCollapseSection: true
 
 # Architecture
 
-Placeholder section (was `key-components/`). The eight explanation pages
-move here in a later ticket: the journal idea, the data model, the
-simulation engine, rebalancing, the ML toolkit, visualization.
+How the system works, one page per part. Read [About the
+framework](overview.md) first, then follow the parts: the data model, the
+flow journal, the simulation engine, rebalancing, the ML toolkit, and the
+visualization side. The worked examples page shows each mechanic on a
+small, real journal.

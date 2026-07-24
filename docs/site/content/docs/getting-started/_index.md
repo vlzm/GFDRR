@@ -6,6 +6,7 @@ bookCollapseSection: true
 
 # Getting started
 
-Placeholder section. Installation, quickstart, and the UI walk-through move
-here in a later ticket. Below the showcase material: a portfolio reader
-reads before running.
+Run it yourself: [install](installation.md), then a [first
+run](quickstart.md) that produces a flow journal, then a [first look at the
+web interface](ui.md). Placed below the showcase material — a portfolio
+reader reads before running.

@@ -1,3 +1,8 @@
+---
+title: "First run"
+weight: 2
+---
+
 # First run: the simulator on a synthetic scenario
 
 This page takes you from a clean clone to your first flow journal in a few
@@ -8,7 +13,7 @@ Then you change one line at a time and watch the failure events appear in
 the journal.
 
 Three words this page uses (exact contracts live in
-[Notations.md](../../Notations.md)):
+[Notations.md](../reference/notations.md)):
 
 - A **period** is one step of simulated time; here every period is one hour.
 - The **flow journal** is the run's event table: one row per event
@@ -18,7 +23,7 @@ Three words this page uses (exact contracts live in
 ## What runs
 
 The script below assembles the simulator's input contract, `ScenarioInputs`
-([gbp/consumers/simulator/inputs.py](../../gbp/consumers/simulator/inputs.py)),
+([gbp/consumers/simulator/inputs.py](https://github.com/vlzm/GFDRR/blob/city_bike_mvp_accounting/gbp/consumers/simulator/inputs.py)),
 from three hand-written trips, and runs the real `Environment` on it with
 the canonical phases — the same engine the full runs use; only the input
 tables are synthetic. The run finishes in well under a second.
@@ -27,7 +32,7 @@ tables are synthetic. The run finishes in well under a second.
 a Protocol: any object that carries those fields fits, so the script uses a
 plain `types.SimpleNamespace`. The loader `ResolvedModelData` fills the same
 fields from a month of real trips — that path is the
-[minimal example](../scenarios/citibike.md#minimal-example) of the Citi Bike
+[minimal example](../scenario/citibike.md#minimal-example) of the Citi Bike
 scenario page.
 
 Prerequisite: step 1 of [installation.md](installation.md); the base
@@ -261,20 +266,20 @@ trip departs; the other demand is written as `lost` with
 flow, no bike moved. `s1` ends the run empty.
 
 Every table on this page is replayed against a fresh engine run by
-[tests/test_docs_quickstart.py](../../tests/test_docs_quickstart.py): the
+[tests/test_docs_quickstart.py](https://github.com/vlzm/GFDRR/blob/city_bike_mvp_accounting/tests/test_docs_quickstart.py): the
 test executes the script exactly as printed here, replaces the same lines
 the page tells you to replace, and compares the output line by line.
 
 ## Where to go next
 
 - The same call chain on a month of real trips — the
-  [minimal example](../scenarios/citibike.md#minimal-example) of the Citi
+  [minimal example](../scenario/citibike.md#minimal-example) of the Citi
   Bike scenario page (needs the data download from
   [installation.md](installation.md), step 2).
 - [ui.md](ui.md) — run the simulator on a month of real trips and browse
   the saved run in the web interface (same download).
-- [Worked examples](../key-components/worked-examples.md) — the same kind
+- [Worked examples](../architecture/worked-examples.md) — the same kind
   of story for every mechanic: stockout, delayed redirect, redirect chain,
   truck rebalancing.
-- [Notations.md](../../Notations.md) — the exact journal schema (§0), the
+- [Notations.md](../reference/notations.md) — the exact journal schema (§0), the
   step axis (§0.1), the four outcomes (§1).

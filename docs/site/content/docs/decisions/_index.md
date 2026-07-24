@@ -6,6 +6,7 @@ bookCollapseSection: true
 
 # Design decisions
 
-Placeholder section. The three cross-module decision records move here in
-a later ticket. Kept as an own section: they show why the architecture is
-what it is.
+Three cross-module decision records. They show why the architecture is
+what it is: the flow journal as the single source of truth, the initial
+state measured by a sizing run, and a forecast run that replaces only the
+demand table.

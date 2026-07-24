@@ -6,6 +6,8 @@ bookCollapseSection: false
 
 # The Citi Bike scenario
 
-Placeholder section. The scenario page moves here in a later ticket.
-Leads the menu: the concrete problem, the data, and what the system does —
-the first thing a portfolio reader should see.
+The first and so far only scenario of the framework, end to end: the
+problem, how the domain maps onto the four entities, where the data comes
+from, which runs exist, and how to read the results. Start with the
+scenario page; the two notebook pages show the canonical runs move for
+move.

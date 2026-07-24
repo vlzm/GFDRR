@@ -1,3 +1,8 @@
+---
+title: "Debug an invariant violation"
+weight: 3
+---
+
 # How to debug an invariant violation (I1–I5)
 
 Task: a run reports invariant violations — find which check broke and which
@@ -83,7 +88,7 @@ checks only start to matter above the baseline or after a code change — so
 the first suspect is the change you just made. A new phase that stamps
 events under a wrong `phase_rank`, so two batches that needed ordering
 collapse into one step, shows up as I5 (the step contract,
-[Notations.md §0.1](../../Notations.md)). A change in how departures or
+[Notations.md §0.1](../reference/notations.md)). A change in how departures or
 losses are written shows up as I1 — the journal no longer matches the demand
 table. A bike that leaves the system without a `lost` row shows up as I4.
 

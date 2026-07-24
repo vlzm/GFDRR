@@ -76,6 +76,12 @@ map is done when the site is live and the old `docs/` tree is gone.
   `forecast_pipeline` has no saved outputs, so it must be run once before
   its page shows results. **Unblocks the page move (T10)** — now fully
   unblocked.
+- [Set up the deploy pipeline](tickets/T9-set-up-the-deploy-pipeline.md)
+  — the site is **live at https://vlzm.github.io/GFDRR/**. Publishes from
+  branch `city_bike_mvp_accounting` (not `main`, which is ~169 commits
+  behind) via `.github/workflows/hugo.yaml`, the researched Hugo→Pages
+  workflow. Human steps done on GitHub: Pages Source = "GitHub Actions",
+  and the github-pages environment widened to allow the deploy branch.
 - [Decide the fate of the non-site folders](tickets/T7-decide-the-fate-of-non-site-folders.md)
   — fate table settled: delete `docs/README.md`, `docs/README_ru.md`,
   `docs/archive/`; `docs/assets/` deleted once the root README rewrite
@@ -83,18 +89,31 @@ map is done when the site is live and the old `docs/` tree is gone.
   `method/`, `plans/`, `reports/` stay at their current paths, private.
   Russian companions are deleted only when their English partner moves
   into the site — so only `docs/README_ru.md` goes.
+- [Move the docs pages into the site sections](tickets/T10-move-the-docs-pages-into-the-site.md)
+  — all 21 in-scope pages now live under `content/docs/<section>/` with
+  Hugo front matter; old pages and empty source dirs removed; the site
+  builds clean. Internal links kept as relative `.md` links via
+  `BookPortableLinks`; Notations mounted with a `cascade` weight; the
+  scenario page shows the two notebooks as `nbconvert` leaf bundles
+  (`scripts/export_notebooks.py`; `forecast-pipeline` code-only until run).
+  Fixed a `.gitignore` bug (`reference/` was hiding the site's Reference
+  section). Graduates the README rewrite (T11) and the leftover deletions
+  (T12).
 
 ## Not yet specified
 
-- Root `README.md` rewrite after `docs/` moves: its links break, and it
-  should point at the published site. Waits on the move itself.
 - Whether the site gets a dedicated "Results" showcase section (figures
   from `reports/`). The landing page (T3) already absorbs a UI screenshot
   and a one-line results block, so this is now only about a separate
   section, not about the front page.
-- Checks that KaTeX, Mermaid, and search actually work on the moved
-  pages (the template config claims them; per-page front matter flags
-  `math: true` / `mermaid: true` may be needed).
+- A visual check that Mermaid and search render on the moved pages once
+  deployed. T10 confirmed the build is clean, set `mermaid: true` on the
+  two Mermaid pages, and found no KaTeX math on any page, so this is now a
+  small in-browser confirmation, not a build question.
+
+<!-- Graduated from fog by T10: the README rewrite is now the live ticket
+T11; the leftover `docs/` deletions are T12. -->
+
 
 ## Out of scope
 
