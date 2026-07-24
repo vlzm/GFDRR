@@ -1,0 +1,22 @@
+{{/*
+  Load KaTeX on any page with `math: true` in its front matter.
+
+  This theme version only injects KaTeX from the `katex` code-block render hook
+  (layouts/_markup/render-codeblock-katex.html). Pages that use *inline* math
+  (\( ... \)) without a ```katex block would otherwise never load KaTeX and would
+  render the raw delimiters. Honoring `math: true` here fixes those pages.
+
+  We set the `katex` page-store flag so the render hook skips its own duplicate
+  include on pages that also contain a ```katex block. This partial runs from
+  <head> (baseof.html) before .Content is rendered, so the flag is set in time.
+*/}}
+{{- if .Params.math -}}
+  {{- if not (.Page.Store.Get "katex") -}}
+    <link rel="stylesheet" href="{{ "katex/katex.min.css" | relURL }}" />
+    <script defer src="{{ "katex/katex.min.js" | relURL }}"></script>
+    {{- with resources.Get "katex.json" | minify -}}
+      <script defer src="{{ "katex/auto-render.min.js" | relURL }}" onload="renderMathInElement(document.body, {{ .Content | safeJS }});"></script>
+    {{- end -}}
+    {{- .Page.Store.Set "katex" true -}}
+  {{- end -}}
+{{- end -}}

@@ -53,7 +53,12 @@
       "Bash(sort -t: -k2 -rn)",
       "Bash(grep -v \" total$\")",
       "Bash(echo \"exit:$?\")",
-      "Bash(python -m compileall -q gbp app)"
+      "Bash(python -m compileall -q gbp app)",
+      "Bash(gh auth *)",
+      "Bash(hugo version *)",
+      "Bash(git check-ignore *)",
+      "Bash(hugo --source docs/site --gc --minify)",
+      "Bash(echo \"=== exit: $? ===\")"
     ]
   }
 }

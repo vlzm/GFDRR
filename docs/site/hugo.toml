@@ -1,0 +1,40 @@
+baseURL = 'https://vlzm.github.io/GFDRR/'
+title = 'Flow-graph framework'
+theme = 'hugo-book'
+locale = 'en-us'
+
+# hugo-book builds the left-hand menu from the content/docs tree
+[params]
+  BookTheme = 'auto'          # light/dark/auto
+  BookToC = true              # right-hand table of contents
+  BookRepo = 'https://github.com/vlzm/GFDRR'
+  # "Edit this page" link. This theme version takes a template, not a path
+  # prefix; {{ .Path }} is the page file relative to docs/site/.
+  BookEditLink = '{{ .Site.Params.BookRepo }}/edit/main/docs/site/{{ .Path }}'
+  BookSearch = true
+  BookComments = false
+
+# KaTeX is loaded per-page via `math: true` (see
+# layouts/partials/docs/inject/head.html); Mermaid via `mermaid: true`.
+
+[markup]
+  [markup.goldmark.renderer]
+    unsafe = true             # needed for inline HTML (README tables, images)
+  # Hand \( ... \) etc. to client-side KaTeX untouched. Without this Goldmark
+  # strips the backslashes (\( -> (, \{ -> {), so auto-render never sees the
+  # delimiters and inline math shows up as raw text.
+  [markup.goldmark.extensions.passthrough]
+    enable = true
+    [markup.goldmark.extensions.passthrough.delimiters]
+      block = [['\[', '\]'], ['$$', '$$']]
+      inline = [['\(', '\)']]
+  [markup.tableOfContents]
+    startLevel = 1
+    endLevel = 3
+
+# Point the processed-image cache at Hugo's cacheDir so the CI cache step
+# (which saves/restores runner.temp/.cache/hugo) covers it. See the deploy
+# guide, docs/plans/wayfinder-hugo-site/research/github-pages-deploy.md §1.
+[caches]
+  [caches.images]
+    dir = ':cacheDir/images'
