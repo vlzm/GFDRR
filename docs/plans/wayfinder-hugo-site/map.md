@@ -99,6 +99,19 @@ map is done when the site is live and the old `docs/` tree is gone.
   Fixed a `.gitignore` bug (`reference/` was hiding the site's Reference
   section). Graduates the README rewrite (T11) and the leftover deletions
   (T12).
+- [Rewrite the root README](tickets/T11-rewrite-the-root-readme.md)
+  — `README.md` is now a thin GitHub front door (~60 lines): pitch, a
+  prominent link to the live site, the screenshot, four "what is
+  interesting" bullets, a minimal local-run block, dev commands, and
+  pointers. Stale `docs/<section>` deep links dropped (reached through the
+  site); `Notations.md` kept as a repo link. Screenshot points at the
+  in-repo site copy `docs/site/assets/images/ui_overview.png`; `docs/assets/`
+  deleted, closing the T7 coupling. Leftover deletions remain T12.
+- [Delete the retired docs/ leftovers](tickets/T12-delete-the-retired-docs-leftovers.md)
+  — deleted `docs/README.md`, `docs/README_ru.md`, `docs/archive/` (only
+  references were historical prose in private `docs/plans/*`). `docs/` now
+  holds only `site/` and the private folders — **the destination is reached
+  and the map is done.**
 
 ## Not yet specified
 

@@ -2,8 +2,8 @@
 id: T12
 title: Delete the retired docs/ leftovers
 label: wayfinder:task
-status: open
-assignee:
+status: closed
+assignee: vlzm
 blocked-by: []
 ---
 
@@ -23,3 +23,15 @@ rewrite — see T11) or the private folders `plans/`, `reports/`, `method/`,
 `interview/`, which T7 keeps. When this and T11 are both done, the only
 `docs/` left is `site/` plus the private folders — the destination's "old
 `docs/` tree is gone" is reached.
+
+## Resolution
+
+Deleted `docs/README.md`, `docs/README_ru.md`, and `docs/archive/overview.md`
+via `git rm` (the empty `docs/archive/` dir went with its only file). Checked
+first for live references: the only mentions are historical prose in old
+`docs/plans/*` planning documents (kept private per T7), not code, build
+config, or the site — safe to remove.
+
+`docs/` now holds only `site/` and the private folders (`interview/`,
+`method/`, `plans/`, `reports/`). With T11 (which removed `docs/assets/`) this
+completes the destination's "the old `docs/` tree is gone". The map is done.
