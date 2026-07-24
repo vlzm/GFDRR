@@ -1,7 +1,8 @@
 """Every toy table in the worked-examples page, replayed against the real engine.
 
-docs/site/content/docs/architecture/worked-examples.md shows one journal table per canonical scenario. Each table
-sits under an anchor comment (``<!-- table:scenario-04 -->``). A test here
+docs/site/content/docs/architecture/worked-examples.md shows one journal table
+per canonical scenario. Each table sits under an anchor comment
+(``<!-- table:scenario-04 -->``). A test here
 rebuilds the same scenario, runs the real engine, selects the same rows from
 the fresh journal, and compares them with the table parsed out of the
 document, cell by cell. If the code changes a journal shape, these tests go

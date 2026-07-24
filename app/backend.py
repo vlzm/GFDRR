@@ -92,7 +92,7 @@ class DiskBackend:
 
 
 class ApiBackend:
-    """Runs live on the server; reads and starts go over HTTP (docs/site/content/docs/reference/api.md)."""
+    """Runs on the server; HTTP reads and starts (docs/site/content/docs/reference/api.md)."""
 
     def list_runs(self) -> list[str]:
         """Names of every saved run on the server."""
