@@ -115,21 +115,20 @@ map is done when the site is live and the old `docs/` tree is gone.
 
 ## Not yet specified
 
-- Whether the site gets a dedicated "Results" showcase section (figures
-  from `reports/`). The landing page (T3) already absorbs a UI screenshot
-  and a one-line results block, so this is now only about a separate
-  section, not about the front page.
-- A visual check that Mermaid and search render on the moved pages once
-  deployed. T10 confirmed the build is clean, set `mermaid: true` on the
-  two Mermaid pages, and found no KaTeX math on any page, so this is now a
-  small in-browser confirmation, not a build question.
-
-<!-- Graduated from fog by T10: the README rewrite is now the live ticket
-T11; the leftover `docs/` deletions are T12. -->
+<!-- Empty: the destination is reached and every ticket is closed. The two
+remaining fog items were ruled out of scope by the user (2026-07-24) — see
+Out of scope. -->
 
 
 ## Out of scope
 
+- A dedicated "Results" showcase section on the site (figures from
+  `reports/`) — the user decided against it (2026-07-24). The landing page
+  (T3) already carries a UI screenshot and a one-line results block, which is
+  enough.
+- An in-browser check that Mermaid and search render on the deployed pages —
+  the user decided it is not needed (2026-07-24). The build is clean, the two
+  Mermaid pages carry `mermaid: true`, and no page has KaTeX math (T10).
 - A bilingual site — settled while charting: English only. The Russian
   companion files' fate is decided (T7: kept beside stays-outside
   partners, deleted only when the English partner moves in), but a
