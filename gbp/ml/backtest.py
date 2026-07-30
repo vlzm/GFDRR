@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 import mlflow
 import pandas as pd
 
-from gbp.loaders.download import month_bounds, normalize_month
+from domains.citybike.loaders.download import month_bounds, normalize_month
 from gbp.ml.data import MlPaths, load_weather_daily, month_period_grid
 from gbp.ml.forecast import forecast_input, naive_month_prediction
 from gbp.ml.metrics import forecast_metrics

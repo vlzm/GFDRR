@@ -53,7 +53,7 @@ Two boundaries of the mapping:
 - Stations and trips are real — they come from the published CSV. Depots
   and trucks are synthetic: the loader places `n_depots` depots at random
   coordinates inside the city box (`get_depots` in
-  `gbp/loaders/dataloader_raw.py`), and the truck fleet is a run parameter
+  `domains/citybike/loaders/dataloader_raw.py`), and the truck fleet is a run parameter
   ([Notations.md §14](../reference/notations.md#14-rebalancing-moving-bikes-by-truck)).
 - Citi Bike does not publish station inventories or dock capacities. The
   initial inventory and the capacities are measured by a sizing run instead
@@ -75,10 +75,12 @@ Two loaders turn one CSV into the input tables of the simulator:
   they start. It keeps a processed parquet copy of the CSV in
   `data/processed/` — a cache, so later loads are much faster. It also
   synthesizes the depots and the trucks.
-- `dataloader_graph.py` (class `ResolvedModelData`) derives the tables the
-  simulator reads: the period grid (one row per hour), the historical flow
-  journal, the demand and the OD matrix computed from that journal, the
-  facility table, dock capacities, geography, and `routes`.
+- `dataloader_graph.py` (function `build_resolved`) puts the raw tables into
+  the framework's column names and builds the period grid (one row per hour)
+  and the historical flow journal. It hands those to `ResolvedModelData`
+  (`gbp/model/dataloader_graph.py`), which knows nothing about bikes and
+  derives the rest: the demand and the OD matrix computed from the journal,
+  the start inventory, and `routes`.
 
 How each table is built, column by column:
 [data-model.md](../architecture/data-model.md).
@@ -130,9 +132,8 @@ minute.
 ```python
 import pandas as pd
 
+from domains.citybike.loaders import RawModelData, build_resolved
 from gbp.consumers.simulator import run_sized_scenario
-from gbp.loaders.dataloader_graph import ResolvedModelData
-from gbp.loaders.dataloader_raw import RawModelData
 from gbp.logging import configure_logging
 
 configure_logging()
@@ -151,7 +152,7 @@ raw_data = RawModelData(
 )
 
 # 2. Graph tables: the period grid, demand, the OD matrix, geography, routing.
-graph_data = ResolvedModelData(raw_data, period_len=pd.Timedelta(hours=1))
+graph_data = build_resolved(raw_data, period_len=pd.Timedelta(hours=1))
 
 # 3. Size the state and run 50 periods. Equal scale factors (the default 1.0)
 #    give the base replay: departures equal the historical ones, nothing is lost.

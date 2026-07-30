@@ -8,8 +8,7 @@ import pathlib
 import pandas as pd
 import pandera.pandas as pa
 
-from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN, to_period_id
-from gbp.loaders.download import (
+from domains.citybike.loaders.download import (
     download_months,
     load_trips_any_schema,
     month_bounds,
@@ -19,6 +18,7 @@ from gbp.loaders.download import (
 from gbp.ml.data import load_weather_daily, ml_dir, month_period_grid
 from gbp.ml.features import FEATURE_SCHEMA_COLUMNS, HISTORY_WEEKS, build_features
 from gbp.ml.station_status import download_status_months, next_month, stockout_share_table
+from gbp.model.dataloader_graph import DEFAULT_PERIOD_LEN, to_period_id
 from gbp.model.journal_schema import schema_violations
 
 #: One row per station-hour and bike type, zero rows kept: the departure
@@ -156,7 +156,8 @@ def build_month_partition(
     csvs = month_csvs(month, raw)
     if not csvs:
         raise FileNotFoundError(
-            f"no raw CSVs for {month}; download them first (python -m gbp.loaders.download)"
+            f"no raw CSVs for {month}; download them first "
+            "(python -m domains.citybike.loaders.download)"
         )
     trips_df = pd.concat([load_trips_any_schema(str(path)) for path in csvs], ignore_index=True)
     table = departure_counts(trips_df, month)

@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from domains.citybike.loaders.dataloader_graph import apply_truck_fleet
 from gbp.consumers.simulator import canonical_phases, rebalancing_phases, scaled_demand_inputs
 from gbp.consumers.simulator.rebalancing import (
     RebalancingParams,
@@ -30,7 +31,6 @@ from gbp.consumers.simulator.rebalancing import (
     target_inventory,
 )
 from gbp.consumers.simulator.validation import validate_run
-from gbp.loaders.dataloader_graph import apply_truck_fleet
 from gbp.model import flows as J
 from tests import scenarios
 from tests.invariants import check_journal_well_formed

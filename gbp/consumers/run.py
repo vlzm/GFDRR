@@ -9,6 +9,7 @@ from typing import Literal
 import pandas as pd
 import pydantic
 
+from domains.citybike.loaders import RawModelData, apply_truck_fleet, build_resolved
 from gbp import artifacts
 from gbp.consumers.simulator import (
     RebalancingParams,
@@ -16,12 +17,7 @@ from gbp.consumers.simulator import (
     rebalancing_phases,
     run_sized_scenario,
 )
-from gbp.loaders.dataloader_graph import (
-    ResolvedModelData,
-    apply_saved_forecast,
-    apply_truck_fleet,
-)
-from gbp.loaders.dataloader_raw import RawModelData
+from gbp.model.dataloader_graph import ResolvedModelData, apply_saved_forecast
 from gbp.routing import DEFAULT_OSRM_URL, RoutingMode
 
 DEFAULT_TRIPS_PATH = str(artifacts.data_dir() / "raw" / "202601-citibike-tripdata_1.csv")
@@ -30,7 +26,7 @@ DEFAULT_NUMBER_OF_PERIODS = 50
 #: Where a run's demand table can come from (Notations.md §11).
 DEMAND_SOURCES = ("history", "forecast")
 
-# The synthetic depot and truck fleet (see gbp/loaders/dataloader_raw.py).
+# The synthetic depot and truck fleet (see domains/citybike/loaders/dataloader_raw.py).
 DEFAULT_N_DEPOTS = 10
 DEPOT_IDS = [f"depot_{i + 1}" for i in range(DEFAULT_N_DEPOTS)]
 DEFAULT_TRUCK_HOMES = ["depot_1"] * 5
@@ -93,7 +89,7 @@ def build_graph_data(
         electric_bike_rate=5,
         classic_bike_rate=3,
     )
-    return ResolvedModelData(
+    return build_resolved(
         raw,
         period_len=pd.Timedelta(hours=period_len_hours),
         routing_mode=routing_mode,

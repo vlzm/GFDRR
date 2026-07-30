@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from gbp.loaders.download import normalize_month
+from domains.citybike.loaders.download import normalize_month
 from gbp.ml.data import MlPaths, ml_dir, month_grid
 from gbp.ml.features import HISTORY_FEATURES, WEATHER_FEATURES
 from gbp.ml.forecast import (

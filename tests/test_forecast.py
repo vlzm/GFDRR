@@ -10,15 +10,15 @@ import pandas as pd
 import pytest
 
 from gbp.consumers.simulator import run_sized_scenario
-from gbp.loaders.dataloader_graph import (
+from gbp.ml import forecast
+from gbp.ml.models import create_model
+from gbp.model.dataloader_graph import (
     apply_forecast_demand,
     apply_saved_forecast,
     get_forecast_periods_df,
     hour_of_week,
     map_od_matrix_by_hour_of_week,
 )
-from gbp.ml import forecast
-from gbp.ml.models import create_model
 from tests import scenarios
 
 CLASSIC = "classic_bike"

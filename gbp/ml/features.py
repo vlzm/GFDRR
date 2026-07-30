@@ -6,7 +6,7 @@ import holidays
 import pandas as pd
 import pandera.pandas as pa
 
-from gbp.loaders.dataloader_graph import hour_of_week
+from gbp.model.dataloader_graph import hour_of_week
 
 #: The history the history features read: the departure counts of the
 #: HISTORY_WEEKS weeks right before the target rows. Both the training-table

@@ -6,7 +6,7 @@ weight: 2
 # About the data model
 
 This page is an explanation, not a map. It stands around the data model that
-`gbp/loaders/` builds — from the raw Citi Bike trip CSV to `ResolvedModelData`,
+`domains/citybike/loaders/` builds — from the raw Citi Bike trip CSV to `ResolvedModelData`,
 the tables the simulator reads — and tries to say *why* it is shaped the way it
 is, what each decision buys, and what it costs. For the exact list of tables and
 functions, read the class docstring and the code; for how the simulator uses

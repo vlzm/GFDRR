@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Response
 from gbp import artifacts
 from gbp.consumers import run
 from gbp.consumers.run import RunRequest
-from gbp.loaders.dataloader_graph import ResolvedModelData
+from gbp.model.dataloader_graph import ResolvedModelData
 
 PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"
 

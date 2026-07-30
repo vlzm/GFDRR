@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gbp.loaders.download import month_bounds
+from domains.citybike.loaders.download import month_bounds
 from gbp.ml import features
 from gbp.ml.backtest import (
     backtest_splits,

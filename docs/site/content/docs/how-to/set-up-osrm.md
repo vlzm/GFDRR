@@ -136,7 +136,7 @@ python app/runner.py --run-name my_run --routing osrm
 From Python or a notebook:
 
 ```python
-graph_data = ResolvedModelData(raw_data, routing_mode="osrm")
+graph_data = build_resolved(raw_data, routing_mode="osrm")
 ```
 
 With `routing_mode="osrm"` the loader fetches the full

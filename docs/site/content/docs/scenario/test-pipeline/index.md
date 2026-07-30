@@ -33,8 +33,8 @@ marginal that is preserved exactly is the departures table:
 ```python
 import pandas as pd
 
-from gbp.loaders.dataloader_raw import RawModelData
-from gbp.loaders.dataloader_graph import ResolvedModelData, attach_simulation
+from domains.citybike.loaders import RawModelData, build_resolved
+from gbp.model.dataloader_graph import attach_simulation
 from gbp.consumers.simulator import run_sized_scenario
 from gbp.logging import configure_logging
 
@@ -64,7 +64,7 @@ raw_data = RawModelData(
 # routing_mode picks how facility-pair distances and travel times are measured
 # (Notations.md §13): "haversine" (default, straight-line formula) or "osrm"
 # (road network; needs the local OSRM server from docs/how-to/set-up-osrm.md running).
-graph_data = ResolvedModelData(raw_data, period_len=pd.Timedelta(hours=1))
+graph_data = build_resolved(raw_data, period_len=pd.Timedelta(hours=1))
 
 historical_flows_df_raw = graph_data.historical_flows_df.copy()
 ```

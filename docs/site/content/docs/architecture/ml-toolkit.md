@@ -34,7 +34,7 @@ How to run a forecast is [how-to/run-on-a-forecast.md](../how-to/run-on-a-foreca
 
 | Part | Files | Purpose |
 |---|---|---|
-| Prepare data | `gbp/loaders/download.py`, `data.py`, `station_status.py`, `training.py`, `features.py` | Download source files and build the training table. The trip downloader lives in `gbp/loaders/` because the base replay uses the same CSVs. |
+| Prepare data | `domains/citybike/loaders/download.py`, `data.py`, `station_status.py`, `training.py`, `features.py` | Download source files and build the training table. The trip downloader lives with the Citi Bike loaders because the base replay uses the same CSVs. |
 | Fit and use models | `models/`, `forecast.py` | Fit a model and save a forecast artifact. |
 | Compare models | `metrics.py`, `backtest.py`, `evaluation.py` | Measure forecast error and simulator results. |
 | Operate the model | `registry.py`, `pipeline.py`, `monitoring.py` | Choose the champion, retrain it, and check later results. |

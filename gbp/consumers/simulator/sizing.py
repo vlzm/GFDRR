@@ -5,8 +5,8 @@ import dataclasses
 
 import pandas as pd
 
-from gbp.loaders.dataloader_graph import get_replay_initial_inventory_df
 from gbp.model import inventory_at_moments, occupancy_per_facility
+from gbp.model.dataloader_graph import get_replay_initial_inventory_df
 
 from .config import EnvironmentConfig
 from .engine import Environment

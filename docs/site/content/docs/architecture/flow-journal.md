@@ -46,12 +46,12 @@ in `flows.py`, top to bottom:
 journal speak.
 
 ```text
-gbp/loaders/          gbp/consumers/simulator/
-(historical journal)  (simulated journal)
-        \                 /
-         both import from
-        gbp/model/flows.py
-         (imports neither)
+domains/citybike/loaders/   gbp/consumers/simulator/
+(historical journal)       (simulated journal)
+          \                    /
+            both import from
+           gbp/model/flows.py
+            (imports neither)
 ```
 
 The historical loader builds a journal from real trips in one pass. The
@@ -108,7 +108,8 @@ invariants (I3–I5) need the live simulator state, so they live in
 
 | Caller | Uses |
 |---|---|
-| `gbp/loaders/dataloader_graph.py` | builders, `stamp_history_ordering`, `finalize_flows` for the historical journal; the marginals for the historical tables and, in `attach_simulation`, their simulated twins; `inventory_at_moments` for the replay sizing |
+| `domains/citybike/loaders/dataloader_graph.py` | builders, `stamp_history_ordering`, `finalize_flows` for the historical journal |
+| `gbp/model/dataloader_graph.py` | the marginals for the historical tables and, in `attach_simulation`, their simulated twins; `inventory_at_moments` for the replay sizing |
 | `gbp/consumers/simulator/` | builders inside the phases; `inventory_deltas_from_events` and `in_transit_after_events` in `apply_step_events`; `neighbor_distance_sq` in the redirect mechanics; `finalize_flows` at run end |
 | `gbp/consumers/simulator/validation.py` | `check_demand_split`, `check_flow_closure`, `get_inventory_df`, `inventory_at_moments` |
 | `gbp/artifacts.py` | `flows_with_measures` for `flows.parquet`; `flows_to_panel` for `panel.parquet` |

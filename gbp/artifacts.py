@@ -13,7 +13,6 @@ import pandas as pd
 import pandera.pandas as pa
 import pydantic
 
-from gbp.loaders.dataloader_graph import PeriodGrid
 from gbp.model import (
     PANEL_KEYS,
     flows_to_panel,
@@ -23,6 +22,7 @@ from gbp.model import (
 from gbp.model import (
     PANEL_VALUES as _MODEL_PANEL_VALUES,
 )
+from gbp.model.dataloader_graph import PeriodGrid
 from gbp.model.journal_schema import FLOW_EVENT_SCHEMA, schema_violations
 from gbp.routing import Routes
 

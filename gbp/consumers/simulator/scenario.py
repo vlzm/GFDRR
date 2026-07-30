@@ -8,11 +8,11 @@ from collections.abc import Callable
 import pandas as pd
 import structlog
 
-from gbp.loaders.dataloader_graph import (
+from gbp.model import CANONICAL_PHASE_ORDER
+from gbp.model.dataloader_graph import (
     FACILITIES_CAPACITIES_SCHEMA,
     INITIAL_INVENTORY_SCHEMA,
 )
-from gbp.model import CANONICAL_PHASE_ORDER
 from gbp.model.journal_schema import schema_violations
 
 from .config import EnvironmentConfig

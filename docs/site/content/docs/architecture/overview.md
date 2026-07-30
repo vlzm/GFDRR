@@ -78,7 +78,7 @@ The parts of the framework are best understood as stages a fact passes through,
 from a raw CSV row to a pixel on the screen. Read in that order they stop being
 a pile of modules and become a pipeline.
 
-**From trips to tables.** The loaders (`gbp/loaders/`) read the raw Citi Bike
+**From trips to tables.** The loaders (`domains/citybike/loaders/`) read the raw Citi Bike
 trip files and build the tables the simulator reads. This is where the domain is
 stripped off — more on that below — and where the historical journal is built
 from real trips. The design and its trade-offs are in

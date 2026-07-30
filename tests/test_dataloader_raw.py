@@ -11,7 +11,7 @@ import os
 import pandas as pd
 import pytest
 
-from gbp.loaders.dataloader_raw import load_trips_raw_df, processed_trips_path
+from domains.citybike.loaders.dataloader_raw import load_trips_raw_df, processed_trips_path
 
 CSV_HEADER = (
     "ride_id,rideable_type,started_at,ended_at,"

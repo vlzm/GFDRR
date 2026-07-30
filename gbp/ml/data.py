@@ -10,8 +10,8 @@ from collections.abc import Callable
 import pandas as pd
 import requests
 
-from gbp.loaders.dataloader_graph import DEFAULT_PERIOD_LEN, PeriodGrid
-from gbp.loaders.download import month_bounds, raw_dir
+from domains.citybike.loaders.download import month_bounds, raw_dir
+from gbp.model.dataloader_graph import DEFAULT_PERIOD_LEN, PeriodGrid
 
 _DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[2] / "data"
 

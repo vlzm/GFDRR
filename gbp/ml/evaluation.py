@@ -10,14 +10,9 @@ from typing import Literal, Protocol
 
 import pandas as pd
 
+from domains.citybike.loaders.download import month_bounds, normalize_month
 from gbp import artifacts
 from gbp.consumers.run import RunRequest, build_graph_data, run_and_save
-from gbp.loaders.dataloader_graph import (
-    ResolvedModelData,
-    apply_forecast_demand,
-    restrict_demand_to_scenario,
-)
-from gbp.loaders.download import month_bounds, normalize_month
 from gbp.ml import forecast
 from gbp.ml.data import ml_dir, month_period_grid
 from gbp.ml.metrics import (
@@ -27,6 +22,11 @@ from gbp.ml.metrics import (
     panel_departed_mae,
 )
 from gbp.ml.training import load_actual_month, training_dir
+from gbp.model.dataloader_graph import (
+    ResolvedModelData,
+    apply_forecast_demand,
+    restrict_demand_to_scenario,
+)
 
 
 class RunMetaLike(Protocol):

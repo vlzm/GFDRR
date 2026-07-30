@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gbp.loaders.dataloader_graph import get_forecast_periods_df
 from gbp.ml import features, forecast, station_status, training
+from gbp.model.dataloader_graph import get_forecast_periods_df
 
 CLASSIC = "classic_bike"
 ELECTRIC = "electric_bike"

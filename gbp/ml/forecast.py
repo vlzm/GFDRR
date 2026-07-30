@@ -11,16 +11,16 @@ import numpy as np
 import pandas as pd
 import pydantic
 
-from gbp.loaders.dataloader_graph import (
+from domains.citybike.loaders.download import month_bounds, normalize_month
+from gbp.ml.data import MlPaths, load_weather_daily, ml_dir, month_period_grid
+from gbp.ml.features import HISTORY_WEEKS, build_features, clip_history_window
+from gbp.ml.models import DemandModel, create_model
+from gbp.model.dataloader_graph import (
     DEFAULT_PERIOD_LEN,
     HISTORICAL_DEMAND_SCHEMA,
     PeriodGrid,
     get_forecast_periods_df,
 )
-from gbp.loaders.download import month_bounds, normalize_month
-from gbp.ml.data import MlPaths, load_weather_daily, ml_dir, month_period_grid
-from gbp.ml.features import HISTORY_WEEKS, build_features, clip_history_window
-from gbp.ml.models import DemandModel, create_model
 from gbp.model.journal_schema import schema_violations
 
 
@@ -447,8 +447,11 @@ def main() -> None:
         raise SystemExit("--trips-path builds the seasonal naive only; use --months instead")
 
     # The heavy loader imports live here so `import gbp.ml.forecast` stays light.
-    from gbp.loaders.dataloader_graph import get_historical_flows_df, get_periods_df
-    from gbp.loaders.dataloader_raw import load_trips_raw_df
+    from domains.citybike.loaders.dataloader_graph import (
+        get_historical_flows_df,
+        get_periods_df,
+    )
+    from domains.citybike.loaders.dataloader_raw import load_trips_raw_df
     from gbp.model import flows_to_departures
 
     print("Loading the trips and deriving the historical demand ...")

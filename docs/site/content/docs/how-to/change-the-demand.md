@@ -48,7 +48,7 @@ zero loss totals.
 Download the month's trip CSV and point the runner at it:
 
 ```bash
-python -m gbp.loaders.download --months 202602
+python -m domains.citybike.loaders.download --months 202602
 python app/runner.py --run-name feb_replay \
     --trips-path data/raw/202602-citibike-tripdata_1.csv
 ```

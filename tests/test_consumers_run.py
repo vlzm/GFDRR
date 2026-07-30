@@ -100,7 +100,7 @@ def test_forecast_run_records_the_dropped_share(monkeypatch):
 
     The forecast step itself (load the artifact, cut the demand to the
     scenario, put it in place of the historical demand) lives in
-    ``gbp.loaders.dataloader_graph.apply_saved_forecast`` and is tested
+    ``gbp.model.dataloader_graph.apply_saved_forecast`` and is tested
     there; the run path's job is to hand over the scenario data and the
     forecast name, run on what comes back, and record the reported share.
     """

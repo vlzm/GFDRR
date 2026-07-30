@@ -21,12 +21,8 @@ replay in `test_pipeline.ipynb`. The steps, in order:
 ```python
 import pandas as pd
 
-from gbp.loaders.dataloader_raw import RawModelData
-from gbp.loaders.dataloader_graph import (
-    ResolvedModelData,
-    apply_forecast_demand,
-    attach_simulation,
-)
+from domains.citybike.loaders import RawModelData, build_resolved
+from gbp.model.dataloader_graph import apply_forecast_demand, attach_simulation
 from gbp.consumers.simulator import run_sized_scenario
 from gbp.ml import forecast
 ```
@@ -49,7 +45,7 @@ raw_data = RawModelData(
     electric_bike_rate=5,
     classic_bike_rate=3,
 )
-graph_data = ResolvedModelData(raw_data, period_len=pd.Timedelta(hours=1))
+graph_data = build_resolved(raw_data, period_len=pd.Timedelta(hours=1))
 ```
 
 

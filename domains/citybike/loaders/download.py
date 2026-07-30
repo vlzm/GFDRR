@@ -14,17 +14,18 @@ from collections.abc import Callable
 import pandas as pd
 import requests
 
-from gbp.loaders.dataloader_raw import (
+from gbp.model.journal_schema import schema_violations
+
+from .dataloader_raw import (
     TRIPS_SCHEMA,
     clean_trips,
     load_trips_raw_df,
     processed_trips_path,
 )
-from gbp.model.journal_schema import schema_violations
 
 TRIPDATA_BUCKET_URL = "https://s3.amazonaws.com/tripdata"
 
-_DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[2] / "data"
+_DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[3] / "data"
 
 #: Extra strings the old CSVs use for a missing value.
 _NA_VALUES = ["NULL", "\\N"]

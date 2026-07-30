@@ -15,7 +15,7 @@ stockout and no dock-full can happen — and then measures that sizing run's
 journal: the initial inventory is the smallest start under which no station
 goes below zero at any step, and the capacity is each station's peak
 occupancy (`size_state_for_demand` in `gbp/consumers/simulator/sizing.py`,
-using the two helpers in `gbp/loaders/dataloader_graph.py`).
+using the two helpers in `gbp/model/dataloader_graph.py`).
 
 The sizing run and the real run use two independent demand multipliers:
 `sizing_scale_factor` sizes the state, `demand_scale_factor` is what the
@@ -39,5 +39,5 @@ losses depend on the guess, not on the scenario.
 - `gbp/consumers/simulator/scenario.py` — `run_sized_scenario`, the two
   multipliers, `sizing_data`.
 - `gbp/consumers/simulator/sizing.py` — the saturated run.
-- `gbp/loaders/dataloader_graph.py` — `get_replay_initial_inventory_df`,
+- `gbp/model/dataloader_graph.py` — `get_replay_initial_inventory_df`,
   `get_replay_capacities_df`.

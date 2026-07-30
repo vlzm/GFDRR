@@ -11,7 +11,7 @@ from collections.abc import Callable, Sequence
 import pandas as pd
 from mlflow.entities.model_registry import ModelVersion
 
-from gbp.loaders.download import (
+from domains.citybike.loaders.download import (
     download_months,
     month_zip_keys,
     normalize_month,

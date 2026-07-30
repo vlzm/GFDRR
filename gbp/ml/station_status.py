@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from gbp.loaders.download import month_bounds, normalize_month, raw_dir
+from domains.citybike.loaders.download import month_bounds, normalize_month, raw_dir
 
 #: Monthly dump of the archived Citi Bike station feed.
 STATUS_DUMP_URL = (

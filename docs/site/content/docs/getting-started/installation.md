@@ -52,7 +52,7 @@ CSVs; a year of months is about 9 GB on disk.
 Download one month into `data/raw/` (the data folders are Notations.md §15):
 
 ```bash
-python -m gbp.loaders.download --months 202601
+python -m domains.citybike.loaders.download --months 202601
 ```
 
 The command streams the month's zip files, unpacks them, and ends with the

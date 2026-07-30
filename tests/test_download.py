@@ -1,4 +1,4 @@
-"""Tests for the trip downloader (``gbp/loaders/download.py``).
+"""Tests for the trip downloader (``domains/citybike/loaders/download.py``).
 
 The schema harmonization (old and new published files both land in the one
 trips schema), the month naming helpers, and the downloader's skip and
@@ -11,8 +11,8 @@ import zipfile
 import pandas as pd
 import pytest
 
-from gbp.loaders import download
-from gbp.loaders.dataloader_raw import load_trips_raw_df
+from domains.citybike.loaders import download
+from domains.citybike.loaders.dataloader_raw import load_trips_raw_df
 
 NEW_HEADER = (
     "ride_id,rideable_type,started_at,ended_at,start_station_name,start_station_id,"

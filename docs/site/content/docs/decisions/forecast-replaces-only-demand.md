@@ -9,7 +9,7 @@ weight: 3
 
 A forecast run ([Notations.md §11](../reference/notations.md#11-run-kinds)) is the
 same run chain as the base replay with one substitution:
-`apply_forecast_demand` (`gbp/loaders/dataloader_graph.py`) returns a
+`apply_forecast_demand` (`gbp/model/dataloader_graph.py`) returns a
 shallow copy of the resolved data with the forecast demand table in the
 `historical_demand_df` slot — the one demand slot the engine reads — plus
 the matching period grid (`periods_df`, `t0`) and an OD matrix pooled from
@@ -31,7 +31,7 @@ any difference in the results is the forecast's doing.
 
 ## Where in code
 
-- `gbp/loaders/dataloader_graph.py` — `apply_forecast_demand`,
+- `gbp/model/dataloader_graph.py` — `apply_forecast_demand`,
   `map_od_matrix_by_hour_of_week`, `get_forecast_periods_df`.
 - `app/runner.py` — `--demand-source forecast` loads the named forecast
   artifact and applies it before the run.

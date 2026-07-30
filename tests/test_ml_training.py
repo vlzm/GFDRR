@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gbp.loaders.dataloader_graph import get_historical_flows_df
+from domains.citybike.loaders.dataloader_graph import get_historical_flows_df
 from gbp.ml import training
 from gbp.ml.features import FEATURE_COLUMNS, HISTORY_FEATURES
 from gbp.model import flows_to_departures
