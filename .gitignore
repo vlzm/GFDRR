@@ -98,6 +98,7 @@ dmypy.json
 # data/ml/.gitignore). The untracked data folders are ignored here.
 data/processed/
 data/runs/
+data/osrm/
 data/ml/forecasts/
 data/ml/monitoring/
 data/ml/mlflow/
