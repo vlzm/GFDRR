@@ -65,7 +65,7 @@ Once the user picks a candidate, drop into a grilling conversation. Walk the des
 
 Side effects happen inline as decisions crystallize:
 
-- **Naming a deepened module after a concept not in `Notations.md`?** Add the term to `Notations.md`, anchored to the flow journal — same discipline as the `check-notations` skill.
+- **Naming a deepened module after a concept not in `Notations.md`?** Add the term to `Notations.md` first, then use it.
 - **Sharpening a fuzzy term during the conversation?** Update `Notations.md` right there.
 - **User rejects the candidate with a load-bearing reason?** Offer to record it in `docs/decisions/`, framed as: _"Want me to record this decision so future architecture reviews don't re-suggest it?"_ Only offer when the reason would actually be needed by a future explorer to avoid re-suggesting the same thing — skip ephemeral reasons ("not worth it right now") and self-evident ones. Match the format of the existing files in `docs/decisions/`.
 - **Want to explore alternative interfaces for the deepened module?** See [INTERFACE-DESIGN.md](INTERFACE-DESIGN.md).
