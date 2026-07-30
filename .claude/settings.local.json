@@ -58,7 +58,8 @@
       "Bash(hugo version *)",
       "Bash(git check-ignore *)",
       "Bash(hugo --source docs/site --gc --minify)",
-      "Bash(echo \"=== exit: $? ===\")"
+      "Bash(echo \"=== exit: $? ===\")",
+      "Read(//Users/vladislav/.agents/skills/wayfinder/**)"
     ]
   }
 }
