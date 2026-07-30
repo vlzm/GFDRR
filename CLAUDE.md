@@ -4,9 +4,9 @@ A framework for problems on flow graphs — networks where commodities move betw
 
 ```bash
 uv pip install -e ".[dev,ui,api,ml]" # install
-ruff check gbp/ tests/ app/       # lint
-ruff format gbp/ tests/ app/      # format
-mypy gbp/                         # typecheck
+ruff check gbp/ domains/ tests/ app/   # lint
+ruff format gbp/ domains/ tests/ app/  # format
+mypy gbp/ domains/                # typecheck
 streamlit run app/main.py         # UI
 python app/runner.py --help       # run a scenario from the terminal
 uvicorn api:app --app-dir app     # serve the run-artifact API (docs/site/content/docs/reference/api.md)
@@ -28,6 +28,7 @@ dvc status                        # data/raw and data/ml/training vs their .dvc 
 
 ## Codebase Rules
 
+- **Layers.** `gbp/` is the domain-agnostic framework; `domains/<name>/` is one concrete scenario built on it. The dependency arrow is always `domains → gbp`; `gbp` must never import `domains`. Not true yet: `gbp/consumers/run.py` and `gbp/ml/` still import `domains.citybike`. Check with `grep -rn "domains\." gbp/` — an empty result means the split is done.
 - **Minimalism.** Code must be hackable. No factories, heavy DI containers, or hidden magic.
 - **Deep modules.** A module's interface is everything a caller must know to use it — types, call order, invariants, error modes, required config — not just the signature. Aim for a lot of behaviour behind a small interface. Before adding a parameter, a helper, or a wrapper, apply the deletion test: if deleting it would only move the same complexity onto the callers, it is shallow — don't add it.
 - **Vectorization first.** All math via pandas/NumPy. No `for` loops over data in hot paths.

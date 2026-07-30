@@ -36,13 +36,13 @@ jobs:
         run: uv pip install --system --torch-backend=cpu -e ".[dev,ui,api,ml]"
 
       - name: Lint
-        run: ruff check gbp/ tests/ app/
+        run: ruff check gbp/ domains/ tests/ app/
 
       - name: Format check
-        run: ruff format --check gbp/ tests/ app/
+        run: ruff format --check gbp/ domains/ tests/ app/
 
       - name: Typecheck
-        run: mypy gbp/
+        run: mypy gbp/ domains/
 
       - name: Tests
         run: pytest
