@@ -1,4 +1,4 @@
-"""Tests for the two-level evaluation module (``gbp/ml/evaluation.py``).
+"""Tests for the two-level evaluation module (``domains/citybike/ml/ops/evaluation.py``).
 
 The heavy path (resolve the scenario, run 744 periods) stays in the evaluation
 itself; these tests pin the logic the module owns -- the run and file names, the
@@ -12,8 +12,8 @@ import types
 import pandas as pd
 import pytest
 
-from gbp.ml import evaluation
-from gbp.ml.evaluation import EvalNames, ModelForecast, build_comparison
+from domains.citybike.ml.ops import evaluation
+from domains.citybike.ml.ops.evaluation import EvalNames, ModelForecast, build_comparison
 
 CLASSIC = "classic_bike"
 

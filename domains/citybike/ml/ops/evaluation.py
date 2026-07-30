@@ -11,17 +11,18 @@ from typing import Literal, Protocol
 import pandas as pd
 
 from domains.citybike.loaders.download import month_bounds, normalize_month
+from domains.citybike.ml.data import month_period_grid
+from domains.citybike.ml.forecast import build_model_forecast
+from domains.citybike.ml.training import load_actual_month, training_dir
 from gbp import artifacts
 from gbp.consumers.run import RunRequest, build_graph_data, run_and_save
-from gbp.ml import forecast
-from gbp.ml.data import ml_dir, month_period_grid
+from gbp.ml.artifact import list_forecasts, load_forecast, ml_dir
 from gbp.ml.metrics import (
     busy_facility_ids,
     forecast_metrics,
     lost_demand_busy_share,
     panel_departed_mae,
 )
-from gbp.ml.training import load_actual_month, training_dir
 from gbp.model.dataloader_graph import (
     ResolvedModelData,
     apply_forecast_demand,
@@ -192,18 +193,18 @@ def ensure_forecast(
     month = normalize_month(month)
     name = f"{model_name}_{month}"
     start = month_bounds(month)[0]
-    if name not in forecast.list_forecasts():
+    if name not in list_forecasts():
         train_months = [p.stem for p in sorted(training_dir().glob("*.parquet")) if p.stem < month]
         if not train_months:
             raise FileNotFoundError(f"no training partitions before {month}")
-        forecast.build_model_forecast(
+        build_model_forecast(
             model_name,
             train_months,
             horizon_periods=len(month_period_grid(month)),
             forecast_name=name,
             log=log,
         )
-    _, meta = forecast.load_forecast(name)
+    _, meta = load_forecast(name)
     if pd.Timestamp(meta.t0) != start or meta.horizon_periods < horizon_periods:
         raise ValueError(
             f"forecast {name} covers {meta.horizon_periods} periods from {meta.t0}; "
@@ -282,7 +283,7 @@ def evaluate_month(
 
     model_forecasts = []
     for model_name in model_names:
-        forecast_demand_df, _ = forecast.load_forecast(forecast_names[model_name])
+        forecast_demand_df, _ = load_forecast(forecast_names[model_name])
         forecast_demand_df = forecast_demand_df[forecast_demand_df["period_id"] < horizon_periods]
         forecast_df, forecast_dropped = restrict_demand_to_scenario(
             forecast_demand_df, graph_data, periods_df

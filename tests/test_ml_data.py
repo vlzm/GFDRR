@@ -1,4 +1,4 @@
-"""Tests for the forecasting data helpers (``gbp/ml/data.py``).
+"""Tests for the forecasting data helpers (``domains/citybike/ml/data.py``).
 
 The daily weather download and its year-file cache — the network itself is
 stubbed out. The trip downloader's tests live in ``tests/test_download.py``.
@@ -7,7 +7,7 @@ stubbed out. The trip downloader's tests live in ``tests/test_download.py``.
 import pandas as pd
 import pytest
 
-from gbp.ml import data
+from domains.citybike.ml import data
 
 
 @pytest.fixture

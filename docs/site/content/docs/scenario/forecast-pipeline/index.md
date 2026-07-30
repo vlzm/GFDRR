@@ -24,7 +24,7 @@ import pandas as pd
 from domains.citybike.loaders import RawModelData, build_resolved
 from gbp.model.dataloader_graph import apply_forecast_demand, attach_simulation
 from gbp.consumers.simulator import run_sized_scenario
-from gbp.ml import forecast
+from domains.citybike.ml import forecast
 ```
 
 

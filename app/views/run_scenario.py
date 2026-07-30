@@ -59,7 +59,7 @@ if demand_source == "forecast":
             st.stop()
     elif not saved:
         st.error(
-            "No saved forecasts. Build one first: python -m gbp.ml.forecast "
+            "No saved forecasts. Build one first: python -m domains.citybike.ml.forecast "
             "--trips-path <csv> --forecast-name <name>"
         )
         st.stop()

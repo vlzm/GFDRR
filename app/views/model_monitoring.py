@@ -5,7 +5,7 @@ import plotly.express as px
 import streamlit as st
 import ui_shared
 
-from gbp.ml.monitoring import (
+from domains.citybike.ml.ops.monitoring import (
     ROLLING_MONTHS,
     drift_report_paths,
     list_drift_summaries,
@@ -19,7 +19,7 @@ metrics = load_metrics()
 if metrics.empty:
     st.info(
         "No monitoring metrics yet. After a new actual month arrives, score it with "
-        "`python -m gbp.ml.monitoring --month <YYYYMM>`."
+        "`python -m domains.citybike.ml.ops.monitoring --month <YYYYMM>`."
     )
     st.stop()
 
@@ -85,7 +85,10 @@ st.caption(
 )
 summaries = list_drift_summaries()
 if not summaries:
-    st.caption("No drift reports yet — `python -m gbp.ml.monitoring --month <YYYYMM>` builds one.")
+    st.caption(
+        "No drift reports yet — "
+        "`python -m domains.citybike.ml.ops.monitoring --month <YYYYMM>` builds one."
+    )
 for summary in summaries:
     drifted = f"{summary['drifted_count']} of {len(summary['columns'])} columns drifted"
     with st.expander(f"{summary['month']} — {drifted}"):

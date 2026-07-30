@@ -14,17 +14,17 @@ import mlflow
 import pandas as pd
 
 from domains.citybike.loaders.download import month_bounds, normalize_month
-from gbp.ml.data import MlPaths, load_weather_daily, month_period_grid
-from gbp.ml.forecast import forecast_input, naive_month_prediction
-from gbp.ml.metrics import forecast_metrics
-from gbp.ml.models import MODEL_FAMILIES, create_model
-from gbp.ml.registry import BACKTEST_EXPERIMENT, MlflowStore
-from gbp.ml.training import (
+from domains.citybike.ml.data import MlPaths, load_weather_daily, month_period_grid
+from domains.citybike.ml.forecast import forecast_input, naive_month_prediction
+from domains.citybike.ml.ops.registry import BACKTEST_EXPERIMENT, MlflowStore
+from domains.citybike.ml.training import (
     load_actual_month,
     load_history_counts,
     load_training_table,
     training_dir,
 )
+from gbp.ml.metrics import forecast_metrics
+from gbp.ml.model import create_model, model_families
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,7 +55,7 @@ def backtest_splits(months: Sequence[str], n_splits: int = 3) -> list[BacktestSp
 
 def data_version() -> str:
     """Return the data version: the git commit that last touched the ``.dvc`` files."""
-    repo = pathlib.Path(__file__).resolve().parents[2]
+    repo = pathlib.Path(__file__).resolve().parents[4]
     tracked = ["data/raw.dvc", "data/ml/training.dvc"]
     try:
         commit = subprocess.run(
@@ -101,7 +101,7 @@ def comparison_table(
     """Average the split metrics per model and compare against the baseline."""
     frame = pd.DataFrame(records)
     table = frame.drop(columns=["test_month"]).groupby("model").mean(numeric_only=True)
-    order = [m for m in MODEL_FAMILIES if m in table.index]
+    order = [m for m in model_families() if m in table.index]
     table = table.loc[order + sorted(set(table.index) - set(order))]
     if baseline_records:
         baseline = pd.DataFrame(baseline_records)
@@ -112,7 +112,7 @@ def comparison_table(
 
 def run_backtest(
     months: Sequence[str],
-    model_names: Sequence[str] = MODEL_FAMILIES,
+    model_names: Sequence[str] | None = None,
     n_splits: int = 3,
     *,
     paths: MlPaths | None = None,
@@ -121,7 +121,8 @@ def run_backtest(
     log: Callable[[str], None] = print,
 ) -> pd.DataFrame:
     """Backtest the model families over the same splits, log runs to MLflow."""
-    unknown = set(model_names) - set(MODEL_FAMILIES)
+    model_names = list(model_families()) if model_names is None else list(model_names)
+    unknown = set(model_names) - set(model_families())
     if unknown:
         raise ValueError(f"unknown model families: {', '.join(sorted(unknown))}")
     paths = paths or MlPaths.resolve()
@@ -204,8 +205,8 @@ def main() -> None:
     parser.add_argument(
         "--models",
         nargs="+",
-        default=list(MODEL_FAMILIES),
-        choices=list(MODEL_FAMILIES),
+        default=list(model_families()),
+        choices=list(model_families()),
         help="model families to compare (default: all)",
     )
     args = parser.parse_args()

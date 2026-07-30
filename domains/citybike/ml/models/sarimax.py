@@ -10,7 +10,7 @@ import pandas as pd
 from statsmodels.iolib.smpickle import load_pickle
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
-from gbp.ml.models.base import DemandModel, fractional_demand
+from gbp.ml.model import DemandModel, fractional_demand
 
 
 class SarimaxTotalModel(DemandModel):

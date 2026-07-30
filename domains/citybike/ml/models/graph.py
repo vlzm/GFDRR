@@ -19,8 +19,8 @@ import pandas as pd
 import torch
 
 from domains.citybike.loaders.download import load_trips_any_schema, month_csvs, normalize_month
-from gbp.ml.features import FEATURE_COLUMNS, HISTORY_FEATURES, WEATHER_FEATURES
-from gbp.ml.models.base import DemandModel, fractional_demand
+from domains.citybike.ml.features import FEATURE_COLUMNS, HISTORY_FEATURES, WEATHER_FEATURES
+from gbp.ml.model import DemandModel, fractional_demand
 
 torch.set_num_threads(1)
 

@@ -2,7 +2,6 @@
 
 import copy
 import dataclasses
-import pathlib
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -306,25 +305,6 @@ def apply_forecast_demand(
     out.historical_demand_df = forecast_demand_df
     out.historical_od_matrix_df = od_matrix_df
     return out
-
-
-def apply_saved_forecast(
-    resolved: "ResolvedModelData",
-    forecast_name: str,
-    root: pathlib.Path | None = None,
-) -> tuple["ResolvedModelData", float]:
-    """Return a copy of ``resolved`` that runs on a saved forecast, plus the dropped share."""
-    # Imported inside the function: ``gbp.ml.forecast`` imports this module
-    # at its top, so a module-level import back would be a circular import.
-    from gbp.ml import forecast
-
-    forecast_demand_df, meta = forecast.load_forecast(forecast_name, root)
-    forecast_periods_df = forecast.forecast_periods_from_meta(meta)
-    forecast_demand_df, dropped_share = restrict_demand_to_scenario(
-        forecast_demand_df, resolved, forecast_periods_df
-    )
-    out = apply_forecast_demand(resolved, forecast_demand_df, forecast_periods_df)
-    return out, dropped_share
 
 
 # ---------------------------------------------------------------------------

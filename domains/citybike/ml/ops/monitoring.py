@@ -12,16 +12,12 @@ from typing import Any
 import pandas as pd
 
 from domains.citybike.loaders.download import normalize_month
-from gbp.ml.data import MlPaths, ml_dir, month_grid
-from gbp.ml.features import HISTORY_FEATURES, WEATHER_FEATURES
-from gbp.ml.forecast import (
-    ForecastMeta,
-    list_forecasts,
-    load_forecast,
-    naive_month_prediction,
-)
+from domains.citybike.ml.data import MlPaths, month_grid
+from domains.citybike.ml.features import HISTORY_FEATURES, WEATHER_FEATURES
+from domains.citybike.ml.forecast import naive_month_prediction
+from domains.citybike.ml.training import load_actual_month, partition_path, training_dir
+from gbp.ml.artifact import ForecastMeta, list_forecasts, load_forecast, ml_dir
 from gbp.ml.metrics import align_forecast, forecast_metrics
-from gbp.ml.training import load_actual_month, partition_path, training_dir
 
 #: How many scored months the rolling MAE of the alert rule averages over.
 ROLLING_MONTHS = 3
@@ -269,7 +265,7 @@ def drift_report(
     from evidently import Report
     from evidently.presets import DataDriftPreset
 
-    from gbp.ml.registry import MlflowStore
+    from domains.citybike.ml.ops.registry import MlflowStore
 
     paths = paths or MlPaths.resolve()
     month = normalize_month(month)
@@ -277,7 +273,7 @@ def drift_report(
     if champion is None:
         raise LookupError(
             "the registry has no champion yet; run the retraining pipeline "
-            "first (python -m gbp.ml.pipeline)"
+            "first (python -m domains.citybike.ml.ops.pipeline)"
         )
     train_months = str(champion.tags.get("train_months", "")).split(",")
     reference_months = [m for m in train_months if m and m != month]
@@ -295,7 +291,7 @@ def drift_report(
         if not path.exists():
             raise FileNotFoundError(
                 f"the champion trained on {reference_month} but its partition is gone; "
-                "rebuild it first (python -m gbp.ml.training)"
+                "rebuild it first (python -m domains.citybike.ml.training)"
             )
         frames.append(_sample_rows(pd.read_parquet(path, columns=DRIFT_COLUMNS), per_month, seed))
     reference = pd.concat(frames, ignore_index=True)
@@ -363,7 +359,9 @@ def main() -> None:
     if month is None:
         partitions = sorted(training_dir().glob("*.parquet"))
         if not partitions:
-            raise SystemExit("no training partitions; build them first (python -m gbp.ml.training)")
+            raise SystemExit(
+                "no training partitions; build them first (python -m domains.citybike.ml.training)"
+            )
         month = partitions[-1].stem
 
     rows = score_month(month)

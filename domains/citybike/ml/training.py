@@ -15,9 +15,14 @@ from domains.citybike.loaders.download import (
     month_csvs,
     normalize_month,
 )
-from gbp.ml.data import load_weather_daily, ml_dir, month_period_grid
-from gbp.ml.features import FEATURE_SCHEMA_COLUMNS, HISTORY_WEEKS, build_features
-from gbp.ml.station_status import download_status_months, next_month, stockout_share_table
+from domains.citybike.ml.data import load_weather_daily, month_period_grid
+from domains.citybike.ml.features import FEATURE_SCHEMA_COLUMNS, HISTORY_WEEKS, build_features
+from domains.citybike.ml.station_status import (
+    download_status_months,
+    next_month,
+    stockout_share_table,
+)
+from gbp.ml.artifact import ml_dir
 from gbp.model.dataloader_graph import DEFAULT_PERIOD_LEN, to_period_id
 from gbp.model.journal_schema import schema_violations
 
@@ -56,7 +61,7 @@ def load_actual_month(month: str, root: pathlib.Path | None = None) -> pd.DataFr
     if not path.exists():
         raise FileNotFoundError(
             f"no training partition for {normalize_month(month)}; "
-            "build it first (python -m gbp.ml.training)"
+            "build it first (python -m domains.citybike.ml.training)"
         )
     return pd.read_parquet(
         path, columns=["period_id", "facility_id", "commodity_category", "quantity"]
@@ -101,7 +106,8 @@ def load_training_table(months: list[str], root: pathlib.Path | None = None) -> 
         path = partition_path(month, root)
         if not path.exists():
             raise FileNotFoundError(
-                f"no training partition for {month}; build it first (python -m gbp.ml.training)"
+                f"no training partition for {month}; build it first "
+                "(python -m domains.citybike.ml.training)"
             )
         frame = pd.read_parquet(path)
         frame[float_columns] = frame[float_columns].astype("float32")

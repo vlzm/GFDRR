@@ -13,10 +13,11 @@ import pandas as pd
 import pytest
 
 from domains.citybike.loaders.download import month_bounds
-from gbp.ml import registry
-from gbp.ml.data import MlPaths
-from gbp.ml.forecast import build_model_forecast, load_forecast
-from gbp.ml.pipeline import STEPS, run_pipeline
+from domains.citybike.ml.data import MlPaths
+from domains.citybike.ml.forecast import build_model_forecast
+from domains.citybike.ml.ops import registry
+from domains.citybike.ml.ops.pipeline import STEPS, run_pipeline
+from gbp.ml.artifact import load_forecast
 from gbp.model.dataloader_graph import HISTORICAL_DEMAND_SCHEMA
 from gbp.model.journal_schema import schema_violations
 from tests.test_ml_models import flat_weather
@@ -97,7 +98,7 @@ def test_pipeline_runs_all_five_steps_on_the_fixture(tmp_path, monkeypatch):
     def bucket_has_nothing(month: str) -> list[str]:
         raise ValueError(f"the bucket has no monthly zip for {month}")
 
-    monkeypatch.setattr("gbp.ml.pipeline.month_zip_keys", bucket_has_nothing)
+    monkeypatch.setattr("domains.citybike.ml.ops.pipeline.month_zip_keys", bucket_has_nothing)
 
     log_path = tmp_path / "pipeline_log.csv"
     notes = []

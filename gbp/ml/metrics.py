@@ -5,11 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from gbp.ml.model import DEMAND_KEYS
+
 #: The floor under a prediction inside the Poisson deviance logarithm.
 POISSON_EPS = 1e-6
-
-#: The join keys of the row-level comparison.
-DEMAND_KEYS = ["period_id", "facility_id", "commodity_category"]
 
 
 def align_forecast(actual_df: pd.DataFrame, predicted_df: pd.DataFrame) -> pd.DataFrame:

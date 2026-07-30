@@ -14,8 +14,8 @@ from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 
 from domains.citybike.loaders.download import normalize_month
-from gbp.ml.data import ml_dir
-from gbp.ml.models import DemandModel, load_model
+from gbp.ml.artifact import ml_dir
+from gbp.ml.model import DemandModel, load_model
 
 #: The one registered model every version belongs to.
 REGISTERED_MODEL_NAME = "demand-model"
@@ -187,7 +187,7 @@ class MlflowStore:
         if version is None:
             raise LookupError(
                 "the registry has no champion yet; run the retraining pipeline "
-                "first (python -m gbp.ml.pipeline)"
+                "first (python -m domains.citybike.ml.ops.pipeline)"
             )
         return self.load_version_model(version), version
 

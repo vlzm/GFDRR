@@ -26,15 +26,15 @@ CSV. Its horizon starts right after the CSV's history ends and covers 168
 one-hour periods (one week) by default:
 
 ```bash
-python -m gbp.ml.forecast --trips-path data/raw/202601-citibike-tripdata_1.csv \
+python -m domains.citybike.ml.forecast --trips-path data/raw/202601-citibike-tripdata_1.csv \
     --forecast-name my_naive
 ```
 
-Once the retraining pipeline (`python -m gbp.ml.pipeline`) has trained and
+Once the retraining pipeline (`python -m domains.citybike.ml.ops.pipeline`) has trained and
 promoted a champion, forecast with it instead:
 
 ```bash
-python -m gbp.ml.forecast --champion --forecast-name champion_w1
+python -m domains.citybike.ml.forecast --champion --forecast-name champion_w1
 ```
 
 ## 3. Run on it

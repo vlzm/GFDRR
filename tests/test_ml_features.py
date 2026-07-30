@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gbp.ml import features, forecast, station_status, training
+from domains.citybike.ml import features, forecast, station_status, training
 from gbp.model.dataloader_graph import get_forecast_periods_df
 
 CLASSIC = "classic_bike"

@@ -8,7 +8,7 @@ from typing import ClassVar, Self
 
 import pandas as pd
 
-from gbp.ml.models.base import DemandModel, fractional_demand
+from gbp.ml.model import DemandModel, fractional_demand
 
 
 class SeasonalNaiveModel(DemandModel):

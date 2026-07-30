@@ -11,13 +11,15 @@ import pandas as pd
 import pytest
 
 from domains.citybike.loaders.download import month_bounds
-from gbp.ml import features
-from gbp.ml.backtest import (
+from domains.citybike.ml import features
+from domains.citybike.ml.data import MlPaths
+from domains.citybike.ml.models.graph import GraphSageModel, station_graph_edges
+from domains.citybike.ml.ops.backtest import (
     backtest_splits,
     comparison_table,
     run_backtest,
 )
-from gbp.ml.data import MlPaths
+from domains.citybike.ml.ops.registry import BACKTEST_EXPERIMENT, MlflowStore
 from gbp.ml.metrics import (
     align_forecast,
     busy_facility_ids,
@@ -25,9 +27,7 @@ from gbp.ml.metrics import (
     mean_absolute_error,
     mean_poisson_deviance,
 )
-from gbp.ml.models import MODEL_FAMILIES, create_model
-from gbp.ml.models.graph import GraphSageModel, station_graph_edges
-from gbp.ml.registry import BACKTEST_EXPERIMENT, MlflowStore
+from gbp.ml.model import create_model, model_families
 
 CLASSIC = "classic_bike"
 
@@ -121,7 +121,7 @@ def make_model(name: str):
 # ---------------------------------------------------------------------------
 # The interface: every family accepts the same tables, returns the same shape
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("name", MODEL_FAMILIES)
+@pytest.mark.parametrize("name", model_families())
 def test_every_family_fits_and_predicts_the_fractional_demand_shape(name):
     model = make_model(name)
     training_table = tiny_training_table()
@@ -137,7 +137,7 @@ def test_every_family_fits_and_predicts_the_fractional_demand_shape(name):
     assert out[keys].equals(out[keys].sort_values(keys).reset_index(drop=True))
 
 
-@pytest.mark.parametrize("name", MODEL_FAMILIES)
+@pytest.mark.parametrize("name", model_families())
 def test_every_family_survives_a_save_load_round_trip(name, tmp_path):
     model = make_model(name)
     model.fit(tiny_training_table())

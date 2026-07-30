@@ -150,7 +150,8 @@ move is what makes a forecast run possible at all. The details live in
 
 ## About the model that sits around the simulator
 
-The forecasting work (`gbp/ml/`) is a ring of code around the simulator rather
+The forecasting work (`domains/citybike/ml/`, on the `gbp/ml/` seam) is a ring
+of code around the simulator rather
 than a change inside it. It turns trip history, weather, and station-status files
 into a forecast demand table, and — this is the quiet elegance of it — that table
 has exactly the same shape as historical demand. So the simulator does not know

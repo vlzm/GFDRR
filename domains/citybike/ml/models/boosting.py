@@ -9,8 +9,8 @@ from typing import ClassVar, Self
 import lightgbm as lgb
 import pandas as pd
 
-from gbp.ml.features import FEATURE_COLUMNS
-from gbp.ml.models.base import DemandModel, fractional_demand
+from domains.citybike.ml.features import FEATURE_COLUMNS
+from gbp.ml.model import DemandModel, fractional_demand
 
 #: Fixed training settings; instance parameters override them.
 _DEFAULT_PARAMS: dict[str, object] = {

@@ -17,17 +17,18 @@ from domains.citybike.loaders.download import (
     normalize_month,
     raw_trip_months,
 )
-from gbp.ml.backtest import data_version, run_backtest
-from gbp.ml.data import MlPaths, ml_dir
-from gbp.ml.models import MODEL_FAMILIES, create_model
-from gbp.ml.registry import MlflowStore
-from gbp.ml.station_status import download_status_months, next_month
-from gbp.ml.training import (
+from domains.citybike.ml.data import MlPaths
+from domains.citybike.ml.ops.backtest import data_version, run_backtest
+from domains.citybike.ml.ops.registry import MlflowStore
+from domains.citybike.ml.station_status import download_status_months, next_month
+from domains.citybike.ml.training import (
     load_training_table,
     partition_path,
     training_dir,
     write_month_partition,
 )
+from gbp.ml.artifact import ml_dir
+from gbp.ml.model import create_model, model_families
 
 #: The steps, in the only order they run in.
 STEPS = ("download", "build-table", "train", "backtest", "promote")
@@ -90,7 +91,7 @@ def published_missing_months(
 
 def refresh_dvc(log: Callable[[str], None] = print) -> None:
     """Update the ``.dvc`` files after the tracked data changed."""
-    repo = pathlib.Path(__file__).resolve().parents[2]
+    repo = pathlib.Path(__file__).resolve().parents[4]
     try:
         subprocess.run(
             ["dvc", "add", "data/raw", "data/ml/training"],
@@ -405,7 +406,7 @@ def main() -> None:
     parser.add_argument(
         "--model",
         default="lightgbm",
-        choices=list(MODEL_FAMILIES),
+        choices=list(model_families()),
         help="candidate model family (default: lightgbm)",
     )
     parser.add_argument(

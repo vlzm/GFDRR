@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import os
 import pathlib
 from collections.abc import Callable
 
@@ -11,14 +10,8 @@ import pandas as pd
 import requests
 
 from domains.citybike.loaders.download import month_bounds, raw_dir
+from gbp.ml.artifact import forecasts_root
 from gbp.model.dataloader_graph import DEFAULT_PERIOD_LEN, PeriodGrid
-
-_DEFAULT_DATA_DIR = pathlib.Path(__file__).resolve().parents[2] / "data"
-
-
-def ml_dir() -> pathlib.Path:
-    """Root of the forecasting data: ``<data dir>/ml`` (honors the ``DATA_DIR`` switch)."""
-    return pathlib.Path(os.environ.get("DATA_DIR", _DEFAULT_DATA_DIR)) / "ml"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -34,11 +27,10 @@ class MlPaths:
     @classmethod
     def resolve(cls) -> MlPaths:
         """Return the repository default folders (honoring the ``DATA_DIR`` switch)."""
-        # Imported here, not at the top: training, forecast, and monitoring
-        # each import this module, so importing them at the top would cycle.
-        from gbp.ml.forecast import forecasts_root
-        from gbp.ml.monitoring import monitoring_dir
-        from gbp.ml.training import training_dir
+        # Imported here, not at the top: training and monitoring each import
+        # this module, so importing them at the top would cycle.
+        from domains.citybike.ml.ops.monitoring import monitoring_dir
+        from domains.citybike.ml.training import training_dir
 
         return cls(
             raw=raw_dir(),

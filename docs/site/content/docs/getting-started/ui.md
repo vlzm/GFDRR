@@ -71,7 +71,7 @@ only page that computes anything heavy is "Run scenario".
 - Single facility — one facility: its inventory over periods, any metric
   per period, the raw panel rows.
 - Model monitoring — the forecast-model metric history and drift reports
-  saved by `python -m gbp.ml.monitoring`; empty until that command has run.
+  saved by `python -m domains.citybike.ml.ops.monitoring`; empty until that command has run.
 - Download data — the raw output tables of the selected runs as CSV files.
 
 ## Where to go next

@@ -10,12 +10,12 @@ mypy gbp/ domains/                # typecheck
 streamlit run app/main.py         # UI
 python app/runner.py --help       # run a scenario from the terminal
 uvicorn api:app --app-dir app     # serve the run-artifact API (docs/site/content/docs/reference/api.md)
-python -m gbp.ml.training --months 202502 202503  # download raw months, build the training table
-python -m gbp.ml.backtest         # rolling-origin backtest of the model families, logged to MLflow
-python -m gbp.ml.pipeline         # retraining pipeline: download → build-table → train → backtest → promote
-python -m gbp.ml.forecast --champion --forecast-name <name>  # forecast with the registry champion
-python -m gbp.ml.evaluation --month 202601  # two-level evaluation: run the simulator on actual vs forecast demand
-python -m gbp.ml.monitoring --month 202602  # score saved forecasts against the month's actuals, build the drift report
+python -m domains.citybike.ml.training --months 202502 202503  # download raw months, build the training table
+python -m domains.citybike.ml.ops.backtest         # rolling-origin backtest of the model families, logged to MLflow
+python -m domains.citybike.ml.ops.pipeline         # retraining pipeline: download → build-table → train → backtest → promote
+python -m domains.citybike.ml.forecast --champion --forecast-name <name>  # forecast with the registry champion
+python -m domains.citybike.ml.ops.evaluation --month 202601  # two-level evaluation: run the simulator on actual vs forecast demand
+python -m domains.citybike.ml.ops.monitoring --month 202602  # score saved forecasts against the month's actuals, build the drift report
 mlflow ui --backend-store-uri sqlite:///data/ml/mlflow/mlflow.db  # browse the experiments and the model registry
 dvc status                        # data/raw and data/ml/training vs their .dvc files
 ```
@@ -28,7 +28,7 @@ dvc status                        # data/raw and data/ml/training vs their .dvc 
 
 ## Codebase Rules
 
-- **Layers.** `gbp/` is the domain-agnostic framework; `domains/<name>/` is one concrete scenario built on it. The dependency arrow is always `domains → gbp`; `gbp` must never import `domains`. Not true yet: `gbp/consumers/run.py` and `gbp/ml/` still import `domains.citybike`. Check with `grep -rn "domains\." gbp/` — an empty result means the split is done.
+- **Layers.** `gbp/` is the domain-agnostic framework; `domains/<name>/` is one concrete scenario built on it. The dependency arrow is always `domains → gbp`; `gbp` must never import `domains`. Not true yet: `gbp/consumers/run.py` still imports `domains.citybike`. Check with `grep -rn "domains\." gbp/` — an empty result means the split is done.
 - **Minimalism.** Code must be hackable. No factories, heavy DI containers, or hidden magic.
 - **Deep modules.** A module's interface is everything a caller must know to use it — types, call order, invariants, error modes, required config — not just the signature. Aim for a lot of behaviour behind a small interface. Before adding a parameter, a helper, or a wrapper, apply the deletion test: if deleting it would only move the same complexity onto the callers, it is shallow — don't add it.
 - **Vectorization first.** All math via pandas/NumPy. No `for` loops over data in hot paths.

@@ -10,8 +10,8 @@ import pandas as pd
 import pytest
 
 from domains.citybike.loaders.dataloader_graph import get_historical_flows_df
-from gbp.ml import training
-from gbp.ml.features import FEATURE_COLUMNS, HISTORY_FEATURES
+from domains.citybike.ml import training
+from domains.citybike.ml.features import FEATURE_COLUMNS, HISTORY_FEATURES
 from gbp.model import flows_to_departures
 
 CLASSIC = "classic_bike"

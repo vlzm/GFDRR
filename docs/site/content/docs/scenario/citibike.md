@@ -244,11 +244,11 @@ version the platform forecasts with — is marked in the MLflow model
 registry. The pipeline commands:
 
 ```bash
-python -m gbp.ml.training --months 202502 202503        # download raw months, build the training table
-python -m gbp.ml.backtest                               # rolling-origin backtest of the model families
-python -m gbp.ml.pipeline                               # download → build-table → train → backtest → promote
-python -m gbp.ml.forecast --champion --forecast-name champion_w1   # forecast with the registry champion
-python -m gbp.ml.monitoring --month 202602              # score saved forecasts against the month's actuals
+python -m domains.citybike.ml.training --months 202502 202503        # download raw months, build the training table
+python -m domains.citybike.ml.ops.backtest                               # rolling-origin backtest of the model families
+python -m domains.citybike.ml.ops.pipeline                               # download → build-table → train → backtest → promote
+python -m domains.citybike.ml.forecast --champion --forecast-name champion_w1   # forecast with the registry champion
+python -m domains.citybike.ml.ops.monitoring --month 202602              # score saved forecasts against the month's actuals
 ```
 
 How each step works — the training table, the features, the censoring, the
@@ -261,7 +261,7 @@ forecast runs against the state sized on the actual demand — and compares
 the run totals against the reference run:
 
 ```bash
-python -m gbp.ml.evaluation --month 202601
+python -m domains.citybike.ml.ops.evaluation --month 202601
 ```
 
 The saved result for January 2026, ending with which model the platform

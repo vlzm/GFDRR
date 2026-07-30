@@ -10,11 +10,10 @@ import dataclasses
 import pandas as pd
 import pytest
 
-from gbp.ml import registry
-from gbp.ml.data import MlPaths
-from gbp.ml.forecast import build_champion_forecast, load_forecast
-from gbp.ml.models import create_model
-from gbp.ml.pipeline import (
+from domains.citybike.ml.data import MlPaths
+from domains.citybike.ml.forecast import build_champion_forecast
+from domains.citybike.ml.ops import registry
+from domains.citybike.ml.ops.pipeline import (
     LOG_COLUMNS,
     append_log_row,
     family_score,
@@ -22,6 +21,8 @@ from gbp.ml.pipeline import (
     published_missing_months,
     run_pipeline,
 )
+from gbp.ml.artifact import load_forecast
+from gbp.ml.model import create_model
 from tests.test_ml_models import (
     MONDAY,
     WEEK,
@@ -217,7 +218,7 @@ def test_published_missing_months_stops_at_the_first_unpublished(monkeypatch):
             raise ValueError(f"the bucket has no monthly zip for {month}")
         return [f"{month}-citibike-tripdata.zip"]
 
-    monkeypatch.setattr("gbp.ml.pipeline.month_zip_keys", fake_keys)
+    monkeypatch.setattr("domains.citybike.ml.ops.pipeline.month_zip_keys", fake_keys)
     got = published_missing_months(["202512", "202601"], today=pd.Timestamp("2026-07-11"))
     assert got == ["202602", "202603"]
     assert published_missing_months([], today=pd.Timestamp("2026-07-11")) == []

@@ -5,8 +5,8 @@ weight: 6
 
 # The ML toolkit — demand forecasting
 
-This document explains how `gbp/ml/` turns Citi Bike trip history into a
-forecast that the simulator can run.
+This document explains how `domains/citybike/ml/` turns Citi Bike trip
+history into a forecast that the simulator can run.
 
 The connection to the simulator is small. The model produces a forecast
 demand table — `period_id, facility_id, commodity_category, quantity` — the
@@ -27,7 +27,8 @@ trip, weather, and station-status files
 The canonical terms are
 [Notations.md §17](../reference/notations.md#17-demand-forecasting-the-model-around-the-simulator).
 Each module's exact behavior is in its docstring (start from the package
-docstring, `gbp/ml/__init__.py`) — this page gives the map and the design.
+docstring, `domains/citybike/ml/__init__.py`) — this page gives the map and
+the design.
 How to run a forecast is [how-to/run-on-a-forecast.md](../how-to/run-on-a-forecast.md).
 
 ## Code And Data Map
@@ -35,9 +36,9 @@ How to run a forecast is [how-to/run-on-a-forecast.md](../how-to/run-on-a-foreca
 | Part | Files | Purpose |
 |---|---|---|
 | Prepare data | `domains/citybike/loaders/download.py`, `data.py`, `station_status.py`, `training.py`, `features.py` | Download source files and build the training table. The trip downloader lives with the Citi Bike loaders because the base replay uses the same CSVs. |
-| Fit and use models | `models/`, `forecast.py` | Fit a model and save a forecast artifact. |
-| Compare models | `metrics.py`, `backtest.py`, `evaluation.py` | Measure forecast error and simulator results. |
-| Operate the model | `registry.py`, `pipeline.py`, `monitoring.py` | Choose the champion, retrain it, and check later results. |
+| Fit and use models | `models/`, `forecast.py` | Fit a model and save a forecast artifact. The model interface and the artifact format are the framework seam: `gbp/ml/model.py`, `gbp/ml/artifact.py`. |
+| Compare models | `gbp/ml/metrics.py`, `ops/backtest.py`, `ops/evaluation.py` | Measure forecast error and simulator results. |
+| Operate the model | `ops/registry.py`, `ops/pipeline.py`, `ops/monitoring.py` | Choose the champion, retrain it, and check later results. |
 
 | Path | Contents |
 |---|---|
@@ -73,8 +74,11 @@ feature (future stockouts are unknown); LightGBM and GraphSage use it as a
 training weight, `1 - stockout_share`.
 
 Four model families implement one contract, `DemandModel`
-(`fit / predict / save / load / params`), built through one factory,
-`create_model`: `seasonal_naive` (the hour-of-week mean, the baseline),
+(`fit / predict / save / load / params`), which lives in the framework
+(`gbp/ml/model.py`) together with the registry the domain fills at import
+time: a family is registered under its name, and `create_model` imports its
+module the first time that name is asked for. The four are `seasonal_naive`
+(the hour-of-week mean, the baseline),
 `sarimax` (a daily city-wide series, divided back over stations),
 `lightgbm` (one gradient-boosting model for all stations, Poisson
 objective), and `graphsage` (stations as graph nodes, trips as weighted
@@ -91,11 +95,11 @@ by name and runs the same chain as a replay
 
 | Command | What it does |
 |---|---|
-| `python -m gbp.ml.training --months ...` | Download missing months, build the monthly partitions, oldest first. |
-| `python -m gbp.ml.backtest` | The rolling-origin backtest: train on earlier months, forecast the next, move forward; scores (MAE, Poisson deviance) and models logged to MLflow, with ratios against the seasonal naive baseline. |
-| `python -m gbp.ml.evaluation --month <YYYYMM>` | The two-level evaluation: level 1 compares demand tables, level 2 runs the simulator on the actual and on each forecast with the same replay state, so only demand differs. |
-| `python -m gbp.ml.pipeline` | The retraining pipeline: `download -> build-table -> train -> backtest -> promote`; every decision appends one row to `data/ml/pipeline_log.csv`. |
-| `python -m gbp.ml.monitoring --month <YYYYMM>` | After a month's actuals arrive: score the saved forecasts against them, mark degraded months, build the drift report. |
+| `python -m domains.citybike.ml.training --months ...` | Download missing months, build the monthly partitions, oldest first. |
+| `python -m domains.citybike.ml.ops.backtest` | The rolling-origin backtest: train on earlier months, forecast the next, move forward; scores (MAE, Poisson deviance) and models logged to MLflow, with ratios against the seasonal naive baseline. |
+| `python -m domains.citybike.ml.ops.evaluation --month <YYYYMM>` | The two-level evaluation: level 1 compares demand tables, level 2 runs the simulator on the actual and on each forecast with the same replay state, so only demand differs. |
+| `python -m domains.citybike.ml.ops.pipeline` | The retraining pipeline: `download -> build-table -> train -> backtest -> promote`; every decision appends one row to `data/ml/pipeline_log.csv`. |
+| `python -m domains.citybike.ml.ops.monitoring --month <YYYYMM>` | After a month's actuals arrive: score the saved forecasts against them, mark degraded months, build the drift report. |
 
 The registry (`MlflowStore`, under `data/ml/mlflow/`) keeps versions of one
 registered model, `demand-model`; each version records `model_family`,

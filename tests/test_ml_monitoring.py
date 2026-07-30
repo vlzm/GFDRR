@@ -16,9 +16,9 @@ import pandas as pd
 import pytest
 
 from domains.citybike.loaders.download import month_bounds
-from gbp.ml import monitoring
-from gbp.ml.data import MlPaths
-from gbp.ml.forecast import ForecastMeta, save_forecast
+from domains.citybike.ml.data import MlPaths
+from domains.citybike.ml.ops import monitoring
+from gbp.ml.artifact import ForecastMeta, save_forecast
 
 CLASSIC = "classic_bike"
 FACILITIES = ["s1", "s2"]
@@ -237,7 +237,7 @@ def test_metric_history_on_an_empty_table():
 # The drift report
 # ---------------------------------------------------------------------------
 def test_drift_report_compares_the_month_against_the_champions_training_data(roots, monkeypatch):
-    import gbp.ml.registry as registry
+    import domains.citybike.ml.ops.registry as registry
 
     # December is the reference; January's temperatures are shifted far up.
     partition_frame("202512", 2, temperature=10.0).to_parquet(roots.training / "202512.parquet")
@@ -274,7 +274,7 @@ def test_drift_report_compares_the_month_against_the_champions_training_data(roo
 
 
 def test_drift_report_without_a_champion_raises(roots, monkeypatch):
-    import gbp.ml.registry as registry
+    import domains.citybike.ml.ops.registry as registry
 
     monkeypatch.setattr(registry.MlflowStore, "champion_version", lambda self: None)
     with pytest.raises(LookupError, match="no champion"):

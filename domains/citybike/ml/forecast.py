@@ -1,4 +1,4 @@
-"""Build and save forecast demand tables."""
+"""Build forecast demand tables and save them as artifacts."""
 
 from __future__ import annotations
 
@@ -7,112 +7,15 @@ import datetime
 import pathlib
 from collections.abc import Callable
 
-import numpy as np
 import pandas as pd
-import pydantic
 
 from domains.citybike.loaders.download import month_bounds, normalize_month
-from gbp.ml.data import MlPaths, load_weather_daily, ml_dir, month_period_grid
-from gbp.ml.features import HISTORY_WEEKS, build_features, clip_history_window
-from gbp.ml.models import DemandModel, create_model
-from gbp.model.dataloader_graph import (
-    DEFAULT_PERIOD_LEN,
-    HISTORICAL_DEMAND_SCHEMA,
-    PeriodGrid,
-    get_forecast_periods_df,
-)
-from gbp.model.journal_schema import schema_violations
-
-
-def forecasts_root() -> pathlib.Path:
-    """Folder that holds all forecast artifacts: ``<ml dir>/forecasts``."""
-    return ml_dir() / "forecasts"
-
-
-def forecast_dir(forecast_name: str, root: pathlib.Path | None = None) -> pathlib.Path:
-    """Folder of one forecast artifact."""
-    return (root or forecasts_root()) / forecast_name
-
-
-def list_forecasts(root: pathlib.Path | None = None) -> list[str]:
-    """Names of every saved forecast (folders with a ``meta.json``), sorted."""
-    base = root or forecasts_root()
-    if not base.exists():
-        return []
-    return sorted(p.name for p in base.iterdir() if (p / "meta.json").exists())
-
-
-class ForecastMeta(pydantic.BaseModel):
-    """The meta.json contract of a forecast artifact."""
-
-    forecast_name: str
-    model_name: str
-    model_version: str
-    created_at: str
-    #: Wall-clock start of forecast period 0 (right after the history ends).
-    t0: str
-    horizon_periods: int
-    period_len_hours: float
-    #: The history window the model was built from.
-    history_start: str
-    history_end: str
-    #: File names of the raw source files the history came from.
-    inputs: list[str]
-
-    @property
-    def grid(self) -> PeriodGrid:
-        """The forecast horizon this meta describes, as a PeriodGrid."""
-        return PeriodGrid(
-            pd.Timestamp(self.t0),
-            self.horizon_periods,
-            pd.Timedelta(hours=self.period_len_hours),
-        )
-
-
-def forecast_periods_from_meta(meta: ForecastMeta) -> pd.DataFrame:
-    """Rebuild the forecast period grid a saved forecast was built for."""
-    return meta.grid.frame()
-
-
-def counts_from_demand(demand_df: pd.DataFrame, periods_df: pd.DataFrame) -> pd.DataFrame:
-    """Turn the historical demand marginal into a zero-filled counts grid."""
-    known = demand_df["period_id"].isin(set(periods_df["period_id"]))
-    if not known.all():
-        missing = demand_df.loc[~known, "period_id"].unique()[:5].tolist()
-        raise ValueError(f"demand has periods outside the period grid: {missing}")
-    grid = pd.MultiIndex.from_product(
-        [
-            periods_df["period_id"],
-            sorted(demand_df["facility_id"].unique()),
-            sorted(demand_df["commodity_category"].unique()),
-        ],
-        names=["period_id", "facility_id", "commodity_category"],
-    ).to_frame(index=False)
-    out = grid.merge(demand_df, on=["period_id", "facility_id", "commodity_category"], how="left")
-    out["quantity"] = out["quantity"].fillna(0).astype("int64")
-    out = out.merge(periods_df[["period_id", "start_timestamp"]], on="period_id")
-    return out[["start_timestamp", "facility_id", "commodity_category", "quantity"]]
-
-
-def round_forecast_demand(demand_df: pd.DataFrame) -> pd.DataFrame:
-    """Round a fractional forecast to whole bikes (largest-remainder, group totals stay exact)."""
-    m = demand_df.copy()
-    m["base"] = np.floor(m["quantity"]).astype("int64")
-    m["remainder"] = m["quantity"] - m["base"]
-    m = m.sort_values(
-        ["period_id", "commodity_category", "remainder", "facility_id"],
-        ascending=[True, True, False, True],
-        kind="stable",
-    )
-    grp = m.groupby(["period_id", "commodity_category"])
-    leftover = grp["quantity"].transform("sum").round() - grp["base"].transform("sum")
-    m["quantity"] = m["base"] + (grp.cumcount() < leftover).astype("int64")
-    m = m[m["quantity"] > 0]
-    return (
-        m[["period_id", "facility_id", "commodity_category", "quantity"]]
-        .sort_values(["period_id", "facility_id", "commodity_category"])
-        .reset_index(drop=True)
-    )
+from domains.citybike.ml.data import MlPaths, load_weather_daily, month_period_grid
+from domains.citybike.ml.features import HISTORY_WEEKS, build_features, clip_history_window
+from domains.citybike.ml.training import load_history_counts, load_training_table
+from gbp.ml.artifact import ForecastMeta, counts_from_demand, round_forecast_demand, save_forecast
+from gbp.ml.model import DemandModel, create_model
+from gbp.model.dataloader_graph import DEFAULT_PERIOD_LEN, get_forecast_periods_df
 
 
 def forecast_input(
@@ -141,19 +44,10 @@ def forecast_input(
 def predict_horizon(
     model: DemandModel,
     forecast_periods_df: pd.DataFrame,
-    *,
-    history_df: pd.DataFrame | None = None,
-    training_root: pathlib.Path | None = None,
+    history_df: pd.DataFrame,
     weather_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Predict one forecast horizon with a fitted model, in whole bikes."""
-    if history_df is None:
-        # Imported here, not at the top: gbp.ml.training is the partition
-        # builder, and only this default needs it.
-        from gbp.ml.training import load_history_counts
-
-        t0 = forecast_periods_df["start_timestamp"].iloc[0]
-        history_df = load_history_counts(t0.strftime("%Y%m"), training_root)
     fractional = model.predict(forecast_input(history_df, forecast_periods_df, weather_df))
     return round_forecast_demand(fractional)
 
@@ -162,50 +56,15 @@ def naive_month_prediction(
     month: str, training_root: pathlib.Path | None = None
 ) -> pd.DataFrame | None:
     """Forecast one calendar month with the seasonal naive; None if no earlier partition exists."""
-    # Imported here, not at the top: gbp.ml.training is the partition
-    # builder, and only the partition-backed helpers need it.
-    from gbp.ml.training import load_history_counts
-
     history = load_history_counts(month, training_root)
     if history.empty:
         return None
-    return predict_horizon(
-        create_model("seasonal_naive"), month_period_grid(month), history_df=history
-    )
-
-
-def save_forecast(
-    demand_df: pd.DataFrame, meta: ForecastMeta, root: pathlib.Path | None = None
-) -> pathlib.Path:
-    """Write one forecast artifact, after checking the demand table against the schema."""
-    violations = schema_violations(HISTORICAL_DEMAND_SCHEMA, demand_df)
-    if violations:
-        raise ValueError(
-            "forecast demand table breaks the demand schema:\n" + "\n".join(violations)
-        )
-    folder = forecast_dir(meta.forecast_name, root)
-    folder.mkdir(parents=True, exist_ok=True)
-    demand_df.to_parquet(folder / "demand.parquet", index=False)
-    (folder / "meta.json").write_text(meta.model_dump_json(indent=2))
-    return folder
-
-
-def load_forecast(
-    forecast_name: str, root: pathlib.Path | None = None
-) -> tuple[pd.DataFrame, ForecastMeta]:
-    """Read a saved forecast: the demand table and its validated ``meta.json``."""
-    folder = forecast_dir(forecast_name, root)
-    if not (folder / "meta.json").exists():
-        raise FileNotFoundError(
-            f"unknown forecast {forecast_name!r}; saved forecasts: {list_forecasts(root)}"
-        )
-    meta = ForecastMeta.model_validate_json((folder / "meta.json").read_text())
-    demand_df = pd.read_parquet(folder / "demand.parquet")
-    return demand_df, meta
+    return predict_horizon(create_model("seasonal_naive"), month_period_grid(month), history)
 
 
 def _finish_forecast(
     model: DemandModel,
+    history_df: pd.DataFrame,
     *,
     t0: pd.Timestamp,
     horizon_periods: int,
@@ -216,19 +75,11 @@ def _finish_forecast(
     history_end: pd.Timestamp,
     inputs: list[str],
     root: pathlib.Path | None,
-    history_df: pd.DataFrame | None = None,
-    training_root: pathlib.Path | None = None,
     weather_df: pd.DataFrame | None = None,
 ) -> pathlib.Path:
     """Predict the horizon and save the artifact — the tail every builder ends with."""
     forecast_periods_df = get_forecast_periods_df(t0, horizon_periods, period_len)
-    forecast_demand_df = predict_horizon(
-        model,
-        forecast_periods_df,
-        history_df=history_df,
-        training_root=training_root,
-        weather_df=weather_df,
-    )
+    forecast_demand_df = predict_horizon(model, forecast_periods_df, history_df, weather_df)
     meta = ForecastMeta(
         forecast_name=forecast_name,
         model_name=model.name,
@@ -261,6 +112,7 @@ def build_seasonal_naive_forecast(
     model.fit(counts)
     return _finish_forecast(
         model,
+        counts,
         t0=t0,
         horizon_periods=horizon_periods,
         period_len=period_len,
@@ -270,7 +122,6 @@ def build_seasonal_naive_forecast(
         history_end=periods_df["end_timestamp"].iloc[-1],
         inputs=inputs,
         root=root,
-        history_df=counts,
     )
 
 
@@ -303,10 +154,6 @@ def build_model_forecast(
     **model_params: object,
 ) -> pathlib.Path:
     """Fit one model family on the training partitions and save its forecast."""
-    # Imported here, not at the top: gbp.ml.training is the partition
-    # builder, and only this builder needs it.
-    from gbp.ml.training import load_training_table
-
     paths = paths or MlPaths.resolve()
     months = sorted(normalize_month(m) for m in train_months)
     log(f"Training {model_name} on {months[0]}..{months[-1]} ...")
@@ -320,6 +167,7 @@ def build_model_forecast(
     log(f"Predicting {horizon_periods} periods from {t0} ...")
     return _finish_forecast(
         model,
+        load_history_counts(t0.strftime("%Y%m"), paths.training),
         t0=t0,
         horizon_periods=horizon_periods,
         period_len=DEFAULT_PERIOD_LEN,
@@ -329,7 +177,6 @@ def build_model_forecast(
         history_end=t0,
         inputs=[f"{month}.parquet" for month in months],
         root=paths.forecasts,
-        training_root=paths.training,
         weather_df=weather_df,
     )
 
@@ -344,10 +191,10 @@ def build_champion_forecast(
     log: Callable[[str], None] = print,
 ) -> pathlib.Path:
     """Build a forecast with the champion, resolved from the registry by its alias."""
-    # Imported here, not at the top: the registry drags in MLflow and the
-    # training module is the partition builder — only this builder needs them.
-    from gbp.ml.registry import MlflowStore
-    from gbp.ml.training import history_months, partition_path
+    # Imported here, not at the top: the registry drags in MLflow, and only
+    # this builder needs it.
+    from domains.citybike.ml.ops.registry import MlflowStore
+    from domains.citybike.ml.training import history_months, partition_path
 
     paths = paths or MlPaths.resolve()
     model, version = MlflowStore(paths.tracking).resolve_champion()
@@ -357,7 +204,7 @@ def build_champion_forecast(
         partitions = sorted(paths.training.glob("*.parquet"))
         if not partitions:
             raise FileNotFoundError(
-                "no training partitions; build them first (python -m gbp.ml.training)"
+                "no training partitions; build them first (python -m domains.citybike.ml.training)"
             )
         t0_month = partitions[-1].stem
         t0 = month_bounds(t0_month)[1]
@@ -371,6 +218,7 @@ def build_champion_forecast(
     window = [m for m in history_months(t0_month) if partition_path(m, paths.training).exists()]
     return _finish_forecast(
         model,
+        load_history_counts(t0_month, paths.training),
         t0=t0,
         horizon_periods=horizon_periods,
         period_len=DEFAULT_PERIOD_LEN,
@@ -380,13 +228,14 @@ def build_champion_forecast(
         history_end=t0,
         inputs=[f"{month}.parquet" for month in window],
         root=paths.forecasts,
-        training_root=paths.training,
         weather_df=weather_df,
     )
 
 
 def main() -> None:
     """Terminal entry point: build one forecast artifact."""
+    from gbp.ml.artifact import load_forecast
+
     parser = argparse.ArgumentParser(description="Build a forecast demand table and save it.")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--trips-path", help="raw trip CSV path (seasonal naive only)")
@@ -446,7 +295,7 @@ def main() -> None:
     if args.model != "seasonal_naive":
         raise SystemExit("--trips-path builds the seasonal naive only; use --months instead")
 
-    # The heavy loader imports live here so `import gbp.ml.forecast` stays light.
+    # The heavy loader imports live here so importing this module stays light.
     from domains.citybike.loaders.dataloader_graph import (
         get_historical_flows_df,
         get_periods_df,

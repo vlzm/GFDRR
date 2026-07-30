@@ -17,7 +17,8 @@ from gbp.consumers.simulator import (
     rebalancing_phases,
     run_sized_scenario,
 )
-from gbp.model.dataloader_graph import ResolvedModelData, apply_saved_forecast
+from gbp.ml.artifact import apply_saved_forecast
+from gbp.model.dataloader_graph import ResolvedModelData
 from gbp.routing import DEFAULT_OSRM_URL, RoutingMode
 
 DEFAULT_TRIPS_PATH = str(artifacts.data_dir() / "raw" / "202601-citibike-tripdata_1.csv")

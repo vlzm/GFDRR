@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from gbp import artifacts
+from gbp.ml import artifact
 
 if TYPE_CHECKING:
     from gbp.consumers.run import RunRequest
@@ -60,9 +61,7 @@ class DiskBackend:
 
     def list_forecasts(self) -> list[str]:
         """Names of the saved forecasts (``data/ml/forecasts/``) a run can use."""
-        from gbp.ml import forecast  # heavy import; only the Run page pays it
-
-        return forecast.list_forecasts()
+        return artifact.list_forecasts()
 
     def default_trips_path(self) -> str:
         """Return the trips CSV a local run reads by default; the user may point elsewhere."""
