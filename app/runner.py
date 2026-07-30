@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import argparse
 
-from gbp import artifacts
-from gbp.consumers.run import (
-    DEFAULT_NUMBER_OF_PERIODS,
+from domains.citybike.run import (
     DEFAULT_TRIPS_PATH,
     DEFAULT_TRUCK_CAPACITY_BIKES,
-    DEMAND_SOURCES,
     RunRequest,
     build_graph_data,
     run_scenario,
 )
+from gbp import artifacts
+from gbp.consumers.run import DEFAULT_NUMBER_OF_PERIODS, DEMAND_SOURCES
 from gbp.logging import configure_logging
 from gbp.routing import DEFAULT_OSRM_URL, ROUTING_MODES
 

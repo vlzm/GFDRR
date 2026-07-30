@@ -132,9 +132,14 @@ class RebalancingSettings(NamedTuple):
 
 
 def rebalancing_settings(meta: artifacts.RunMeta) -> RebalancingSettings:
-    """Read the rebalancing block of ``meta.json`` (``truck_homes`` empty when off)."""
+    """Read the rebalancing block of ``meta.json`` (``truck_homes`` empty when off).
+
+    ``truck_homes`` is a Citi Bike key: the framework's ``RebalancingMeta``
+    stores whatever the domain recipe wrote, so it is read off the extras.
+    """
     block = meta.rebalancing
-    return RebalancingSettings(block.enabled, block.truck_homes or [])
+    homes = (block.model_extra or {}).get("truck_homes") or []
+    return RebalancingSettings(block.enabled, list(homes))
 
 
 # --- Scenario picking -------------------------------------------------------

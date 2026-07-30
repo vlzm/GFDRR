@@ -1,4 +1,4 @@
-"""The run path: the recipe, the fleet defaults, and configure → run → save."""
+"""The run path: the run recipe, and configure → run → save."""
 
 from __future__ import annotations
 
@@ -6,10 +6,8 @@ import pathlib
 from collections.abc import Callable
 from typing import Literal
 
-import pandas as pd
 import pydantic
 
-from domains.citybike.loaders import RawModelData, apply_truck_fleet, build_resolved
 from gbp import artifacts
 from gbp.consumers.simulator import (
     RebalancingParams,
@@ -19,24 +17,20 @@ from gbp.consumers.simulator import (
 )
 from gbp.ml.artifact import apply_saved_forecast
 from gbp.model.dataloader_graph import ResolvedModelData
-from gbp.routing import DEFAULT_OSRM_URL, RoutingMode
 
-DEFAULT_TRIPS_PATH = str(artifacts.data_dir() / "raw" / "202601-citibike-tripdata_1.csv")
 DEFAULT_NUMBER_OF_PERIODS = 50
 
 #: Where a run's demand table can come from (Notations.md §11).
 DEMAND_SOURCES = ("history", "forecast")
 
-# The synthetic depot and truck fleet (see domains/citybike/loaders/dataloader_raw.py).
-DEFAULT_N_DEPOTS = 10
-DEPOT_IDS = [f"depot_{i + 1}" for i in range(DEFAULT_N_DEPOTS)]
-DEFAULT_TRUCK_HOMES = ["depot_1"] * 5
-DEFAULT_TRUCK_CAPACITY_BIKES = 20
-DEFAULT_TRUCK_RATE = 50.0
-
 
 class RunRequest(pydantic.BaseModel):
-    """The full recipe of one run: every parameter that says what to run."""
+    """The full recipe of one run: every parameter that says what to run.
+
+    Framework parameters only. A domain that needs more -- its own data
+    source, a fleet of resources -- subclasses this and adds its fields; see
+    ``domains/citybike/run.py``.
+    """
 
     run_name: str = pydantic.Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     demand_scale_factor: float = 1.0
@@ -47,8 +41,6 @@ class RunRequest(pydantic.BaseModel):
     #: ``demand_source="forecast"``.
     forecast_name: str | None = None
     rebalancing: bool = False
-    truck_homes: list[str] | None = None
-    truck_capacity_bikes: int = DEFAULT_TRUCK_CAPACITY_BIKES
 
     @pydantic.model_validator(mode="after")
     def _forecast_needs_a_name(self) -> RunRequest:
@@ -57,45 +49,13 @@ class RunRequest(pydantic.BaseModel):
             raise ValueError("demand_source='forecast' needs a forecast_name")
         return self
 
-    def resolved_truck_homes(self) -> list[str]:
-        """Home depot per truck the run uses: the request's list, or the default fleet."""
-        if self.truck_homes is not None:
-            return list(self.truck_homes)
-        return list(DEFAULT_TRUCK_HOMES)
-
     def rebalancing_meta(self) -> dict[str, object]:
-        """Build the run's rebalancing block for ``meta.json``."""
-        meta: dict[str, object] = {"enabled": self.rebalancing}
-        if self.rebalancing:
-            meta["truck_homes"] = self.resolved_truck_homes()
-            meta["truck_capacity_bikes"] = self.truck_capacity_bikes
-        return meta
+        """Build the run's rebalancing block for ``meta.json``.
 
-
-def build_graph_data(
-    trips_path: str = DEFAULT_TRIPS_PATH,
-    period_len_hours: float = 1.0,
-    routing_mode: RoutingMode = "haversine",
-    osrm_url: str = DEFAULT_OSRM_URL,
-) -> ResolvedModelData:
-    """Load the raw sources and resolve the graph tables (the heavy step)."""
-    raw = RawModelData(
-        trips_path=trips_path,
-        seed=42,
-        n_depots=DEFAULT_N_DEPOTS,
-        depot_capacity=9000,
-        n_trucks=len(DEFAULT_TRUCK_HOMES),
-        truck_capacity_bikes=DEFAULT_TRUCK_CAPACITY_BIKES,
-        truck_rate=DEFAULT_TRUCK_RATE,
-        electric_bike_rate=5,
-        classic_bike_rate=3,
-    )
-    return build_resolved(
-        raw,
-        period_len=pd.Timedelta(hours=period_len_hours),
-        routing_mode=routing_mode,
-        osrm_url=osrm_url,
-    )
+        A domain subclass overrides this to record its own fleet parameters:
+        ``RebalancingMeta`` keeps every extra key it returns.
+        """
+        return {"enabled": self.rebalancing}
 
 
 def run_scenario(
@@ -122,7 +82,7 @@ def run_scenario(
         if forecast_dropped_share > 0:
             progress(
                 f"Cut {forecast_dropped_share:.2%} of the forecast demand: rows the "
-                "scenario has no OD rows for (unknown stations or station-hours)"
+                "scenario has no OD rows for (unknown facilities or facility-hours)"
             )
 
     return run_and_save(
@@ -143,7 +103,12 @@ def run_and_save(
     root: pathlib.Path | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> pathlib.Path:
-    """Apply the fleet, size and run the scenario on ``data``, save the artifact."""
+    """Size and run the scenario on ``data``, then save the run artifact.
+
+    ``data`` arrives ready: whatever resources the run uses are already on it
+    (a domain puts its fleet there before calling), so this step only picks
+    the phases the request asks for and runs them.
+    """
 
     def progress(message: str) -> None:
         if on_progress is not None:
@@ -151,9 +116,6 @@ def run_and_save(
 
     phases = None
     if request.rebalancing:
-        homes = request.resolved_truck_homes()
-        progress(f"Applying the truck fleet: {len(homes)} trucks")
-        data = apply_truck_fleet(data, homes, request.truck_capacity_bikes, DEFAULT_TRUCK_RATE)
         phases = canonical_phases() + rebalancing_phases(RebalancingParams())
 
     progress("Sizing the state, running the simulation, checking the invariants I1-I5")

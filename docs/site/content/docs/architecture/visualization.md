@@ -23,7 +23,8 @@ and the design.
 
 | File | Main role |
 |---|---|
-| `gbp/consumers/run.py` | Owns `RunRequest`, `build_graph_data`, and `run_scenario`; `app/runner.py` is the thin terminal CLI over it (`python app/runner.py --help` lists the flags). |
+| `gbp/consumers/run.py` | Owns the framework's `RunRequest`, `run_scenario`, and `run_and_save`. |
+| `domains/citybike/run.py` | Owns `build_graph_data`, the truck fleet, and the Citi Bike `RunRequest`; `app/runner.py` is the thin terminal CLI over it (`python app/runner.py --help` lists the flags). |
 | `gbp/artifacts.py` | Owns the `build_*` functions, the `METRICS` table, and save/load. |
 | `domains/citybike/ml/ops/evaluation.py` | The two-level evaluation (Notations.md §17): a second terminal entry point, `python -m domains.citybike.ml.ops.evaluation` ([ml-toolkit.md](ml-toolkit.md)). |
 | `main.py` | The Streamlit entry point: the page list and navigation. |
@@ -61,18 +62,28 @@ run is created. `DATA_DIR` moves the data folder.
 
 ## The Main Idea
 
-The run path (`gbp/consumers/run.py`) splits the work by runtime. `build_graph_data` is the slow step
-— it loads the CSV into `RawModelData` and resolves `ResolvedModelData`
-([data-model.md](data-model.md)), takes minutes, and is independent of the
-run parameters, so callers run it once and reuse it. `run_scenario` does one
-run against loaded data described by one `RunRequest`: the forecast
-substitution if asked (`--demand-source forecast`), then `run_and_save` —
-the shared step that applies the truck fleet on a shallow copy if rebalancing
-is on, sizes and runs the scenario (`run_sized_scenario`), and saves the
-artifact (`artifacts.save_scenario_run`). The two-level evaluation
-(`evaluate.py`) runs through the same `run_and_save`, so a run is built one
-way from either entry. It must not modify `graph_data` — the Run page shares
-one cached copy across runs.
+The run path spans both layers, split by who owns the data. The domain builds
+and prepares it; the framework runs and saves whatever it is handed.
+
+`domains/citybike/run.py` holds the Citi Bike half. `build_graph_data` is the
+slow step — it loads the CSV into `RawModelData` and resolves
+`ResolvedModelData` ([data-model.md](data-model.md)), takes minutes, and is
+independent of the run parameters, so callers run it once and reuse it. Its
+`run_scenario` puts the requested truck fleet on a shallow copy when
+rebalancing is on, then hands the data to the framework.
+
+`gbp/consumers/run.py` holds the framework half. Its `run_scenario` does the
+forecast substitution if asked (`--demand-source forecast`), then
+`run_and_save` sizes and runs the scenario (`run_sized_scenario`) and saves
+the artifact (`artifacts.save_scenario_run`). The two-level evaluation
+(`domains/citybike/ml/ops/evaluation.py`) runs through the same
+`run_and_save`, so a run is built one way from either entry. Neither half
+modifies `graph_data` — the Run page shares one cached copy across runs, and
+both fleet and forecast write their changes to a shallow copy.
+
+The fleet swap rewrites the resource tables; the forecast rewrites the demand
+side. They touch nothing in common, which is why the order between them is
+free (`tests/test_rebalancing.py` pins this).
 
 `artifacts.py` computes everything once, at save time. `build_run_tables`
 builds the five tables from one finalized journal; the panel itself is a

@@ -23,9 +23,9 @@ sys.path.insert(0, str(_REPO_ROOT / "app"))
 
 import api  # noqa: E402  (needs the app folder on sys.path)
 
+from domains.citybike import run  # noqa: E402
+from domains.citybike.run import RunRequest  # noqa: E402
 from gbp import artifacts  # noqa: E402
-from gbp.consumers import run  # noqa: E402
-from gbp.consumers.run import RunRequest  # noqa: E402
 from tests import scenarios  # noqa: E402
 from tests.test_app_artifacts import _save_run  # noqa: E402
 

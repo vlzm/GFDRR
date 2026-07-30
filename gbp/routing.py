@@ -16,9 +16,14 @@ RoutingMode = Literal["haversine", "osrm"]
 ROUTING_MODES = ("haversine", "osrm")
 
 #: Base URL of the OSRM server. Set the ``OSRM_URL`` environment variable to
-#: point somewhere else (in a container the server is not on localhost);
-#: without it, this is the bike server started by ``scripts/osrm/serve.sh bike``.
+#: point somewhere else (in a container the server is not on localhost).
 DEFAULT_OSRM_URL = os.environ.get("OSRM_URL", "http://127.0.0.1:5000")
+
+#: Travel profile the OSRM server was built with; it is part of the table URL.
+#: Set the ``OSRM_PROFILE`` environment variable to match the running server.
+#: The default matches ``scripts/osrm/serve.sh bike``, the server this repo
+#: ships -- a deployment setting, not something the model knows about.
+DEFAULT_OSRM_PROFILE = os.environ.get("OSRM_PROFILE", "bike")
 
 _OSRM_TIMEOUT_SECONDS = 300
 
@@ -28,7 +33,7 @@ def _osrm_table(facilities_geo_df: pd.DataFrame, osrm_url: str) -> tuple[np.ndar
     path = ";".join(
         f"{lng:.6f},{lat:.6f}" for lat, lng in facilities_geo_df[["lat", "lng"]].to_numpy()
     )
-    url = f"{osrm_url}/table/v1/bike/{path}?annotations=duration,distance"
+    url = f"{osrm_url}/table/v1/{DEFAULT_OSRM_PROFILE}/{path}?annotations=duration,distance"
     response = requests.get(url, timeout=_OSRM_TIMEOUT_SECONDS)
     if response.status_code != 200:
         raise ValueError(

@@ -66,8 +66,8 @@ def _meta(**totals: float) -> types.SimpleNamespace:
     return types.SimpleNamespace(
         violations=[],
         totals=totals,
-        initial_inventory_bikes=100,
-        station_capacity_docks=200,
+        initial_inventory_total=100,
+        station_capacity_total=200,
     )
 
 
@@ -121,7 +121,7 @@ def test_build_comparison_assembles_the_reference_and_forecast_rows():
     reference_row, forecast_row = table.iloc[0], table.iloc[1]
     assert reference_row["run_name"] == names.reference_run
     assert reference_row["departed"] == 10.0
-    assert reference_row["initial_inventory_bikes"] == 100
+    assert reference_row["initial_inventory_total"] == 100
 
     # panel_departed_mae: |6-8| at s1, 0 at s2, mean 1.0.
     assert forecast_row["panel_departed_mae"] == pytest.approx(1.0)

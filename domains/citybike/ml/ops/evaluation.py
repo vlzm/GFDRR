@@ -14,8 +14,9 @@ from domains.citybike.loaders.download import month_bounds, normalize_month
 from domains.citybike.ml.data import month_period_grid
 from domains.citybike.ml.forecast import build_model_forecast
 from domains.citybike.ml.training import load_actual_month, training_dir
+from domains.citybike.run import RunRequest, build_graph_data
 from gbp import artifacts
-from gbp.consumers.run import RunRequest, build_graph_data, run_and_save
+from gbp.consumers.run import run_and_save
 from gbp.ml.artifact import list_forecasts, load_forecast, ml_dir
 from gbp.ml.metrics import (
     busy_facility_ids,
@@ -35,8 +36,8 @@ class RunMetaLike(Protocol):
 
     violations: list[str]
     totals: dict[str, float]
-    initial_inventory_bikes: int | None
-    station_capacity_docks: int | None
+    initial_inventory_total: int | None
+    station_capacity_total: int | None
 
 
 #: Run one evaluation run and save its artifact; a no-op when it already
@@ -101,8 +102,8 @@ def run_row(run_name: str, load_meta: LoadMetaFn) -> dict[str, object]:
         "run_name": run_name,
         "violations": len(meta.violations),
         **meta.totals,
-        "initial_inventory_bikes": meta.initial_inventory_bikes,
-        "station_capacity_docks": meta.station_capacity_docks,
+        "initial_inventory_total": meta.initial_inventory_total,
+        "station_capacity_total": meta.station_capacity_total,
     }
 
 

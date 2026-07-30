@@ -10,9 +10,9 @@ from typing import Literal
 import pydantic
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Response
 
+from domains.citybike import run
+from domains.citybike.run import RunRequest
 from gbp import artifacts
-from gbp.consumers import run
-from gbp.consumers.run import RunRequest
 from gbp.model.dataloader_graph import ResolvedModelData
 
 PARQUET_MEDIA_TYPE = "application/vnd.apache.parquet"

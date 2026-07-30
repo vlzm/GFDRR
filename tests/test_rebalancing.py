@@ -548,6 +548,12 @@ def test_apply_truck_fleet_rebuilds_the_resource_tables():
     assert out.resources_rates_df["rate"].tolist() == [50.0, 50.0]
     # The input container keeps its own fleet (the copy is shallow).
     assert resolved.resources_df["resource_id"].tolist() == [TRUCK]
+    # The swap touches the three resource tables and nothing else. This is why
+    # the run path can apply the fleet before the forecast substitution, which
+    # rewrites the demand side: the two never write the same attribute.
+    assert out.historical_demand_df is resolved.historical_demand_df
+    assert out.historical_od_matrix_df is resolved.historical_od_matrix_df
+    assert out.periods_df is resolved.periods_df
 
 
 def test_apply_truck_fleet_rejects_bad_homes():

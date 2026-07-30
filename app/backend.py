@@ -14,7 +14,7 @@ from gbp import artifacts
 from gbp.ml import artifact
 
 if TYPE_CHECKING:
-    from gbp.consumers.run import RunRequest
+    from domains.citybike.run import RunRequest
 
 #: Seconds between two polls of a run executing on the server.
 _POLL_SECONDS = 2
@@ -31,7 +31,7 @@ class RunFailed(Exception):
 @st.cache_resource(show_spinner=False)
 def _graph_data_cached(trips_path: str):
     """Load the raw data once per source; later runs reuse the tables."""
-    from gbp.consumers import run  # heavy import (pulls the simulator); only a local run pays it
+    from domains.citybike import run  # heavy import (pulls the simulator); only a local run pays it
 
     return run.build_graph_data(trips_path)
 
@@ -65,7 +65,7 @@ class DiskBackend:
 
     def default_trips_path(self) -> str:
         """Return the trips CSV a local run reads by default; the user may point elsewhere."""
-        from gbp.consumers import run
+        from domains.citybike import run
 
         return run.DEFAULT_TRIPS_PATH
 
@@ -77,7 +77,7 @@ class DiskBackend:
         self, request: RunRequest, trips_path: str | None, on_progress: Callable[[str], None]
     ) -> str:
         """Run one scenario in this process; return the final run name."""
-        from gbp.consumers import run
+        from domains.citybike import run
 
         on_progress("Loading data (a few minutes the first time; cached afterwards)…")
         graph_data = _graph_data_cached(trips_path)

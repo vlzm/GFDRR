@@ -1,9 +1,10 @@
 """Tests of ``gbp/consumers/run.py``: the run recipe and the ``run_scenario`` wiring.
 
 The recipe tests pin ``RunRequest``. The wiring tests replace the heavy pieces
-(forecast loading, the fleet swap, the sized run, the save) with fakes that
-record what data object each stage received, so they check the wiring between
-the stages without a trip CSV.
+(forecast loading, the sized run, the save) with fakes that record what data
+object each stage received, so they check the wiring between the stages
+without a trip CSV. The Citi Bike half of the run path -- the truck fleet and
+``build_graph_data`` -- is tested in ``tests/test_citybike_run.py``.
 """
 
 import pathlib
@@ -11,7 +12,7 @@ import pathlib
 import pytest
 
 from gbp.consumers import run
-from gbp.consumers.run import DEFAULT_TRUCK_HOMES, RunRequest
+from gbp.consumers.run import RunRequest
 
 
 # ---------------------------------------------------------------------------
@@ -30,69 +31,42 @@ def test_history_source_needs_no_forecast_name():
     assert request.forecast_name is None
 
 
-def test_resolved_truck_homes_falls_back_to_the_default_fleet():
-    """With ``truck_homes`` unset the run uses the default fleet; a list is kept."""
-    assert RunRequest(run_name="x").resolved_truck_homes() == DEFAULT_TRUCK_HOMES
-    picked = RunRequest(run_name="x", truck_homes=["depot_2", "depot_3"])
-    assert picked.resolved_truck_homes() == ["depot_2", "depot_3"]
-
-
-def test_rebalancing_meta_off_and_on():
-    """The meta block is ``enabled`` alone when off, and the fleet when on."""
+def test_rebalancing_meta_is_the_flag_alone():
+    """The framework block says whether rebalancing ran; a domain adds its fleet keys."""
     assert RunRequest(run_name="x").rebalancing_meta() == {"enabled": False}
-    on = RunRequest(
-        run_name="x", rebalancing=True, truck_homes=["depot_1"], truck_capacity_bikes=30
-    )
-    assert on.rebalancing_meta() == {
-        "enabled": True,
-        "truck_homes": ["depot_1"],
-        "truck_capacity_bikes": 30,
-    }
+    assert RunRequest(run_name="x", rebalancing=True).rebalancing_meta() == {"enabled": True}
+
+
+def test_the_recipe_has_no_domain_parameters():
+    """``RunRequest`` names no fleet: the truck fields belong to the Citi Bike subclass."""
+    assert "truck_homes" not in RunRequest.model_fields
+    assert "truck_capacity_bikes" not in RunRequest.model_fields
 
 
 # ---------------------------------------------------------------------------
 # run_scenario: the stage wiring
 # ---------------------------------------------------------------------------
-def test_forecast_run_with_rebalancing_keeps_the_forecast(monkeypatch):
-    """The truck fleet is applied on top of the forecast data, not instead of it.
-
-    Regression test: with ``demand_source="forecast"`` and ``rebalancing=True``,
-    ``apply_truck_fleet`` used to receive the original ``graph_data``, silently
-    dropping the applied forecast from the run.
-    """
+def test_rebalancing_run_uses_the_rebalancing_phases(monkeypatch):
+    """With ``rebalancing=True`` the run adds the rebalancing phases to the canonical ones."""
     seen = {}
 
-    monkeypatch.setattr(run, "apply_saved_forecast", lambda data, name: ("forecast-data", 0.0))
-
-    def fake_apply_truck_fleet(data, homes, capacity, rate):
-        seen["fleet_input"] = data
-        return "fleet-data"
-
     def fake_run_sized_scenario(data, **kwargs):
-        seen["run_input"] = data
+        seen["phases"] = kwargs["phases"]
         return "result"
 
-    def fake_save_scenario_run(result, data, request, **kwargs):
-        seen["save_input"] = data
-        return pathlib.Path("saved")
-
-    monkeypatch.setattr(run, "apply_truck_fleet", fake_apply_truck_fleet)
     monkeypatch.setattr(run, "run_sized_scenario", fake_run_sized_scenario)
-    monkeypatch.setattr(run.artifacts, "save_scenario_run", fake_save_scenario_run)
-
-    run.run_scenario(
-        "graph-data",
-        RunRequest(
-            run_name="forecast_with_trucks",
-            demand_source="forecast",
-            forecast_name="some_forecast",
-            rebalancing=True,
-        ),
+    monkeypatch.setattr(
+        run.artifacts, "save_scenario_run", lambda *args, **kwargs: pathlib.Path("saved")
     )
 
-    assert seen["fleet_input"] == "forecast-data"
-    assert seen["run_input"] == "fleet-data"
-    assert seen["save_input"] == "fleet-data"
+    run.run_scenario("graph-data", RunRequest(run_name="plain"))
+    assert seen["phases"] is None
+
+    run.run_scenario("graph-data", RunRequest(run_name="with_rebalancing", rebalancing=True))
+    expected = run.canonical_phases() + run.rebalancing_phases(run.RebalancingParams())
+    assert [type(phase).__name__ for phase in seen["phases"]] == [
+        type(phase).__name__ for phase in expected
+    ]
 
 
 def test_forecast_run_records_the_dropped_share(monkeypatch):

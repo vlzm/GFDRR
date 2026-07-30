@@ -5,7 +5,8 @@ import pandas as pd
 import streamlit as st
 import ui_shared
 
-from gbp.consumers import run
+from domains.citybike import run
+from gbp.consumers.run import DEFAULT_NUMBER_OF_PERIODS, DEMAND_SOURCES
 
 st.title("Run scenario")
 st.caption(
@@ -39,7 +40,7 @@ bk = backend.current()
 
 demand_source = st.radio(
     "Demand source",
-    options=list(run.DEMAND_SOURCES),
+    options=list(DEMAND_SOURCES),
     horizontal=True,
     help=(
         "history replays the historical trips; forecast runs on a saved forecast "
@@ -91,7 +92,7 @@ sizing_scale = middle.number_input(
     ),
 )
 periods = right.number_input(
-    "Number of periods", min_value=1, max_value=2000, value=run.DEFAULT_NUMBER_OF_PERIODS
+    "Number of periods", min_value=1, max_value=2000, value=DEFAULT_NUMBER_OF_PERIODS
 )
 rebalancing = st.checkbox(
     "Overnight rebalancing",

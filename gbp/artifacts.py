@@ -438,11 +438,17 @@ def build_totals(panel: pd.DataFrame, flow_totals: pd.DataFrame) -> dict[str, fl
 
 
 class RebalancingMeta(pydantic.BaseModel):
-    """The ``rebalancing`` block of ``meta.json``."""
+    """The ``rebalancing`` block of ``meta.json``.
+
+    ``enabled`` is the only field the framework owns. A domain describes the
+    fleet it used by returning extra keys from ``RunRequest.rebalancing_meta``
+    (for Citi Bike: ``truck_homes`` and ``truck_capacity_bikes``); they are
+    stored and read back as written.
+    """
+
+    model_config = pydantic.ConfigDict(extra="allow")
 
     enabled: bool
-    truck_homes: list[str] | None = None
-    truck_capacity_bikes: int | None = None
 
 
 class RunMeta(pydantic.BaseModel):
@@ -464,13 +470,12 @@ class RunMeta(pydantic.BaseModel):
     #: Name of the forecast artifact a forecast run used; None on history runs.
     forecast_name: str | None = None
     #: Share of the forecast demand total cut before the run because the
-    #: scenario has no OD rows for it (stations or station-hours the trip CSV
-    #: has never seen). 0.0 when nothing was cut; None on history runs and on
-    #: artifacts saved before this field existed.
+    #: scenario has no OD rows for it (facilities or facility-hours the
+    #: history has never seen). 0.0 when nothing was cut; None on history runs
+    #: and on artifacts saved before this field existed.
     forecast_dropped_share: float | None = None
-    #: File names of the raw source files the run was built from (for the
-    #: canonical pipeline: the trip CSV). Empty for runs built from a
-    #: synthetic journal, like the test fixtures.
+    #: File names of the raw source files the run was built from. Empty for
+    #: runs built from a synthetic journal, like the test fixtures.
     inputs: list[str]
     #: Git commit of the code that produced the run, ``-dirty`` appended when
     #: the working tree had uncommitted changes; ``unknown`` outside git.
@@ -478,11 +483,20 @@ class RunMeta(pydantic.BaseModel):
     violations: list[str]
     rebalancing: RebalancingMeta
     #: The sized state the run started from, precomputed at save time so no
-    #: reader recovers it from the panel: all bikes at period 0, and the dock
-    #: capacity summed over stations. None only on artifacts saved before
-    #: these fields existed.
-    initial_inventory_bikes: int | None = None
-    station_capacity_docks: int | None = None
+    #: reader recovers it from the panel: the whole inventory at period 0, and
+    #: the capacity summed over the station facilities. None only on artifacts
+    #: saved before these fields existed; artifacts written under the earlier
+    #: bike-worded names still load.
+    initial_inventory_total: int | None = pydantic.Field(
+        default=None,
+        validation_alias=pydantic.AliasChoices(
+            "initial_inventory_total", "initial_inventory_bikes"
+        ),
+    )
+    station_capacity_total: int | None = pydantic.Field(
+        default=None,
+        validation_alias=pydantic.AliasChoices("station_capacity_total", "station_capacity_docks"),
+    )
     totals: dict[str, float]
 
 
@@ -551,8 +565,8 @@ def build_meta(
         rebalancing=RebalancingMeta.model_validate(
             rebalancing if rebalancing is not None else {"enabled": False}
         ),
-        initial_inventory_bikes=int(panel.loc[panel["period_id"] == 0, "quantity_sop"].sum()),
-        station_capacity_docks=int(stations["capacity"].fillna(0).sum()),
+        initial_inventory_total=int(panel.loc[panel["period_id"] == 0, "quantity_sop"].sum()),
+        station_capacity_total=int(stations["capacity"].fillna(0).sum()),
         totals=build_totals(panel, tables["flow_totals"]),
     )
 

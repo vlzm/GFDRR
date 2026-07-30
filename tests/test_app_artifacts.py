@@ -282,8 +282,8 @@ def test_meta_carries_t0_and_the_run_parameters():
     # The sized state is precomputed into meta.json, so readers (the two-level
     # evaluation) never sum the panel or the facilities table for it. In a
     # station-only scenario it equals the sums of the input state tables.
-    assert meta.initial_inventory_bikes == int(resolved.initial_inventory_df["quantity"].sum())
-    assert meta.station_capacity_docks == int(resolved.facilities_capacities_df["capacity"].sum())
+    assert meta.initial_inventory_total == int(resolved.initial_inventory_df["quantity"].sum())
+    assert meta.station_capacity_total == int(resolved.facilities_capacities_df["capacity"].sum())
     # t0 + period * period_len is what the pages show on the time axis.
     t0 = pd.Timestamp(meta.t0)
     assert t0 + 3 * pd.Timedelta(hours=meta.period_len_hours) == pd.Timestamp("2026-01-01T03:00:00")
