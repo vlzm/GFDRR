@@ -276,8 +276,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ #
-    # Данные: скачиваем CIFAR-10 и делим train на train/val.
-    # Train — с аугментациями, val/test — только нормализация.
+    # Это мой DataloaderRaw
     # ------------------------------------------------------------------ #
     train_tf = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
@@ -291,8 +290,6 @@ def main():
     ])
 
     full_train = datasets.CIFAR10(args.data_dir, train=True, download=True, transform=train_tf)
-    # Отдельный экземпляр с eval-трансформами для валидации,
-    # чтобы на val не применялись аугментации.
     full_train_eval = datasets.CIFAR10(args.data_dir, train=True, download=False, transform=eval_tf)
     test_ds = datasets.CIFAR10(args.data_dir, train=False, download=True, transform=eval_tf)
 
@@ -303,19 +300,18 @@ def main():
 
     gen = torch.Generator().manual_seed(args.seed)
     train_ds, _ = random_split(full_train, [n_train, n_val], generator=gen)
-    # Тот же генератор => то же разбиение индексов
     gen = torch.Generator().manual_seed(args.seed)
     _, val_ds = random_split(full_train_eval, [n_train, n_val], generator=gen)
 
     # ------------------------------------------------------------------ #
-    # DataLoader'ы. pin_memory ускоряет копирование на GPU.
+    # Это мой DataloaderGraph (хотя сейчас его почему то нет,надо перенести логику в класс)
     # ------------------------------------------------------------------ #
     common = dict(num_workers=args.num_workers, pin_memory=torch.cuda.is_available())
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True, **common)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size * 2, shuffle=False, **common)
     test_loader = DataLoader(test_ds, batch_size=args.batch_size * 2, shuffle=False, **common)
 
-    # --- Модель ---
+    # --- Модель это мои фазы---
     model = SimpleCNN(num_classes=len(CLASS_NAMES)).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 

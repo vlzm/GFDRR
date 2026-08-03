@@ -207,7 +207,7 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=args.batch_size * 2, shuffle=False, **common)
     test_loader = DataLoader(test_ds, batch_size=args.batch_size * 2, shuffle=False, **common)
 
-    # --- Модель ---
+    # --- Модель это мли фазы ---
     model = SimpleCNN(num_classes=len(CLASS_NAMES)).to(device)
 
     # ------------------------------------------------------------------ #
